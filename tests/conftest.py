@@ -55,3 +55,74 @@ def fake_boot_partition():
             pass
 
     return _Fake()
+
+
+@pytest.fixture
+def fake_platform_io(tmp_path):
+    """Dict-backed PlatformIO impl. Each physical_drive_id maps to a sparse file."""
+    from astromechos_imager.core.models import DiskRef
+
+    class _FakeRawDevice:
+        sector_size = 512
+
+        def __init__(self, path, size):
+            self._path = path
+            self.size_bytes = size
+            self._fh = open(path, "r+b")
+
+        def write(self, offset, data):
+            self._fh.seek(offset)
+            self._fh.write(data)
+            return len(data)
+
+        def read(self, offset, length):
+            self._fh.seek(offset)
+            return self._fh.read(length)
+
+        def flush(self):
+            self._fh.flush()
+
+        def close(self):
+            self._fh.close()
+
+    class _Fake:
+        def __init__(self):
+            self.drives: dict[int, DiskRef] = {}
+            self.handles: list[int] = []
+            self._next_h = 1000
+
+        def add_drive(self, phys_id: int, size: int = 32 << 30, model="Test SD"):
+            path = tmp_path / f"sparse_{phys_id}.img"
+            path.touch()
+            os.truncate(path, size)
+            self.drives[phys_id] = DiskRef(
+                physical_drive_id=phys_id,
+                device_path=f"\\\\.\\PHYSICALDRIVE{phys_id}",
+                drive_letters=(),
+                size_bytes=size,
+                model=model,
+                serial=f"TEST-{phys_id}",
+            )
+            return path
+
+        def enumerate_removable_drives(self):
+            return list(self.drives.values())
+
+        def lock_and_dismount(self, letters):
+            self._next_h += 1
+            return [self._next_h + i for i, _ in enumerate(letters)]
+
+        def open_raw_device(self, phys_id):
+            path = tmp_path / f"sparse_{phys_id}.img"
+            return _FakeRawDevice(path, self.drives[phys_id].size_bytes)
+
+        def close_handle(self, h):
+            pass
+
+        def update_disk_properties(self, h):
+            pass
+
+        def eject_media(self, h):
+            pass
+
+    return _Fake()

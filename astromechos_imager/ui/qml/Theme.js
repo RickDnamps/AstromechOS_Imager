@@ -3,52 +3,54 @@
 // Import as:   import "Theme.js" as Theme
 // Reference:   Theme.colorAccent, Theme.fontTitle, etc.
 //
-// Single source of truth for the techno-droïde dark palette and font
-// stack. Editing colors here propagates across every QML file.
+// Single source of truth for the R2-D2 control dark palette: matches the
+// piloting UI (see ui/resources/images/R2-D2_Ligth_Theme_*.png) so both
+// surfaces share the same identity. Editing colors here propagates
+// across every QML file.
 
 .pragma library
 
-// ── Surfaces ─────────────────────────────────────────────────────────
-var colorBg        = "#0c1014"   // window background — near-black, deep blue undertone
-var colorSurface   = "#161b21"   // card / panel idle
-var colorSurface2  = "#1c232a"   // card hover
-var colorSurfaceAccent = "#173746"  // card selected — dark teal tint
-var colorHeader    = "#0e1318"   // header / footer chrome
-var colorDivider   = "#22303a"   // hairline borders
+// ── Surfaces (deep dark, slight blue undertone) ──────────────────────
+var colorBg            = "#101418"   // window background
+var colorSurface       = "#1a1f24"   // card / panel idle
+var colorSurface2      = "#262b30"   // card hover / row-2
+var colorSurfaceAccent = "#1c3550"   // card selected — saturated blue tint
+var colorHeader        = "#0e1217"   // header / footer chrome
+var colorDivider       = "#2a2f34"   // hairline borders
 
 // ── Borders ──────────────────────────────────────────────────────────
-var colorBorderIdle    = "#22303a"
-var colorBorderHover   = "#345566"
-var colorBorderAccent  = "#3dd4c4"   // selected — cyan-teal LED-like
-var colorBorderWarn    = "#e8a93d"
-var colorBorderError   = "#e85a5a"
+var colorBorderIdle   = "#2c333a"
+var colorBorderHover  = "#3e5366"
+var colorBorderAccent = "#5e9bd6"   // selected — LED cyan-blue (R2 piloting accent)
+var colorBorderWarn   = "#e8a93d"
+var colorBorderError  = "#c0433a"   // matches the "EMERGENCY STOP" red
 
 // ── Text ─────────────────────────────────────────────────────────────
 var colorTextPrimary   = "#e6e8ea"
-var colorTextSecondary = "#90979e"
-var colorTextTertiary  = "#5a6068"
+var colorTextSecondary = "#8b96a3"
+var colorTextTertiary  = "#5c6671"
 var colorTextMuted     = "#3a4048"
-var colorTextAccent    = "#3dd4c4"
+var colorTextAccent    = "#7eb8e8"   // hue-shifted variant of accent for body text
 var colorTextOnAccent  = "#0c1014"
 
-// ── Accents (LED-like) ───────────────────────────────────────────────
-var colorAccent       = "#3dd4c4"  // primary techno cyan-teal
-var colorAccentBright = "#5fe6d7"  // hover variant
-var colorAccentDim    = "#2a8c80"  // disabled/dim variant
-var colorAccentGlow   = "#3dd4c4"  // for shadow/glow; use with alpha
+// ── Accents (LED-like cyan-blue, matching R2 piloting surface) ──────
+var colorAccent       = "#5e9bd6"   // primary accent
+var colorAccentBright = "#7eb8e8"   // hover variant
+var colorAccentDim    = "#3d6e9e"   // disabled / dim
+var colorAccentGlow   = "#5e9bd6"   // for shadow/glow; use with alpha
 
 // ── Fonts ────────────────────────────────────────────────────────────
-// Orbitron is bundled in resources/fonts and registered at startup
-// (see app.py _load_fonts). When the family is missing — e.g. running
-// without the TTF in dev — Qt falls back to "Segoe UI" automatically.
-var fontTitle    = "Orbitron"     // Bold for big headlines
-var fontSubtitle = "Orbitron"     // Medium for labels / step indicator
-var fontBody     = "Segoe UI"     // readable prose
-var fontMono     = "Consolas"     // paths, byte counts, code
+// Orbitron is bundled in resources/fonts as OTF and registered at
+// startup (see app.py _load_fonts). Segoe UI is the safe Windows
+// fallback when the family is unavailable (dev mode without OTFs etc.).
+var fontTitle    = "Orbitron"
+var fontSubtitle = "Orbitron"
+var fontBody     = "Orbitron"     // R2 piloting UI uses Orbitron everywhere
+var fontMono     = "Consolas"     // for paths and byte counts
 
 // ── Geometry ─────────────────────────────────────────────────────────
-var radiusCard   = 10
-var radiusButton = 6
+var radiusCard   = 8
+var radiusButton = 5
 var radiusPip    = 5
 var paddingCard  = 16
 var spacingCard  = 14

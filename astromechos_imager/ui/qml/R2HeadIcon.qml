@@ -1,10 +1,8 @@
-// R2-D2 head (dome) icon — line-art, convex UP.
-// Used as the "Master" mode glyph: the master Pi drives the dome.
+// R2-D2 dome (Master). Line-art, convex UP, with the iconic eye lens.
 //
-// Note on PathArc direction: QML's screen coordinates are y-down, so
+// Note on PathArc direction: QML uses y-down screen coords, so
 // `Clockwise` traces from a left anchor up over the top to a right
-// anchor (visually a dome bulging up). `Counterclockwise` would dip
-// downward, giving an inverted U.
+// anchor (visually a dome bulging up).
 import QtQuick
 import QtQuick.Shapes
 
@@ -17,7 +15,7 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    property color strokeColor: "#3dd4c4"
+    property color strokeColor: "#5e9bd6"
     property real  strokeWidth: 2.0
 
     // Half-circle dome with flat baseline (closed silhouette).
@@ -28,13 +26,30 @@ Shape {
         capStyle:    ShapePath.RoundCap
         joinStyle:   ShapePath.RoundJoin
 
-        startX: 6;  startY: 28
+        startX: 5;  startY: 26
         PathArc {
-            x: 30; y: 28
-            radiusX: 12; radiusY: 12
+            x: 31; y: 26
+            radiusX: 13; radiusY: 13
             useLargeArc: false
-            direction: PathArc.Clockwise   // bulges up
+            direction: PathArc.Clockwise
         }
-        PathLine { x: 6; y: 28 }           // baseline closes the dome
+        PathLine { x: 5; y: 26 }
+    }
+
+    // Eye lens — R2's prominent dark eye. Filled rounded rectangle so the
+    // glyph reads as R2-D2 even at small sizes.
+    Rectangle {
+        x: 12; y: 19
+        width: 12; height: 5
+        radius: 2.5
+        color: icon.strokeColor
+    }
+
+    // Tiny secondary processor port on the left of the eye.
+    Rectangle {
+        x: 10; y: 15
+        width: 2.5; height: 2.5
+        radius: 1.25
+        color: icon.strokeColor
     }
 }

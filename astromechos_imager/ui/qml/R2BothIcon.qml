@@ -1,6 +1,6 @@
-// R2-D2 full silhouette — dome above body. "Flash both" glyph.
-// Geometry matches R2HeadIcon + R2BodyIcon scaled to share a viewport,
-// joined at the dome's baseline so the silhouette reads as one droid.
+// Full R2-D2 silhouette (dome + body + legs). "Flash both" glyph —
+// shares the dome/baseline pattern of R2HeadIcon and the band/leg
+// pattern of R2BodyIcon so the three glyphs feel like one family.
 import QtQuick
 import QtQuick.Shapes
 
@@ -13,7 +13,7 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    property color strokeColor: "#3dd4c4"
+    property color strokeColor: "#5e9bd6"
     property real  strokeWidth: 2.0
 
     // Dome on top (bulges up).
@@ -24,16 +24,24 @@ Shape {
         capStyle:    ShapePath.RoundCap
         joinStyle:   ShapePath.RoundJoin
 
-        startX: 10; startY: 18
+        startX: 10; startY: 14
         PathArc {
-            x: 26; y: 18
+            x: 26; y: 14
             radiusX: 8; radiusY: 8
             useLargeArc: false
             direction: PathArc.Clockwise
         }
     }
 
-    // Body box just below the dome (shares the dome's baseline).
+    // Eye lens — filled rounded rectangle on the dome.
+    Rectangle {
+        x: 14; y: 9
+        width: 8; height: 3
+        radius: 1.5
+        color: icon.strokeColor
+    }
+
+    // Body box.
     ShapePath {
         strokeColor: icon.strokeColor
         strokeWidth: icon.strokeWidth
@@ -41,29 +49,47 @@ Shape {
         capStyle:    ShapePath.RoundCap
         joinStyle:   ShapePath.RoundJoin
 
-        startX: 10; startY: 18
-        PathLine { x: 10; y: 32 }
-        PathLine { x: 26; y: 32 }
-        PathLine { x: 26; y: 18 }
-        PathLine { x: 10; y: 18 }   // closes the top edge = dome baseline
+        startX: 10; startY: 14
+        PathLine { x: 10; y: 28 }
+        PathLine { x: 26; y: 28 }
+        PathLine { x: 26; y: 14 }
+        PathLine { x: 10; y: 14 }
     }
 
-    // Internal horizontal line 1 (upper data band).
+    // Data band 1.
     ShapePath {
         strokeColor: icon.strokeColor
         strokeWidth: icon.strokeWidth
         fillColor:   "transparent"
         capStyle:    ShapePath.RoundCap
-        startX: 12; startY: 23
-        PathLine { x: 24; y: 23 }
+        startX: 12; startY: 20
+        PathLine { x: 24; y: 20 }
     }
-    // Internal horizontal line 2 (lower data band).
+    // Data band 2.
     ShapePath {
         strokeColor: icon.strokeColor
         strokeWidth: icon.strokeWidth
         fillColor:   "transparent"
         capStyle:    ShapePath.RoundCap
-        startX: 12; startY: 28
-        PathLine { x: 24; y: 28 }
+        startX: 12; startY: 25
+        PathLine { x: 24; y: 25 }
+    }
+
+    // Legs.
+    ShapePath {
+        strokeColor: icon.strokeColor
+        strokeWidth: icon.strokeWidth
+        fillColor:   "transparent"
+        capStyle:    ShapePath.RoundCap
+        startX: 13; startY: 28
+        PathLine { x: 11; y: 33 }
+    }
+    ShapePath {
+        strokeColor: icon.strokeColor
+        strokeWidth: icon.strokeWidth
+        fillColor:   "transparent"
+        capStyle:    ShapePath.RoundCap
+        startX: 23; startY: 28
+        PathLine { x: 25; y: 33 }
     }
 }

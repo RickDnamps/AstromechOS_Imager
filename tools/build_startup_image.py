@@ -8,10 +8,9 @@ Processing pipeline
 1.  Normalise source to RGBA.
 2.  Thumbnail to fit within 800x600 (LANCZOS, aspect-ratio preserving).
 3.  Paste the thumbnail centred on a transparent 800x600 RGBA canvas.
-4.  Render a three-line copyright block, bottom-centre:
+4.  Render a two-line copyright block, bottom-centre:
       Line 1  "AstromechOS © 2026"      bold-ish, ~14 pt
       Line 2  "GNU GPL v3"              regular,  ~11 pt
-      Line 3  "Distributed Startup Software"  regular, ~11 pt
     Text colour: (200, 200, 200, 220) — light-grey, semi-opaque,
     readable over both dark and mid-tone background pixels.
     8 px inter-line gap; 16 px below last line to canvas bottom.
@@ -45,8 +44,7 @@ CANVAS_W, CANVAS_H = 800, 600
 # Copyright block content — spelling is critical: AstromechOS (capital A + OS)
 COPYRIGHT_LINES = [
     ("AstromechOS © 2026", 14),   # Line 1: bold-ish, 14 pt equiv
-    ("GNU GPL v3", 11),                # Line 2: regular, 11 pt equiv
-    ("Distributed Startup Software", 11),  # Line 3: regular, 11 pt equiv
+    ("GNU GPL v3", 11),           # Line 2: regular, 11 pt equiv
 ]
 
 TEXT_COLOR = (200, 200, 200, 220)   # light-grey, semi-opaque

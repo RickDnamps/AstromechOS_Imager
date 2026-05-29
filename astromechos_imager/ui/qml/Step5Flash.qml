@@ -1,10 +1,10 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "Theme.js" as Theme
 
 Rectangle {
-    // Root sized by StackView — no anchors.fill here
-    color: "#1a1f24"
+    color: Theme.colorBg
 
     property bool isFlashing: flashViewModel.status === "flashing"
     property bool isDone:     flashViewModel.status === "done"
@@ -15,93 +15,252 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        anchors.bottomMargin: 80
-        spacing: 16
+        anchors.margins: 28
+        anchors.bottomMargin: 88
+        spacing: 18
 
-        Text {
-            text: isFlashing ? "Flashing — do not unplug" : "Confirm and flash"
-            color: "#e6e6e6"
-            font.pixelSize: 22
+        // ── Header ────────────────────────────────────────────────────
+        ColumnLayout {
+            spacing: 4
+            Text {
+                text: isFlashing ? "FLASHING — DO NOT UNPLUG"
+                    : isError    ? "FLASH FAILED"
+                    : isDone     ? "FLASH COMPLETE"
+                    :              "CONFIRM AND FLASH"
+                color: isError    ? Theme.colorBorderError
+                     : isDone     ? Theme.colorAccent
+                     :              Theme.colorTextPrimary
+                font.family: Theme.fontTitle
+                font.pixelSize: 18
+                font.bold: true
+                font.letterSpacing: 1.4
+                Behavior on color { ColorAnimation { duration: Theme.durBase } }
+            }
+            Text {
+                text: isFlashing ? "Bit-for-bit copy in progress. The Pi will boot from this card."
+                    : isError    ? "Review the message below, fix the cause, then retry."
+                    : isDone     ? "Eject the card(s) and insert into the Pi 4B."
+                    :              "Review the plan below. Writing will erase the targets."
+                color: Theme.colorTextSecondary
+                font.family: Theme.fontBody
+                font.pixelSize: 12
+            }
         }
 
-        // ── Summary table (Phase A) ──────────────────────────────────
+        // ── Summary panel (pre-flash) ─────────────────────────────────
         Rectangle {
             visible: !isFlashing && !isDone
             Layout.fillWidth: true
             Layout.preferredHeight: 180
-            color: "#262b30"
-            border.color: "#3a3f44"
+            radius: Theme.radiusCard
+            color: Theme.colorSurface
+            border.color: Theme.colorBorderIdle
             border.width: 1
-            radius: 6
+
+            // Top edge highlight
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                anchors.margins: 1; height: 1; radius: parent.radius
+                color: Qt.rgba(1, 1, 1, 0.04)
+            }
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 18
                 spacing: 12
 
-                Text {
-                    visible: needMaster
-                    text: "Master:  " + wizardState.masterImagePath + "  →  drive " + wizardState.masterDriveId
-                    color: "#cfd2d5"
-                    font.pixelSize: 13
-                    elide: Text.ElideMiddle
-                    Layout.fillWidth: true
+                Repeater {
+                    model: [
+                        { vis: needMaster, role: "MASTER", img: wizardState.masterImagePath, drv: wizardState.masterDriveId },
+                        { vis: needSlave,  role: "SLAVE",  img: wizardState.slaveImagePath,  drv: wizardState.slaveDriveId  },
+                    ]
+                    delegate: RowLayout {
+                        visible: modelData.vis
+                        Layout.fillWidth: true
+                        spacing: 12
+                        Text {
+                            text: modelData.role
+                            color: Theme.colorTextAccent
+                            font.family: Theme.fontTitle
+                            font.pixelSize: 10
+                            font.bold: true
+                            font.letterSpacing: 1.6
+                            Layout.preferredWidth: 70
+                        }
+                        Text {
+                            text: modelData.img
+                            color: Theme.colorTextPrimary
+                            font.family: Theme.fontMono
+                            font.pixelSize: 12
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: "→ drive " + modelData.drv
+                            color: Theme.colorTextSecondary
+                            font.family: Theme.fontMono
+                            font.pixelSize: 12
+                        }
+                    }
                 }
-                Text {
-                    visible: needSlave
-                    text: "Slave:   " + wizardState.slaveImagePath  + "  →  drive " + wizardState.slaveDriveId
-                    color: "#cfd2d5"
-                    font.pixelSize: 13
-                    elide: Text.ElideMiddle
-                    Layout.fillWidth: true
-                }
+
                 Item { Layout.fillHeight: true }
 
-                Text {
-                    text: "All data on the target drive(s) will be ERASED."
-                    color: "#e8a05e"
-                    font.pixelSize: 13
-                    font.bold: true
+                // Hairline warning bar
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: Theme.colorBorderWarn
+                    opacity: 0.4
+                }
+                RowLayout {
+                    spacing: 8
+                    Text {
+                        text: "⚠"
+                        color: Theme.colorBorderWarn
+                        font.family: Theme.fontTitle
+                        font.pixelSize: 14
+                    }
+                    Text {
+                        text: "ALL DATA ON THE TARGET DRIVE(S) WILL BE ERASED."
+                        color: Theme.colorBorderWarn
+                        font.family: Theme.fontTitle
+                        font.pixelSize: 11
+                        font.bold: true
+                        font.letterSpacing: 1.4
+                    }
                 }
             }
         }
 
-        // ── Progress (Phase B) ───────────────────────────────────────
-        ColumnLayout {
+        // ── Progress panel (during / after flash) ─────────────────────
+        Rectangle {
             visible: isFlashing || isDone || isError
             Layout.fillWidth: true
-            spacing: 12
+            Layout.preferredHeight: 200
+            radius: Theme.radiusCard
+            color: Theme.colorSurface
+            border.color: isError ? Theme.colorBorderError : Theme.colorBorderIdle
+            border.width: 1
+            Behavior on border.color { ColorAnimation { duration: Theme.durBase } }
+
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                anchors.margins: 1; height: 1; radius: parent.radius
+                color: Qt.rgba(1, 1, 1, 0.04)
+            }
 
             ColumnLayout {
-                visible: needMaster
-                Layout.fillWidth: true
-                spacing: 4
-                Text { text: "Master · " + flashViewModel.masterPhase; color: "#cfd2d5"; font.pixelSize: 12 }
-                ProgressBar { Layout.fillWidth: true; value: flashViewModel.masterProgress; from: 0; to: 1 }
-            }
-            ColumnLayout {
-                visible: needSlave
-                Layout.fillWidth: true
-                spacing: 4
-                Text { text: "Slave · " + flashViewModel.slavePhase; color: "#cfd2d5"; font.pixelSize: 12 }
-                ProgressBar { Layout.fillWidth: true; value: flashViewModel.slaveProgress; from: 0; to: 1 }
-            }
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 14
 
-            Text {
-                visible: isDone
-                text: "✓ Flash complete"
-                color: "#5ec07a"
-                font.pixelSize: 14
-                font.bold: true
-            }
-            Text {
-                visible: isError
-                text: "✗ " + flashViewModel.errorMessage
-                color: "#e85a5a"
-                font.pixelSize: 13
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
+                // Master progress
+                ColumnLayout {
+                    visible: needMaster
+                    Layout.fillWidth: true
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "MASTER"
+                            color: Theme.colorTextAccent
+                            font.family: Theme.fontTitle
+                            font.pixelSize: 10
+                            font.bold: true
+                            font.letterSpacing: 1.6
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: flashViewModel.masterPhase
+                            color: Theme.colorTextSecondary
+                            font.family: Theme.fontMono
+                            font.pixelSize: 11
+                        }
+                    }
+                    // Themed progress bar
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 6
+                        radius: 3
+                        color: Theme.colorBg
+                        border.color: Theme.colorBorderIdle
+                        border.width: 1
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 1
+                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.masterProgress))
+                            radius: 2
+                            color: Theme.colorAccent
+                            Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+                    }
+                }
+                // Slave progress
+                ColumnLayout {
+                    visible: needSlave
+                    Layout.fillWidth: true
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "SLAVE"
+                            color: Theme.colorTextAccent
+                            font.family: Theme.fontTitle
+                            font.pixelSize: 10
+                            font.bold: true
+                            font.letterSpacing: 1.6
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: flashViewModel.slavePhase
+                            color: Theme.colorTextSecondary
+                            font.family: Theme.fontMono
+                            font.pixelSize: 11
+                        }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 6
+                        radius: 3
+                        color: Theme.colorBg
+                        border.color: Theme.colorBorderIdle
+                        border.width: 1
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 1
+                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.slaveProgress))
+                            radius: 2
+                            color: Theme.colorAccent
+                            Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
+
+                Text {
+                    visible: isDone
+                    text: "✓ FLASH COMPLETE"
+                    color: Theme.colorAccent
+                    font.family: Theme.fontTitle
+                    font.pixelSize: 13
+                    font.bold: true
+                    font.letterSpacing: 1.6
+                }
+                Text {
+                    visible: isError
+                    text: "✗ " + flashViewModel.errorMessage
+                    color: Theme.colorBorderError
+                    font.family: Theme.fontBody
+                    font.pixelSize: 12
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
             }
         }
     }
@@ -110,48 +269,103 @@ Rectangle {
     Row {
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        anchors.margins: 20
-        spacing: 12
-        Button {
+        anchors.margins: 24
+        spacing: 10
+        AstroButton {
             visible: !isFlashing && !isDone
-            text: "Back"
+            text: "← BACK"
+            variant: "secondary"
             onClicked: wizardState.back()
         }
-        Button {
+        AstroButton {
             visible: !isFlashing && !isDone && !isError
-            text: "WRITE"
-            background: Rectangle { color: "#a02828"; radius: 4 }
-            contentItem: Text {
-                text: "WRITE"
-                color: "#ffffff"
-                font.bold: true
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
+            text: "⚡ WRITE"
+            variant: "danger"
+            horizontalPadding: 28
             onClicked: confirmDialog.open()
         }
-        Button {
+        AstroButton {
             visible: isFlashing
-            text: "Cancel"
+            text: "CANCEL"
+            variant: "secondary"
             onClicked: flashViewModel.cancel()
         }
-        Button {
+        AstroButton {
             visible: isDone
-            text: "Next"
+            text: "NEXT →"
+            variant: "primary"
             onClicked: wizardState.next()
         }
     }
 
+    // ── Themed confirmation dialog ───────────────────────────────────
+    // Fixed width avoids the implicitWidth binding loop that Qt's Basic
+    // Dialog hits when content wrapMode depends on width.
     Dialog {
         id: confirmDialog
-        title: "Erase target drive(s)?"
         modal: true
-        standardButtons: Dialog.Yes | Dialog.Cancel
-        onAccepted: flashViewModel.startFromWizard()
-        contentItem: Text {
-            text: "This will ERASE the target SD card(s). Are you sure?"
-            color: "#e6e6e6"
-            wrapMode: Text.Wrap
+        anchors.centerIn: parent
+        width: 480
+        padding: 0
+
+        background: Rectangle {
+            radius: Theme.radiusCard
+            color: Theme.colorSurface
+            border.color: Theme.colorBorderError
+            border.width: 1
         }
+
+        header: Rectangle {
+            color: "transparent"
+            implicitHeight: 52
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 20
+                text: "⚠ ERASE TARGET DRIVE(S)?"
+                color: Theme.colorBorderError
+                font.family: Theme.fontTitle
+                font.pixelSize: 13
+                font.bold: true
+                font.letterSpacing: 1.4
+            }
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                height: 1; color: Theme.colorDivider
+            }
+        }
+
+        contentItem: Text {
+            text: "This will ERASE the target SD card(s) and write the selected image. " +
+                  "There is no undo. Proceed only if the drive letters look correct."
+            color: Theme.colorTextPrimary
+            font.family: Theme.fontBody
+            font.pixelSize: 13
+            wrapMode: Text.Wrap
+            width: 440
+            leftPadding: 20
+            rightPadding: 20
+            topPadding: 20
+            bottomPadding: 4
+        }
+
+        footer: RowLayout {
+            spacing: 10
+            Item { Layout.fillWidth: true }
+            AstroButton {
+                text: "CANCEL"
+                variant: "secondary"
+                onClicked: confirmDialog.reject()
+            }
+            AstroButton {
+                text: "⚡ ERASE & WRITE"
+                variant: "danger"
+                horizontalPadding: 18
+                onClicked: confirmDialog.accept()
+            }
+            Item { width: 18 }
+        }
+
+        onAccepted: flashViewModel.startFromWizard()
     }
 }

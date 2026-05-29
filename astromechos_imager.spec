@@ -13,6 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(".").resolve()
 QML_DIR = PROJECT_ROOT / "astromechos_imager" / "ui" / "qml"
 RES_IMG_DIR = PROJECT_ROOT / "astromechos_imager" / "ui" / "resources" / "images"
+RES_FONT_DIR = PROJECT_ROOT / "astromechos_imager" / "ui" / "resources" / "fonts"
 VENDOR_DIR = PROJECT_ROOT / "vendor"
 ICON_PATH = PROJECT_ROOT / "images" / "AstromechOS_Imager.ico"
 MANIFEST_PATH = PROJECT_ROOT / "astromechos_imager_admin.manifest"
@@ -22,10 +23,17 @@ datas = []
 if QML_DIR.exists():
     for p in QML_DIR.rglob("*.qml"):
         datas.append((str(p), "astromechos_imager/ui/qml"))
+    # QML JS modules (Theme.js, etc.) — same dest as .qml siblings.
+    for p in QML_DIR.rglob("*.js"):
+        datas.append((str(p), "astromechos_imager/ui/qml"))
 if RES_IMG_DIR.exists():
     for p in RES_IMG_DIR.iterdir():
         if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".svg"}:
             datas.append((str(p), "astromechos_imager/ui/resources/images"))
+if RES_FONT_DIR.exists():
+    for p in RES_FONT_DIR.iterdir():
+        if p.is_file() and p.suffix.lower() in {".ttf", ".otf"}:
+            datas.append((str(p), "astromechos_imager/ui/resources/fonts"))
 if VENDOR_DIR.exists():
     for p in VENDOR_DIR.iterdir():
         if p.is_file() and p.name not in {"README.md", ".gitkeep", "MISSING_BINARIES.md"}:
@@ -34,6 +42,12 @@ if VENDOR_DIR.exists():
 FIRSTBOOT_SNAPSHOT = PROJECT_ROOT / "tests" / "contract" / "fixtures" / "firstboot_setup.sh.snapshot"
 if FIRSTBOOT_SNAPSHOT.is_file():
     datas.append((str(FIRSTBOOT_SNAPSHOT), "tests/contract/fixtures"))
+
+# Window icon (.ico) — also embedded in the EXE for the file icon, but
+# needs to live in the bundle so QGuiApplication.setWindowIcon() can find
+# it at runtime to brand the taskbar.
+if ICON_PATH.is_file():
+    datas.append((str(ICON_PATH), "images"))
 
 # ── Aggressive excludes — Qt modules we do NOT use ─────────────────────────
 # These contribute hundreds of MB combined. PyInstaller's PySide6 hook pulls

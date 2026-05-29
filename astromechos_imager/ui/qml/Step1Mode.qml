@@ -1,62 +1,66 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "Theme.js" as Theme
 
 Rectangle {
     // Root sized by StackView — do NOT set anchors.fill here.
-    color: "#1a1f24"
+    color: Theme.colorBg
 
     ColumnLayout {
         anchors.centerIn: parent
-        spacing: 16
-        width: 420
+        spacing: 18
+        width: 500
 
         Text {
-            text: "What do you want to flash?"
-            color: "#e6e6e6"
-            font.pixelSize: 22
-            Layout.bottomMargin: 12
+            text: "WHAT DO YOU WANT TO FLASH?"
+            color: Theme.colorTextPrimary
+            font.family: Theme.fontTitle
+            font.pixelSize: 18
+            font.bold: true
+            font.letterSpacing: 1.4
+            Layout.bottomMargin: 8
+        }
+        Text {
+            text: "Pick the SD cards you need to (re)write. The recommended path covers both."
+            color: Theme.colorTextSecondary
+            font.family: Theme.fontBody
+            font.pixelSize: 12
+            Layout.bottomMargin: 4
         }
 
-        // Card-style radio buttons for AstromechOS flash mode selection
-        Repeater {
-            model: [
-                { mode: "both",         title: "Flash both (recommended)",
-                  desc: "Master + Slave SD cards in one session" },
-                { mode: "master_only",  title: "Master only",
-                  desc: "Re-flash the master SD card" },
-                { mode: "slave_only",   title: "Slave only",
-                  desc: "Re-flash the slave SD card" },
-            ]
-            delegate: Rectangle {
-                Layout.fillWidth: true
-                height: 64
-                radius: 8
-                color: wizardState.mode === modelData.mode ? "#2d4a6e" : "#262b30"
-                border.color: wizardState.mode === modelData.mode ? "#5e9bd6" : "#3a3f44"
-                border.width: 1
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 2
-                    Text { text: modelData.title; color: "#e6e6e6"; font.pixelSize: 16; font.bold: true }
-                    Text { text: modelData.desc;  color: "#a0a4a8"; font.pixelSize: 12 }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: wizardState.setMode(modelData.mode)
-                }
-            }
+        SelectableCard {
+            title: "FLASH BOTH"
+            subtitle: "Master + Slave SD cards in one session — recommended"
+            selected: wizardState.mode === "both"
+            onClicked: wizardState.setMode("both")
+            iconComponent: Component { R2BothIcon { } }
+        }
+        SelectableCard {
+            title: "MASTER ONLY"
+            subtitle: "Re-flash the dome Pi 4B (4 GB) — Flask, dashboard, PCA9685"
+            selected: wizardState.mode === "master_only"
+            onClicked: wizardState.setMode("master_only")
+            iconComponent: Component { R2HeadIcon { } }
+        }
+        SelectableCard {
+            title: "SLAVE ONLY"
+            subtitle: "Re-flash the body Pi 4B (2 GB) — UART listener, VESC, audio"
+            selected: wizardState.mode === "slave_only"
+            onClicked: wizardState.setMode("slave_only")
+            iconComponent: Component { R2BodyIcon { } }
         }
     }
 
+    // ── Footer navigation: Next ───────────────────────────────────────
     Row {
         anchors.bottom: parent.bottom
         anchors.right: parent.right
-        anchors.margins: 20
-        Button { text: "Next"; onClicked: wizardState.next() }
+        anchors.margins: 24
+        AstroButton {
+            text: "NEXT →"
+            variant: "primary"
+            onClicked: wizardState.next()
+        }
     }
 }

@@ -7,6 +7,7 @@
 # e2fsck.exe / msys-2.0.dll via sys._MEIPASS and raises a clear error if
 # they are missing. See vendor/README.md for how to obtain them.
 
+import fnmatch
 from pathlib import Path
 
 PROJECT_ROOT = Path(".").resolve()
@@ -128,6 +129,132 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+
+# ── Post-Analysis binary/data filter ──────────────────────────────────────
+# PyInstaller's PySide6 hook is comprehensive: it bundles every Qt6*.dll and
+# every PySide6/qml/* module unconditionally, regardless of `excludes=`.
+# `excludes` only blocks Python BINDING modules (~100 KB each); the heavy
+# native DLLs (Qt6WebEngineCore.dll alone is 145 MB) come through.
+# This filter runs after Analysis() and trims a.binaries + a.datas by glob
+# pattern on the destination path. Test by running the rebuilt exe and
+# watching %LOCALAPPDATA%/AstromechOS_Imager/startup.log — any missing-
+# resource warning means a pattern below was too aggressive.
+
+def _filter_entries(entries, drop_patterns, keep_patterns=()):
+    """Filter PyInstaller (dest, src, kind) tuples by glob on dest.
+    keep_patterns wins over drop_patterns (whitelist override).
+    Returns (kept_entries, bytes_dropped, dropped_count)."""
+    kept, dropped_bytes, dropped_count = [], 0, 0
+    for entry in entries:
+        dest = entry[0].replace("\\", "/")
+        if any(fnmatch.fnmatch(dest, k) for k in keep_patterns):
+            kept.append(entry)
+            continue
+        if any(fnmatch.fnmatch(dest, p) for p in drop_patterns):
+            try:
+                dropped_bytes += Path(entry[1]).stat().st_size
+            except OSError:
+                pass
+            dropped_count += 1
+            continue
+        kept.append(entry)
+    return kept, dropped_bytes, dropped_count
+
+
+DROP_BINARIES = [
+    # WebEngine (embedded Chromium) — single biggest win, ~145 MB.
+    "PySide6/Qt6WebEngine*.dll",
+    "PySide6/QtWebEngineProcess.exe",
+    "PySide6/resources/qtwebengine_*",
+    # Software OpenGL fallback (~20 MB) — virtually every modern Windows
+    # install has hardware acceleration; the Mesa fallback is dead weight.
+    "PySide6/opengl32sw.dll",
+    # Qt 3D family — never used (no 3D scenes in QML).
+    "PySide6/Qt63D*.dll",
+    "PySide6/Qt6Quick3D*.dll",
+    # Charts / data visualization.
+    "PySide6/Qt6Charts*.dll",
+    "PySide6/Qt6DataVisualization*.dll",
+    "PySide6/Qt6Graphs.dll",
+    # Multimedia / spatial audio — no audio/video playback in the imager.
+    "PySide6/Qt6Multimedia*.dll",
+    "PySide6/Qt6SpatialAudio.dll",
+    # PDF rendering.
+    "PySide6/Qt6Pdf*.dll",
+    # Location / positioning.
+    "PySide6/Qt6Location.dll",
+    "PySide6/Qt6Positioning*.dll",
+    # Sensors, serial bus, bluetooth, NFC — irrelevant to a SD-card flasher.
+    "PySide6/Qt6Sensors*.dll",
+    "PySide6/Qt6SerialBus.dll",
+    "PySide6/Qt6SerialPort.dll",
+    # SQL backend, TTS, virtual keyboard.
+    "PySide6/Qt6Sql.dll",
+    "PySide6/Qt6TextToSpeech.dll",
+    "PySide6/Qt6VirtualKeyboard*.dll",
+    # Web protocols (other than QtNetwork, which QtQml needs).
+    "PySide6/Qt6WebChannel*.dll",
+    "PySide6/Qt6WebSockets.dll",
+    "PySide6/Qt6WebView*.dll",
+    # Remote objects / Scxml.
+    "PySide6/Qt6RemoteObjects*.dll",
+    "PySide6/Qt6Scxml*.dll",
+    # Qt Test infrastructure shouldn't ship to end users.
+    "PySide6/Qt6Test.dll",
+    "PySide6/Qt6QuickTest.dll",
+    # Alternative QtQuick.Controls 2 styles — we keep Basic + Windows.
+    "PySide6/Qt6QuickControls2Fusion*.dll",
+    "PySide6/Qt6QuickControls2Imagine*.dll",
+    "PySide6/Qt6QuickControls2Material*.dll",
+    "PySide6/Qt6QuickControls2Universal*.dll",
+]
+
+DROP_DATAS = [
+    # Whole QML module trees we don't import.
+    "PySide6/qml/Qt3D/*",
+    "PySide6/qml/QtCharts/*",
+    "PySide6/qml/QtDataVisualization/*",
+    "PySide6/qml/QtGraphs/*",
+    "PySide6/qml/QtLocation/*",
+    "PySide6/qml/QtMultimedia/*",
+    "PySide6/qml/QtPositioning/*",
+    "PySide6/qml/QtQuick3D/*",
+    "PySide6/qml/QtRemoteObjects/*",
+    "PySide6/qml/QtScxml/*",
+    "PySide6/qml/QtSensors/*",
+    "PySide6/qml/QtTest/*",
+    "PySide6/qml/QtTextToSpeech/*",
+    "PySide6/qml/QtWebChannel/*",
+    "PySide6/qml/QtWebEngine/*",
+    "PySide6/qml/QtWebSockets/*",
+    # Alternative Quick.Controls 2 styles.
+    "PySide6/qml/QtQuick/Controls/Fusion/*",
+    "PySide6/qml/QtQuick/Controls/Imagine/*",
+    "PySide6/qml/QtQuick/Controls/Material/*",
+    "PySide6/qml/QtQuick/Controls/Universal/*",
+    "PySide6/qml/QtQuick/Controls/macOS/*",
+    "PySide6/qml/QtQuick/Controls/iOS/*",
+    # Drop ALL Qt translations except the four whitelisted below.
+    "PySide6/translations/*.qm",
+]
+
+KEEP_DATAS = [
+    "PySide6/translations/qt_en.qm",
+    "PySide6/translations/qt_fr.qm",
+    "PySide6/translations/qtbase_en.qm",
+    "PySide6/translations/qtbase_fr.qm",
+]
+
+
+a.binaries, _bin_bytes, _bin_count = _filter_entries(a.binaries, DROP_BINARIES)
+a.datas, _data_bytes, _data_count = _filter_entries(a.datas, DROP_DATAS, KEEP_DATAS)
+print(
+    f"[spec] Trimmed {_bin_count} binaries (-{_bin_bytes/1024/1024:.1f} MB) "
+    f"and {_data_count} data files (-{_data_bytes/1024/1024:.1f} MB)"
+)
+
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # ── ONEDIR mode — fast cold launch (no decompress step), AV-friendly ─────

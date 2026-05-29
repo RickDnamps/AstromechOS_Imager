@@ -32,6 +32,7 @@ if getattr(sys, "frozen", False):
 from PySide6.QtCore import QUrl, qInstallMessageHandler, QtMsgType
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
 
 from astromechos_imager.ui.messages import M
 from astromechos_imager.ui.wizard_state import WizardState
@@ -90,6 +91,14 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # emitted during Qt init (plugin loading, style resolution, etc.) land
     # in our startup.log instead of disappearing into a console=False stderr.
     qInstallMessageHandler(_qt_message_handler)
+
+    # Pin QtQuick.Controls 2 style explicitly. Without this, Qt's autodetect
+    # picks Fusion as the fallback default — which we DROP from the frozen
+    # bundle (see DROP_BINARIES / DROP_DATAS in astromechos_imager.spec) to
+    # save ~5 MB. Basic is the safe cross-platform default; switch to
+    # "Windows" if a more native Win32 look is wanted (style binaries are
+    # still bundled).
+    QQuickStyle.setStyle("Basic")
 
     # Reuse existing instance if pytest-qt already created one
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)

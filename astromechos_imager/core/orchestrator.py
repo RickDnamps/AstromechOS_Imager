@@ -10,6 +10,7 @@ from typing import Callable
 from astromechos_imager.core.bootpartition import (
     BootPartitionLayout,
     find_first_fat32_partition,
+    find_rootfs_partition,
     open_boot_partition as _open_boot_partition_impl,
 )
 
@@ -23,9 +24,6 @@ def _bootpartition_open(
 
     Returns None if no FAT32 partition is found (so callers can skip customize).
     This is the single monkeypatching point for tests.
-
-    NOTE: Phase 5.5 rootfs personalization uses a separate parallel symbol;
-    this function only handles the boot (FAT32) partition step.
     """
     from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
     try:
@@ -37,16 +35,58 @@ def _bootpartition_open(
         layout=layout,
         known_letters_before=known_letters_before,
     )
-from astromechos_imager.core.customization import FirstbootBundle
-from astromechos_imager.core.diskwriter import (
+
+
+def _open_rootfs_partition(
+    raw_device_path: str,
+    mbr_bytes: bytes,
+    debugfs_exe: Path,
+    e2fsck_exe: Path,
+    invoker: list[str] | None = None,
+) -> "object | None":
+    """Parse the MBR, find the Linux (0x83) partition, and open an ext4 backend.
+
+    Returns None if no Linux partition is found.
+    This is the single monkeypatching point for tests.
+
+    On Windows production: ``raw_device_path`` is a Win32 device path
+    (``\\\\.\\PHYSICALDRIVEn``). The ext4 backend constructs a device arg of
+    the form ``\\\\.\\PHYSICALDRIVEn?offset=N`` which e2fsprogs on WSL
+    interprets via the standard ``?offset=N`` syntax.
+
+    On test machines: monkeypatched to return a FakeRootfsPartition directly.
+    """
+    from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
+    from astromechos_imager.core.rootfs import Ext4DebugfsBackend  # noqa: PLC0415
+    try:
+        layout = find_rootfs_partition(mbr_bytes)
+    except BootPartitionMountError:
+        return None
+    return Ext4DebugfsBackend(
+        image_path=raw_device_path,
+        offset_bytes=layout.offset,
+        debugfs_exe=debugfs_exe,
+        e2fsck_exe=e2fsck_exe,
+        invoker=invoker,
+    )
+
+
+from astromechos_imager.core.customization import FirstbootBundle  # noqa: E402
+from astromechos_imager.core.diskwriter import (  # noqa: E402
     DiskWriter,
     DiskWriterProgress,
     verify_readback,
 )
-from astromechos_imager.core.errors import ImagerError
-from astromechos_imager.core.imagesource import open_image
-from astromechos_imager.core.models import DiskRef, Ed25519Pair, FirstbootConfig, Role
-from astromechos_imager.core.platform_io import PlatformIO
+from astromechos_imager.core.errors import ImagerError  # noqa: E402
+from astromechos_imager.core.imagesource import open_image  # noqa: E402
+from astromechos_imager.core.models import (  # noqa: E402
+    DiskRef,
+    Ed25519Pair,
+    FirstbootConfig,
+    LinuxAccount,
+    Role,
+)
+from astromechos_imager.core.platform_io import PlatformIO  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -69,6 +109,12 @@ class FlashJob:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     skip_verify: bool = False
     skip_customize: bool = False
+    # Phase 5.5.4: optional rootfs personalization
+    # When linux_account is None, rootfs personalization is skipped entirely
+    # (backward-compatible for callers that only need the FAT32 firstboot bundle).
+    linux_account: LinuxAccount | None = None
+    ext4_debugfs_exe: Path | None = None
+    ext4_e2fsck_exe: Path | None = None
 
     def run(self) -> FlashJobResult:
         try:
@@ -88,10 +134,8 @@ class FlashJob:
                                     length=write_result.bytes_written,
                                     on_progress=self.on_progress,
                                     cancel_event=self.cancel_event)
-                # 4. Customize via boot partition
-                # NOTE: Phase 5.5 rootfs personalization will be inserted here
-                # (between verify and customize) once Task 5.5.4 lands.
-                if not self.skip_customize:
+                # 4. Rootfs personalization + boot partition customize
+                if not self.skip_customize and not self.cancel_event.is_set():
                     self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
                     mbr = dev.read(0, 512)
                     bp = _bootpartition_open(
@@ -101,8 +145,16 @@ class FlashJob:
                     )
                     if bp is not None:
                         try:
-                            FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
-                                bp, self.role)
+                            # 4a. Rootfs personalization (if linux_account provided)
+                            if (
+                                self.linux_account is not None
+                                and not self.cancel_event.is_set()
+                            ):
+                                self._run_rootfs_personalization(mbr, bp)
+                            # 4b. Firstboot bundle (boot partition)
+                            if not self.cancel_event.is_set():
+                                FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
+                                    bp, self.role)
                         finally:
                             bp.close()
             finally:
@@ -111,6 +163,43 @@ class FlashJob:
                                    source_sha256=write_result.source_sha256)
         except ImagerError as e:
             return FlashJobResult(ok=False, bytes_written=0, source_sha256="", error=e)
+
+    def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
+        """Open the ext4 rootfs partition and apply RootfsPersonalizer.
+
+        Parameters
+        ----------
+        mbr_bytes:
+            First 512 bytes of the disk (already read during customize step).
+        boot:
+            Already-opened BootPartition object (shared with FirstbootBundle).
+        """
+        from astromechos_imager.core.rootfs_personalizer import RootfsPersonalizer  # noqa: PLC0415
+
+        debugfs = self.ext4_debugfs_exe
+        e2fsck = self.ext4_e2fsck_exe
+        # If exe paths not provided, skip (defensive: shouldn't reach here if
+        # linux_account was set without exe paths, but guard for safety)
+        if debugfs is None or e2fsck is None:
+            rp = _open_rootfs_partition(
+                raw_device_path=self.target.device_path,
+                mbr_bytes=mbr_bytes,
+                debugfs_exe=Path("/usr/sbin/debugfs"),
+                e2fsck_exe=Path("/usr/sbin/e2fsck"),
+            )
+        else:
+            rp = _open_rootfs_partition(
+                raw_device_path=self.target.device_path,
+                mbr_bytes=mbr_bytes,
+                debugfs_exe=debugfs,
+                e2fsck_exe=e2fsck,
+            )
+        if rp is None:
+            return  # no Linux partition → skip
+        try:
+            RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
+        finally:
+            rp.close()
 
 
 @dataclass(frozen=True)

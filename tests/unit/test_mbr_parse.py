@@ -1,11 +1,16 @@
-"""Unit tests for MBR parsing (find_first_fat32_partition)."""
+"""Unit tests for MBR parsing (find_first_fat32_partition, find_rootfs_partition)."""
 from __future__ import annotations
 
 import struct
 
 import pytest
 
-from astromechos_imager.core.bootpartition import BootPartitionLayout, find_first_fat32_partition
+from astromechos_imager.core.bootpartition import (
+    BootPartitionLayout,
+    RootfsLayout,
+    find_first_fat32_partition,
+    find_rootfs_partition,
+)
 from astromechos_imager.core.errors import BootPartitionMountError
 
 
@@ -146,3 +151,118 @@ def test_layout_offset_and_size_in_bytes():
     layout = find_first_fat32_partition(mbr)
     assert layout.offset == 2048 * 512       # 1 048 576 bytes
     assert layout.size == 102400 * 512       # 52 428 800 bytes
+
+
+# ── Tests for find_rootfs_partition ──────────────────────────────────────────
+
+
+def _make_pi_os_mbr(
+    boot_start: int = 2048,
+    boot_size: int = 32768,
+    rootfs_start: int = 34816,
+    rootfs_size: int = 163840,
+) -> bytes:
+    """Build a Pi OS-style MBR: FAT32 boot (0x0C) then Linux (0x83) rootfs."""
+    mbr = bytearray(512)
+    mbr[510:512] = b"\x55\xAA"
+
+    # Entry 0: FAT32 boot
+    e0 = bytearray(16)
+    e0[4] = 0x0C
+    struct.pack_into("<I", e0, 8, boot_start)
+    struct.pack_into("<I", e0, 12, boot_size)
+    mbr[446:462] = bytes(e0)
+
+    # Entry 1: Linux ext4 rootfs
+    e1 = bytearray(16)
+    e1[4] = 0x83
+    struct.pack_into("<I", e1, 8, rootfs_start)
+    struct.pack_into("<I", e1, 12, rootfs_size)
+    mbr[462:478] = bytes(e1)
+
+    return bytes(mbr)
+
+
+def test_find_rootfs_partition_typical_pi_os():
+    """Pi OS-style MBR → returns the 0x83 partition at the expected offset."""
+    mbr = _make_pi_os_mbr(rootfs_start=34816, rootfs_size=163840)
+    layout = find_rootfs_partition(mbr)
+    assert isinstance(layout, RootfsLayout)
+    assert layout.offset == 34816 * 512
+    assert layout.size == 163840 * 512
+    assert layout.partition_type == 0x83
+
+
+def test_find_rootfs_partition_returns_first_linux():
+    """When multiple 0x83 entries exist, returns the first one."""
+    mbr = bytearray(512)
+    mbr[510:512] = b"\x55\xAA"
+
+    # Entry 0: Linux (0x83)
+    e0 = bytearray(16)
+    e0[4] = 0x83
+    struct.pack_into("<I", e0, 8, 10000)
+    struct.pack_into("<I", e0, 12, 50000)
+    mbr[446:462] = bytes(e0)
+
+    # Entry 1: Linux (0x83) — should be ignored
+    e1 = bytearray(16)
+    e1[4] = 0x83
+    struct.pack_into("<I", e1, 8, 60000)
+    struct.pack_into("<I", e1, 12, 80000)
+    mbr[462:478] = bytes(e1)
+
+    layout = find_rootfs_partition(bytes(mbr))
+    assert layout.offset == 10000 * 512
+    assert layout.size == 50000 * 512
+
+
+def test_find_rootfs_partition_skips_fat_returns_linux():
+    """Entry 0 FAT32, entry 1 Linux → returns the Linux partition."""
+    mbr = _make_pi_os_mbr()
+    layout = find_rootfs_partition(mbr)
+    assert layout.partition_type == 0x83
+
+
+def test_find_rootfs_partition_invalid_mbr_raises():
+    """Invalid MBR signature → BootPartitionMountError."""
+    with pytest.raises(BootPartitionMountError, match="Invalid MBR signature"):
+        find_rootfs_partition(b"\x00" * 512)
+
+
+def test_find_rootfs_partition_no_linux_raises():
+    """Valid MBR with no 0x83 partition → BootPartitionMountError."""
+    mbr = _make_mbr(ptype=0x0C, lba_start=2048, lba_size=65536)
+    with pytest.raises(BootPartitionMountError, match="No Linux"):
+        find_rootfs_partition(mbr)
+
+
+def test_find_rootfs_partition_zero_size_skipped():
+    """Linux partition with size=0 (deleted) is skipped, next valid entry returned."""
+    mbr = bytearray(512)
+    mbr[510:512] = b"\x55\xAA"
+
+    # Entry 0: Linux but size=0 (should be skipped)
+    e0 = bytearray(16)
+    e0[4] = 0x83
+    struct.pack_into("<I", e0, 8, 2048)
+    struct.pack_into("<I", e0, 12, 0)  # zero size
+    mbr[446:462] = bytes(e0)
+
+    # Entry 1: Linux valid
+    e1 = bytearray(16)
+    e1[4] = 0x83
+    struct.pack_into("<I", e1, 8, 34816)
+    struct.pack_into("<I", e1, 12, 163840)
+    mbr[462:478] = bytes(e1)
+
+    layout = find_rootfs_partition(bytes(mbr))
+    assert layout.offset == 34816 * 512
+
+
+def test_find_rootfs_layout_offset_in_bytes():
+    """RootfsLayout.offset and .size are in bytes, not sectors."""
+    mbr = _make_pi_os_mbr(rootfs_start=34816, rootfs_size=163840)
+    layout = find_rootfs_partition(mbr)
+    assert layout.offset == 34816 * 512
+    assert layout.size == 163840 * 512

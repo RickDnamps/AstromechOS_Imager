@@ -135,6 +135,48 @@ Rectangle {
                     checked: wizardState.reuseHotspot
                     onToggled: wizardState.setReuseHotspot(checked)
                 }
+
+                // Spacer
+                Item { Layout.fillWidth: true; Layout.preferredHeight: 8 }
+
+                // ── Wi-Fi block ────────────────────────────────────────────────
+                Text {
+                    text: "Wi-Fi (optional — wlan1 home network)"
+                    color: "#a0c4e8"
+                    font.pixelSize: 13
+                    font.bold: true
+                    Layout.topMargin: 6
+                }
+                Text {
+                    text: "Configure le Wi-Fi domestique pour le dongle WLAN1. Laissé vide = aucun fichier généré."
+                    color: "#a0a4a8"
+                    font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Text { text: "SSID:"; color: "#cfd2d5"; font.pixelSize: 12; Layout.preferredWidth: 130 }
+                    TextField {
+                        text: wizardState.wifiSsid
+                        Layout.fillWidth: true
+                        placeholderText: "MyHomeNetwork"
+                        onTextChanged: wizardState.setWifiSsid(text)
+                    }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Text { text: "Password:"; color: "#cfd2d5"; font.pixelSize: 12; Layout.preferredWidth: 130 }
+                    TextField {
+                        text: wizardState.wifiPsk
+                        Layout.fillWidth: true
+                        placeholderText: "WPA2 passphrase (8–63 chars)"
+                        echoMode: TextInput.Password
+                        onTextChanged: wizardState.setWifiPsk(text)
+                    }
+                }
             }
         }
     }

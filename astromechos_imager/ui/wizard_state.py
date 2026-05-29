@@ -27,6 +27,8 @@ class WizardState(QObject):
     repoUrlChanged = Signal(str)
     reusePairKeyChanged = Signal(bool)
     reuseHotspotChanged = Signal(bool)
+    wifiSsidChanged = Signal(str)
+    wifiPskChanged = Signal(str)
 
     MIN_STEP = 1
     MAX_STEP = 6
@@ -52,6 +54,8 @@ class WizardState(QObject):
         self._repo_url = ""
         self._reuse_pair_key = False
         self._reuse_hotspot = False
+        self._wifi_ssid = ""
+        self._wifi_psk = ""
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -246,3 +250,27 @@ class WizardState(QObject):
         if val != self._reuse_hotspot:
             self._reuse_hotspot = val
             self.reuseHotspotChanged.emit(val)
+
+    # ------------------------------------------------------------------
+    # Step 4 — Wi-Fi (optional, wlan1 home network) — Phase 8.10
+    # ------------------------------------------------------------------
+
+    @Property(str, notify=wifiSsidChanged)
+    def wifiSsid(self) -> str:
+        return self._wifi_ssid
+
+    @Slot(str)
+    def setWifiSsid(self, v: str) -> None:
+        if v != self._wifi_ssid:
+            self._wifi_ssid = v
+            self.wifiSsidChanged.emit(v)
+
+    @Property(str, notify=wifiPskChanged)
+    def wifiPsk(self) -> str:
+        return self._wifi_psk
+
+    @Slot(str)
+    def setWifiPsk(self, v: str) -> None:
+        if v != self._wifi_psk:
+            self._wifi_psk = v
+            self.wifiPskChanged.emit(v)

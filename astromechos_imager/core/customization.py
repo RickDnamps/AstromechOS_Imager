@@ -82,6 +82,19 @@ def render_authorized_keys(
     return ("\n".join(keys) + "\n").encode("utf-8")
 
 
+def render_wlan_conf(ssid: str, psk: str) -> bytes:
+    """Generate /astromech_wlan.conf for the wlan1 home network dongle.
+
+    Format (shell-sourceable, awk-parseable):
+        SSID=<ssid>
+        PSK=<psk>
+
+    No header comments — keeps it trivially parseable on the Pi side.
+    UTF-8 encoded to support Unicode SSIDs.
+    """
+    return f"SSID={ssid}\nPSK={psk}\n".encode("utf-8")
+
+
 from astromechos_imager.core.errors import (  # noqa: E402
     BundleSelfValidationFailedError,
     PairAsymmetryError,
@@ -140,6 +153,9 @@ class FirstbootBundle:
         hw = self.cfg.hw_layout_master if role is Role.MASTER else self.cfg.hw_layout_slave
         if hw is not None:
             bp.write_bytes("/hw_layout.json", Path(hw).read_bytes())  # type: ignore[union-attr]
+        # 6.5 — Optional WiFi creds for wlan1 (per Phase 8.10 contract)
+        if self.cfg.wifi_ssid and self.cfg.wifi_psk:
+            bp.write_bytes("/astromech_wlan.conf", render_wlan_conf(self.cfg.wifi_ssid, self.cfg.wifi_psk))  # type: ignore[union-attr]
         # 7. Self-validate before trigger — raises if contract is violated
         self._self_validate(bp, role)
         # 8. Trigger marker LAST — refs firstboot_setup.sh:67-72
@@ -178,6 +194,17 @@ class FirstbootBundle:
                     raise BundleSelfValidationFailedError("hotspot ssid not written")
                 if f"password = {self.cfg.hotspot_bootstrap.password}" not in init_cfg_text:
                     raise BundleSelfValidationFailedError("hotspot password not written")
+            # WiFi conf: must exist when creds are set, must be absent when not
+            if self.cfg.wifi_ssid and self.cfg.wifi_psk:
+                if not bp.exists("/astromech_wlan.conf"):  # type: ignore[union-attr]
+                    raise BundleSelfValidationFailedError(
+                        "wifi_ssid and wifi_psk set but /astromech_wlan.conf not written"
+                    )
+            else:
+                if bp.exists("/astromech_wlan.conf"):  # type: ignore[union-attr]
+                    raise BundleSelfValidationFailedError(
+                        "/astromech_wlan.conf present but no wifi creds configured"
+                    )
         except BundleSelfValidationFailedError:
             raise
         except Exception as e:

@@ -11,6 +11,8 @@ from astromechos_imager.core.errors import (
     InvalidBranchNameError,
     InvalidHotspotSsidError,
     InvalidHotspotPskError,
+    InvalidWifiSsidError,
+    InvalidWifiPskError,
 )
 
 
@@ -73,3 +75,27 @@ def validate_wpa2_psk(p: str) -> None:
     if not (8 <= len(p) <= 63) or not p.isascii() or not p.isprintable():
         # Never echo the actual PSK in the message
         raise InvalidHotspotPskError("<redacted: invalid WPA2 PSK>")
+
+
+def validate_wifi_ssid(s: str) -> None:
+    """Relaxed WiFi SSID validator for home/arbitrary networks.
+
+    IEEE 802.11 allows any 1–32 byte UTF-8 sequence (non-empty after strip).
+    Distinct from validate_ssid() which enforces the AstromechOS hotspot pattern.
+    """
+    stripped = s.strip()
+    if not stripped:
+        raise InvalidWifiSsidError("WiFi SSID must be non-empty after stripping whitespace")
+    if len(s.encode("utf-8")) > 32:
+        raise InvalidWifiSsidError(
+            f"WiFi SSID must be ≤ 32 UTF-8 bytes (got {len(s.encode('utf-8'))})"
+        )
+
+
+def validate_wifi_psk(p: str) -> None:
+    """WPA2-PSK passphrase validator for home WiFi credentials.
+
+    Accepts 8–63 ASCII printable characters, matching WPA2-PSK constraints.
+    """
+    if not (8 <= len(p) <= 63) or not p.isascii() or not p.isprintable():
+        raise InvalidWifiPskError("<redacted: invalid WiFi WPA2 PSK>")

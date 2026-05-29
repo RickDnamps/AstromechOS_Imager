@@ -359,3 +359,91 @@ def test_set_reuse_hotspot_emits(qtbot):
     s.setReuseHotspot(True)
     assert s.reuseHotspot is True
     assert received == [True]
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.10 — wifiSsid + wifiPsk properties
+# ---------------------------------------------------------------------------
+
+def test_wifi_ssid_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.wifiSsid == ""
+
+
+def test_wifi_psk_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.wifiPsk == ""
+
+
+def test_set_wifi_ssid_updates_value(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setWifiSsid("HomeNet")
+    assert s.wifiSsid == "HomeNet"
+
+
+def test_set_wifi_psk_updates_value(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setWifiPsk("secret12")
+    assert s.wifiPsk == "secret12"
+
+
+def test_set_wifi_ssid_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.wifiSsidChanged.connect(lambda v: received.append(v))
+    s.setWifiSsid("HomeNet")
+    assert received == ["HomeNet"]
+
+
+def test_set_wifi_psk_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.wifiPskChanged.connect(lambda v: received.append(v))
+    s.setWifiPsk("secret12")
+    assert received == ["secret12"]
+
+
+def test_set_wifi_ssid_same_value_no_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setWifiSsid("HomeNet")
+    received = []
+    s.wifiSsidChanged.connect(lambda v: received.append(v))
+    s.setWifiSsid("HomeNet")  # same — no signal
+    assert received == []
+
+
+def test_set_wifi_psk_same_value_no_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setWifiPsk("secret12")
+    received = []
+    s.wifiPskChanged.connect(lambda v: received.append(v))
+    s.setWifiPsk("secret12")  # same — no signal
+    assert received == []
+
+
+def test_set_wifi_ssid_change_emits_new_value(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.wifiSsidChanged.connect(lambda v: received.append(v))
+    s.setWifiSsid("Net1")
+    s.setWifiSsid("Net2")
+    assert received == ["Net1", "Net2"]
+
+
+def test_set_wifi_psk_change_emits_new_value(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.wifiPskChanged.connect(lambda v: received.append(v))
+    s.setWifiPsk("pass1234")
+    s.setWifiPsk("pass5678")
+    assert received == ["pass1234", "pass5678"]

@@ -89,6 +89,9 @@ class FirstbootConfig:
     # Auto-managed by orchestrator — empty defaults exist for unit tests only.
     imager_version: str = ""
     flashed_at_iso: str = ""
+    # Optional home WiFi for wlan1 dongle — Phase 8.10
+    wifi_ssid: str | None = None   # home WiFi SSID for wlan1 dongle (optional)
+    wifi_psk: str | None = None    # corresponding WPA2-PSK
 
     def __post_init__(self) -> None:
         _v.validate_authorized_keys(self.authorized_keys)
@@ -105,3 +108,21 @@ class FirstbootConfig:
         if self.hotspot_bootstrap is not None:
             _v.validate_ssid(self.hotspot_bootstrap.ssid)
             _v.validate_wpa2_psk(self.hotspot_bootstrap.password)
+        # WiFi creds: both provided together or both absent — half-config is rejected
+        ssid_present = bool(self.wifi_ssid)
+        psk_present = bool(self.wifi_psk)
+        if ssid_present and psk_present:
+            # Full config: validate both
+            _v.validate_wifi_ssid(self.wifi_ssid)  # type: ignore[arg-type]
+            _v.validate_wifi_psk(self.wifi_psk)    # type: ignore[arg-type]
+        elif ssid_present and not psk_present:
+            # SSID without PSK — half-config
+            raise _v.InvalidWifiSsidError(
+                "WiFi SSID and PSK must be provided together"
+            )
+        elif not ssid_present and psk_present:
+            # PSK without SSID — half-config
+            raise _v.InvalidWifiSsidError(
+                "WiFi SSID and PSK must be provided together"
+            )
+        # Both empty/None: fully optional — skip

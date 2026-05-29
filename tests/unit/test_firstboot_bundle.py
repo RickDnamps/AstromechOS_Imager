@@ -1,7 +1,7 @@
 # tests/unit/test_firstboot_bundle.py
 import json
 import pytest
-from astromechos_imager.core.customization import FirstbootBundle
+from astromechos_imager.core.customization import FirstbootBundle, render_wlan_conf
 from astromechos_imager.core.errors import BundleSelfValidationFailedError
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, Role
@@ -76,3 +76,67 @@ def test_hotspot_section_byte_identical_in_init_cfg(fake_boot_partition):
     text = fake_boot_partition.read_bytes("/astromech_init.cfg").decode()
     assert f"ssid = {cfg.hotspot_bootstrap.ssid}" in text
     assert f"password = {cfg.hotspot_bootstrap.password}" in text
+
+
+# ---------------------------------------------------------------------------
+# Phase 8.10 — WiFi provisioning (/astromech_wlan.conf)
+# ---------------------------------------------------------------------------
+
+def test_wlan_conf_written_when_both_creds_set(fake_boot_partition):
+    """When wifi_ssid and wifi_psk are set, /astromech_wlan.conf is written."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert fake_boot_partition.exists("/astromech_wlan.conf")
+
+
+def test_wlan_conf_content_correct(fake_boot_partition):
+    """Written /astromech_wlan.conf has exact SSID=...\nPSK=...\n format."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="MySSID", wifi_psk="mypassword")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
+    assert content == b"SSID=MySSID\nPSK=mypassword\n"
+
+
+def test_wlan_conf_not_written_when_both_none(fake_boot_partition):
+    """When both wifi_ssid and wifi_psk are None (default), no file is written."""
+    pair = generate_ed25519()
+    cfg = _cfg()  # no wifi_ssid, no wifi_psk
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert not fake_boot_partition.exists("/astromech_wlan.conf")
+
+
+def test_wlan_conf_not_written_when_both_empty(fake_boot_partition):
+    """When both wifi_ssid and wifi_psk are empty strings, no file is written."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="", wifi_psk="")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert not fake_boot_partition.exists("/astromech_wlan.conf")
+
+
+def test_self_validate_passes_with_wlan_creds(fake_boot_partition):
+    """_self_validate does not raise when wlan creds are set and file exists."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
+    # Should complete without raising
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert fake_boot_partition.exists("/ASTROMECH_FIRSTBOOT_READY")
+
+
+def test_self_validate_passes_without_wlan_creds(fake_boot_partition):
+    """_self_validate does not raise when no wlan creds — file correctly absent."""
+    pair = generate_ed25519()
+    cfg = _cfg()
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert fake_boot_partition.exists("/ASTROMECH_FIRSTBOOT_READY")
+
+
+def test_wlan_conf_written_for_slave_role(fake_boot_partition):
+    """WiFi conf is role-agnostic — slave also gets the file when creds are set."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
+    assert fake_boot_partition.exists("/astromech_wlan.conf")
+    content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
+    assert content == b"SSID=HomeNet\nPSK=secret12\n"

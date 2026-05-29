@@ -51,3 +51,43 @@ class ImageRef:
     path: Path
     detected_format: str         # "raw" | "xz" | "gz" | "zip"
     uncompressed_size: int | None
+
+
+from astromechos_imager.core import validators as _v  # noqa: E402
+
+
+@dataclass(frozen=True)
+class FirstbootConfig:
+    """Per design spec §6.1.
+
+    Validation runs in __post_init__ — the same validators are also used by the
+    UI's preflight pass so users get immediate feedback in step 4.
+    """
+    authorized_keys: list[str]
+    install_user: str = "pi"
+    repo_url: str | None = None
+    repo_branch: str = "main"
+    hostname_master: str = "astromech-master"
+    hostname_slave: str = "astromech-slave"
+    hw_layout_master: Path | None = None
+    hw_layout_slave: Path | None = None
+    hotspot_bootstrap: HotspotBootstrap | None = None
+    # Auto-managed by orchestrator — empty defaults exist for unit tests only.
+    imager_version: str = ""
+    flashed_at_iso: str = ""
+
+    def __post_init__(self) -> None:
+        _v.validate_authorized_keys(self.authorized_keys)
+        _v.validate_install_user(self.install_user)
+        _v.validate_hostname(self.hostname_master)
+        _v.validate_hostname(self.hostname_slave)
+        if self.hostname_master == self.hostname_slave:
+            raise _v.InvalidHostnameError(
+                "master and slave hostnames must differ"
+            )
+        if self.repo_url is not None:
+            _v.validate_repo_url(self.repo_url)
+            _v.validate_branch_name(self.repo_branch)
+        if self.hotspot_bootstrap is not None:
+            _v.validate_ssid(self.hotspot_bootstrap.ssid)
+            _v.validate_wpa2_psk(self.hotspot_bootstrap.password)

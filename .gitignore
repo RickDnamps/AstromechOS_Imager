@@ -28,3 +28,8 @@ dist/
 tests/poc/*.img
 tests/poc/*.ext4
 /tmp/
+
+# E2E test fixtures (rebuildable via tests/fixtures/make_pi_os_fixture.py)
+tests/fixtures/*.img
+tests/fixtures/*.ext4
+tests/fixtures/*.fat32

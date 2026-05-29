@@ -25,24 +25,27 @@ def splash_asset_path() -> Path:
     return Path(__file__).resolve().parent / "resources" / "images" / "startup_screen_final.png"
 
 
-def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine]:
-    """Construct the QApplication + QML engine. Used by main() and tests."""
+def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, "WizardState"]:
+    """Construct the QApplication + QML engine + WizardState. Used by main() and tests."""
+    from astromechos_imager.ui.wizard_state import WizardState
+
     # Reuse existing instance if pytest-qt already created one
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     app.setApplicationName(M["app_title"])
     sys.excepthook = _excepthook
 
+    state = WizardState()
     engine = QQmlApplicationEngine()
-    engine.rootContext().setContextProperty(
-        "splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path()))
-    )
+    ctx = engine.rootContext()
+    ctx.setContextProperty("splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path())))
+    ctx.setContextProperty("wizardState", state)
     qml_main = Path(__file__).resolve().parent / "qml" / "main.qml"
     engine.load(QUrl.fromLocalFile(str(qml_main)))
-    return app, engine
+    return app, engine, state
 
 
 def main() -> int:
-    app, _engine = build_app()
+    app, _engine, _state = build_app()
     return app.exec()
 
 

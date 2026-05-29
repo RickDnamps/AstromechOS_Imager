@@ -10,11 +10,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_build_app_returns_app_and_engine(qtbot):
+def test_build_app_returns_app_engine_and_state(qtbot):
     from astromechos_imager.ui.app import build_app
-    app, engine = build_app()
+    from astromechos_imager.ui.wizard_state import WizardState
+    app, engine, state = build_app()
     assert app is not None
     assert engine.rootObjects(), "main.qml failed to load"
+    assert isinstance(state, WizardState)
+    assert state.currentStep == 1
 
 
 def test_splash_asset_path_resolves_in_dev():
@@ -28,7 +31,7 @@ def test_splash_asset_context_property_set(qtbot):
     """The QML engine must receive splashImageUrl before main.qml loads."""
     from PySide6.QtCore import QUrl
     from astromechos_imager.ui.app import build_app, splash_asset_path
-    app, engine = build_app()
+    app, engine, state = build_app()
     val = engine.rootContext().contextProperty("splashImageUrl")
     assert isinstance(val, QUrl)
     assert val.isLocalFile()
@@ -38,6 +41,15 @@ def test_splash_asset_context_property_set(qtbot):
 
 def test_window_title_is_astromechos(qtbot):
     from astromechos_imager.ui.app import build_app
-    app, engine = build_app()
+    app, engine, state = build_app()
     root = engine.rootObjects()[0]
     assert root.property("title") == "AstromechOS Imager"
+
+
+def test_wizard_state_context_property(qtbot):
+    from astromechos_imager.ui.app import build_app
+    from astromechos_imager.ui.wizard_state import WizardState
+    app, engine, state = build_app()
+    ctx_state = engine.rootContext().contextProperty("wizardState")
+    assert isinstance(ctx_state, WizardState)
+    assert ctx_state is state

@@ -10,8 +10,33 @@ from typing import Callable
 from astromechos_imager.core.bootpartition import (
     BootPartitionLayout,
     find_first_fat32_partition,
+    open_boot_partition as _open_boot_partition_impl,
 )
-from astromechos_imager.core.bootpartition import open_boot_partition as _bootpartition_open
+
+
+def _bootpartition_open(
+    raw_device_path: str,
+    mbr_bytes: bytes,
+    known_letters_before: set[str],
+) -> "object | None":
+    """Parse the MBR, find the FAT32 partition, and open it.
+
+    Returns None if no FAT32 partition is found (so callers can skip customize).
+    This is the single monkeypatching point for tests.
+
+    NOTE: Phase 5.5 rootfs personalization uses a separate parallel symbol;
+    this function only handles the boot (FAT32) partition step.
+    """
+    from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
+    try:
+        layout = find_first_fat32_partition(mbr_bytes)
+    except BootPartitionMountError:
+        return None
+    return _open_boot_partition_impl(
+        raw_device_path=raw_device_path,
+        layout=layout,
+        known_letters_before=known_letters_before,
+    )
 from astromechos_imager.core.customization import FirstbootBundle
 from astromechos_imager.core.diskwriter import (
     DiskWriter,
@@ -69,10 +94,9 @@ class FlashJob:
                 if not self.skip_customize:
                     self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
                     mbr = dev.read(0, 512)
-                    layout = find_first_fat32_partition(mbr)
                     bp = _bootpartition_open(
                         raw_device_path=self.target.device_path,
-                        layout=layout,
+                        mbr_bytes=mbr,
                         known_letters_before=set(),
                     )
                     if bp is not None:

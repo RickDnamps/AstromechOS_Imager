@@ -41,14 +41,14 @@ Rectangle {
     readonly property bool _hover:   hoverArea.containsMouse && card.enabledLook
     readonly property bool _pressed: hoverArea.pressed       && card.enabledLook
 
-    color: card.selected ? Theme.colorSurfaceAccent
-         : card._pressed ? Theme.colorBg
-         : card._hover   ? Theme.colorSurface2
-         :                  Theme.colorSurface
+    color: card.selected ? theme.colors.colorSurfaceAccent
+         : card._pressed ? theme.colors.colorBg
+         : card._hover   ? theme.colors.colorSurface2
+         :                  theme.colors.colorSurface
 
-    border.color: card.selected ? Theme.colorBorderAccent
-                : card._hover   ? Theme.colorBorderHover
-                :                  Theme.colorBorderIdle
+    border.color: card.selected ? theme.colors.colorBorderAccent
+                : card._hover   ? theme.colors.colorBorderHover
+                :                  theme.colors.colorBorderIdle
 
     // Subtle scale lift on hover — micro-interaction
     scale: card._pressed ? 0.985
@@ -93,7 +93,7 @@ Rectangle {
         anchors.leftMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         radius: 1.5
-        color: card.selected ? Theme.colorAccent : "transparent"
+        color: card.selected ? theme.colors.colorAccent : "transparent"
         opacity: card.selected ? 1.0 : 0.0
         Behavior on opacity { NumberAnimation { duration: Theme.durBase } }
 
@@ -103,7 +103,7 @@ Rectangle {
             width: parent.width + 6
             height: parent.height
             radius: 4
-            color: Theme.colorAccentGlow
+            color: theme.colors.colorAccentGlow
             opacity: card.selected ? 0.22 : 0
             Behavior on opacity { NumberAnimation { duration: Theme.durBase } }
             z: -1
@@ -137,7 +137,7 @@ Rectangle {
 
             Text {
                 text: card.title
-                color: Theme.colorTextPrimary
+                color: theme.colors.colorTextPrimary
                 font.family: Theme.fontTitle
                 font.pixelSize: 15
                 font.bold: true
@@ -148,7 +148,7 @@ Rectangle {
             Text {
                 text: card.subtitle
                 visible: card.subtitle.length > 0
-                color: card.selected ? Theme.colorTextAccent : Theme.colorTextSecondary
+                color: card.selected ? theme.colors.colorTextAccent : theme.colors.colorTextSecondary
                 font.family: Theme.fontBody
                 font.pixelSize: 12
                 Layout.fillWidth: true
@@ -163,7 +163,7 @@ Rectangle {
             Layout.preferredHeight: 10
             Layout.alignment: Qt.AlignVCenter
             radius: 5
-            color: card.selected ? Theme.colorAccent : Theme.colorBorderIdle
+            color: card.selected ? theme.colors.colorAccent : theme.colors.colorBorderIdle
             opacity: card.selected || card._hover ? 1.0 : 0.55
             Behavior on color   { ColorAnimation  { duration: Theme.durFast } }
             Behavior on opacity { NumberAnimation { duration: Theme.durFast } }

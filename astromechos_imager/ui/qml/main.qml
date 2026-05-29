@@ -12,34 +12,34 @@ ApplicationWindow {
     minimumHeight: 560
     visible: true
     title: "AstromechOS Imager"
-    color: Theme.colorBg
+    color: theme.colors.colorBg
     // Frameless: no native title bar — we draw our own header.
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    // Step labels: index 0 = splash; 1..6 mirror WizardState.currentStep.
+    // Step labels: index 0 = splash; 1..5 mirror WizardState.currentStep.
+    // (Zero-Touch: step 4 "Customize" is gone — SSH keys are auto-injected.)
     readonly property var stepLabels: [
         "WELCOME",
         "01 / MODE",
         "02 / IMAGES",
         "03 / STORAGE",
-        "04 / CUSTOMIZE",
-        "05 / CONFIRM & FLASH",
-        "06 / COMPLETE",
+        "04 / CONFIRM & FLASH",
+        "05 / COMPLETE",
     ]
-    // -1 while splash is showing, 0..5 = currentStep-1 once advanced.
+    // -1 while splash is showing, 0..4 = currentStep-1 once advanced.
     property int displayedStepIdx: -1
 
     // ── Custom header (drag region + controls) ────────────────────────
     header: Rectangle {
         id: headerBar
         height: 60
-        color: Theme.colorHeader
+        color: theme.colors.colorHeader
 
         // Hairline bottom border
         Rectangle {
             anchors.left: parent.left; anchors.right: parent.right
             anchors.bottom: parent.bottom
-            height: 1; color: Theme.colorDivider
+            height: 1; color: theme.colors.colorDivider
         }
 
         // Drag handler covers the whole bar — children that intercept
@@ -61,14 +61,14 @@ ApplicationWindow {
             Rectangle {
                 width: 30; height: 30; radius: 15
                 color: "transparent"
-                border.color: Theme.colorAccent
+                border.color: theme.colors.colorAccent
                 border.width: 1.5
                 Layout.alignment: Qt.AlignVCenter
                 // Inner dot — "active LED"
                 Rectangle {
                     anchors.centerIn: parent
                     width: 8; height: 8; radius: 4
-                    color: Theme.colorAccent
+                    color: theme.colors.colorAccent
                 }
                 SequentialAnimation on opacity {
                     loops: Animation.Infinite
@@ -82,7 +82,7 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignVCenter
                 Text {
                     text: "ASTROMECHOS IMAGER"
-                    color: Theme.colorTextPrimary
+                    color: theme.colors.colorTextPrimary
                     font.family: Theme.fontTitle
                     font.pixelSize: 13
                     font.bold: true
@@ -90,7 +90,7 @@ ApplicationWindow {
                 }
                 Text {
                     text: root.displayedStepIdx >= 0 ? root.stepLabels[root.displayedStepIdx + 1] : root.stepLabels[0]
-                    color: Theme.colorTextAccent
+                    color: theme.colors.colorTextAccent
                     font.family: Theme.fontSubtitle
                     font.pixelSize: 10
                     font.letterSpacing: 1.8
@@ -104,7 +104,7 @@ ApplicationWindow {
                 spacing: 8
                 visible: root.displayedStepIdx >= 0
                 Repeater {
-                    model: 6
+                    model: 5
                     delegate: Item {
                         width: 18; height: 18
                         Rectangle {
@@ -115,10 +115,10 @@ ApplicationWindow {
                             width: isActive ? 14 : 9
                             height: width
                             radius: width / 2
-                            color: isActive    ? Theme.colorAccent
-                                 : isCompleted ? Theme.colorAccentDim
-                                 :                Theme.colorDivider
-                            border.color: isActive ? Theme.colorAccentBright : "transparent"
+                            color: isActive    ? theme.colors.colorAccent
+                                 : isCompleted ? theme.colors.colorAccentDim
+                                 :                theme.colors.colorDivider
+                            border.color: isActive ? theme.colors.colorAccentBright : "transparent"
                             border.width: isActive ? 1 : 0
                             Behavior on color  { ColorAnimation  { duration: Theme.durBase } }
                             Behavior on width  { NumberAnimation { duration: Theme.durBase; easing.type: Easing.OutCubic } }
@@ -130,7 +130,7 @@ ApplicationWindow {
                             width: dot.isActive ? 22 : 0
                             height: width
                             radius: width / 2
-                            color: Theme.colorAccent
+                            color: theme.colors.colorAccent
                             opacity: dot.isActive ? 0.22 : 0
                             Behavior on opacity { NumberAnimation { duration: Theme.durBase } }
                             Behavior on width   { NumberAnimation { duration: Theme.durBase } }
@@ -141,6 +141,13 @@ ApplicationWindow {
             }
 
             Item { Layout.preferredWidth: 16 }   // separator
+
+            // ── Theme toggle (sun/moon) ──────────────────────────────
+            WindowCtrlButton {
+                Layout.alignment: Qt.AlignVCenter
+                glyph: theme.mode === "light" ? "☾" : "☀"
+                onActivated: theme.toggle()
+            }
 
             // ── Window controls ──────────────────────────────────────
             Row {
@@ -166,10 +173,10 @@ ApplicationWindow {
     // ── Custom footer ────────────────────────────────────────────────
     footer: Rectangle {
         height: 28
-        color: Theme.colorHeader
+        color: theme.colors.colorHeader
         Rectangle {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            height: 1; color: Theme.colorDivider
+            height: 1; color: theme.colors.colorDivider
         }
         RowLayout {
             anchors.fill: parent
@@ -177,7 +184,7 @@ ApplicationWindow {
             anchors.rightMargin: 16
             Text {
                 text: "v" + appVersion + " · BUILD READY"
-                color: Theme.colorTextTertiary
+                color: theme.colors.colorTextTertiary
                 font.family: Theme.fontSubtitle
                 font.pixelSize: 9
                 font.letterSpacing: 1.5
@@ -185,7 +192,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Text {
                 text: "ASTROMECHOS © 2026 · GPLv3"
-                color: Theme.colorTextTertiary
+                color: theme.colors.colorTextTertiary
                 font.family: Theme.fontSubtitle
                 font.pixelSize: 9
                 font.letterSpacing: 1.5
@@ -205,9 +212,8 @@ ApplicationWindow {
     Component { id: step1Component; Step1Mode {} }
     Component { id: step2Component; Step2Images {} }
     Component { id: step3Component; Step3Storage {} }
-    Component { id: step4Component; Step4Customize {} }
-    Component { id: step5Component; Step5Flash {} }
-    Component { id: step6Component; Step6Done {} }
+    Component { id: step4Component; Step4Flash {} }
+    Component { id: step5Component; Step5Done {} }
 
     function _componentForStep(s) {
         switch (s) {
@@ -216,7 +222,6 @@ ApplicationWindow {
             case 3: return step3Component;
             case 4: return step4Component;
             case 5: return step5Component;
-            case 6: return step6Component;
             default: return step1Component;
         }
     }
@@ -273,7 +278,7 @@ ApplicationWindow {
             model: 2
             delegate: Rectangle {
                 width: 1.5; height: 1.5; radius: 0.75
-                color: Theme.colorTextTertiary
+                color: theme.colors.colorTextTertiary
                 x: 6 + index * 4
                 y: 6 + index * 4
             }

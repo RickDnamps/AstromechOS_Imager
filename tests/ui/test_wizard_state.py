@@ -44,7 +44,8 @@ def test_next_clamps_at_max(qtbot):
     s = WizardState()
     for _ in range(10):
         s.next()
-    assert s.currentStep == 6
+    # Zero-Touch wizard has 5 steps (Mode/Images/Storage/Flash/Done).
+    assert s.currentStep == 5
 
 
 def test_goto_valid_range(qtbot):
@@ -58,7 +59,7 @@ def test_goto_out_of_range_noop(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.goto(0)
-    s.goto(7)
+    s.goto(6)   # one past MAX_STEP=5
     s.goto(-1)
     assert s.currentStep == 1
 
@@ -218,67 +219,10 @@ def test_set_slave_rejects_same_as_master(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# Task 8.6 — Step 4 Customize fields
+# Zero-Touch — SSH key flow is fully automatic. WizardState no longer
+# exposes authorizedKeys / hasValidAuthorizedKey / reusePairKey. Those tests
+# moved to tests/core/test_customization.py (per-role bundle validation).
 # ---------------------------------------------------------------------------
-
-def test_authorized_keys_default_empty(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.authorizedKeys == ""
-
-
-def test_set_authorized_keys_emits_signal(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    received = []
-    s.authorizedKeysChanged.connect(lambda v: received.append(v))
-    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")
-    assert s.authorizedKeys == "ssh-ed25519 AAAA... user@host"
-    assert received == ["ssh-ed25519 AAAA... user@host"]
-
-
-def test_set_authorized_keys_same_value_no_signal(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")
-    received = []
-    s.authorizedKeysChanged.connect(lambda v: received.append(v))
-    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")  # same — no signal
-    assert received == []
-
-
-def test_has_valid_authorized_key_valid_ed25519(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    # Use a syntactically valid ed25519 key format
-    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@host"
-    assert s.hasValidAuthorizedKey(key) is True
-
-
-def test_has_valid_authorized_key_valid_rsa(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC user@example"
-    assert s.hasValidAuthorizedKey(key) is True
-
-
-def test_has_valid_authorized_key_empty_returns_false(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.hasValidAuthorizedKey("") is False
-
-
-def test_has_valid_authorized_key_garbage_returns_false(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.hasValidAuthorizedKey("not-a-key") is False
-
-
-def test_has_valid_authorized_key_multiline_with_one_valid(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    txt = "# comment\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@host\n"
-    assert s.hasValidAuthorizedKey(txt) is True
 
 
 def test_hostname_master_default(qtbot):
@@ -328,21 +272,6 @@ def test_set_repo_url_emits(qtbot):
     assert s.repoUrl == "https://github.com/user/AstromechOS.git"
     assert received == ["https://github.com/user/AstromechOS.git"]
 
-
-def test_reuse_pair_key_default_false(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.reusePairKey is False
-
-
-def test_set_reuse_pair_key_emits(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    received = []
-    s.reusePairKeyChanged.connect(lambda v: received.append(v))
-    s.setReusePairKey(True)
-    assert s.reusePairKey is True
-    assert received == [True]
 
 
 def test_reuse_hotspot_default_false(qtbot):

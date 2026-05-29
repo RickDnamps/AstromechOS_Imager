@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import "Theme.js" as Theme
 
 Rectangle {
-    color: Theme.colorBg
+    color: theme.colors.colorBg
 
     property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
     property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
@@ -23,12 +23,12 @@ Rectangle {
             // Success indicator — filled cyan circle with a check mark.
             Rectangle {
                 width: 44; height: 44; radius: 22
-                color: Theme.colorAccent
+                color: theme.colors.colorAccent
                 Layout.alignment: Qt.AlignVCenter
                 Text {
                     anchors.centerIn: parent
                     text: "✓"
-                    color: Theme.colorTextOnAccent
+                    color: theme.colors.colorTextOnAccent
                     font.family: Theme.fontTitle
                     font.pixelSize: 22
                     font.bold: true
@@ -37,7 +37,7 @@ Rectangle {
                 Rectangle {
                     anchors.centerIn: parent
                     width: 60; height: 60; radius: 30
-                    color: Theme.colorAccent
+                    color: theme.colors.colorAccent
                     opacity: 0.18
                     z: -1
                     SequentialAnimation on opacity {
@@ -53,7 +53,7 @@ Rectangle {
                 Layout.alignment: Qt.AlignVCenter
                 Text {
                     text: "COMPLETE"
-                    color: Theme.colorTextPrimary
+                    color: theme.colors.colorTextPrimary
                     font.family: Theme.fontTitle
                     font.pixelSize: 22
                     font.bold: true
@@ -63,7 +63,7 @@ Rectangle {
                     text: needMaster && needSlave
                         ? "Both AstromechOS SD cards have been flashed."
                         : "Your AstromechOS SD card has been flashed."
-                    color: Theme.colorTextSecondary
+                    color: theme.colors.colorTextSecondary
                     font.family: Theme.fontBody
                     font.pixelSize: 13
                 }
@@ -74,8 +74,8 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 232
-            color: Theme.colorSurface
-            border.color: Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderIdle
             border.width: 1
             radius: Theme.radiusCard
 
@@ -93,7 +93,7 @@ Rectangle {
 
                 Text {
                     text: "NEXT STEPS"
-                    color: Theme.colorTextAccent
+                    color: theme.colors.colorTextAccent
                     font.family: Theme.fontTitle
                     font.pixelSize: 11
                     font.bold: true
@@ -115,12 +115,12 @@ Rectangle {
                             Layout.preferredWidth: 22; Layout.preferredHeight: 22
                             radius: 11
                             color: "transparent"
-                            border.color: Theme.colorBorderAccent
+                            border.color: theme.colors.colorBorderAccent
                             border.width: 1
                             Text {
                                 anchors.centerIn: parent
                                 text: (index + 1).toString()
-                                color: Theme.colorAccent
+                                color: theme.colors.colorAccent
                                 font.family: Theme.fontTitle
                                 font.pixelSize: 10
                                 font.bold: true
@@ -128,7 +128,7 @@ Rectangle {
                         }
                         Text {
                             text: modelData
-                            color: Theme.colorTextPrimary
+                            color: theme.colors.colorTextPrimary
                             font.family: Theme.fontBody
                             font.pixelSize: 13
                             Layout.fillWidth: true

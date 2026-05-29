@@ -1,7 +1,8 @@
 """Capture one PNG per wizard step into screenshots/ — for design review.
 
-Forces fake wizard state so Steps 2-6 render with realistic content even
-without SD cards / real images present. Run from project root:
+Forces fake wizard state so Steps 2-5 render with realistic content even
+without SD cards / real images present. Captures both Dark and Light
+themes back-to-back (sun/moon toggle wiring). Run from project root:
 
     .venv\\Scripts\\python.exe scripts\\ui_tour.py
 
@@ -13,7 +14,6 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QGuiApplication
 
 # Make the package importable when run as a loose script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,7 +29,7 @@ def main() -> int:
     window = engine.rootObjects()[0]
     window.show()
 
-    # Seed realistic state so downstream steps aren't empty.
+    # Seed realistic wizard state — Zero-Touch dropped Step 4 / authorizedKeys.
     state.setMode("both")
     state.setMasterImagePath(r"C:\images\astromechos-master-2026-05-29.img.xz")
     state.setSlaveImagePath(r"C:\images\astromechos-slave-2026-05-29.img.xz")
@@ -37,25 +37,32 @@ def main() -> int:
     state.setSlaveDriveId(3)
     state.setHostnameMaster("astromech-master")
     state.setHostnameSlave("astromech-slave")
-    state.setAuthorizedKeys(
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey0123456789 eric@workstation"
-    )
     state.setRepoUrl("https://github.com/RickDnamps/AstromechOS")
     state.setWifiSsid("HomeNetwork")
     state.setWifiPsk("hunter2")
 
     # Splash auto-advances via a 1500 ms Timer inside main.qml — wait it
-    # out for the step-1 capture instead of fighting it. For 2-6 we drive
-    # navigation explicitly via WizardState.goto().
-    plan = [
-        ("00-splash",     None,   200),   # captured during the splash
-        ("01-mode",       None,  1800),   # let the splash timer fire
-        ("02-images",     2,      700),
-        ("03-storage",    3,      700),
-        ("04-customize",  4,      700),
-        ("05-flash",      5,      700),
-        ("06-done",       6,      700),
+    # out for the step-1 capture instead of fighting it. For 2-5 we drive
+    # navigation explicitly via WizardState.goto(). We capture each step
+    # in dark mode, then re-walk in light mode.
+    base_plan = [
+        ("00-splash",   None,   200),   # captured during the splash
+        ("01-mode",     None,  1800),   # let the splash timer fire
+        ("02-images",      2,   700),
+        ("03-storage",     3,   700),
+        ("04-flash",       4,   700),
+        ("05-done",        5,   700),
     ]
+    themes = ["dark", "light"]
+
+    # Resolve the ThemeManager — exposed as a Python QObject via the
+    # context, but also kept alive by build_app() on engine.themeManager.
+    theme_mgr = getattr(engine, "themeManager", None)
+
+    plan = []
+    for theme_name in themes:
+        for name, step, settle in base_plan:
+            plan.append((f"{theme_name}/{name}", theme_name, step, settle))
 
     idx = {"i": 0}
 
@@ -64,14 +71,21 @@ def main() -> int:
         if i >= len(plan):
             app.quit()
             return
-        name, target_step, settle_ms = plan[i]
+        name, theme_name, target_step, settle_ms = plan[i]
+        if theme_mgr is not None:
+            theme_mgr.setMode(theme_name)
+        # Reset wizard back to step 1 between themes so the splash logic
+        # is consistent.
+        if name.endswith("00-splash") and i > 0:
+            state.goto(1)   # ensure fresh navigation surface
         if target_step is not None:
             state.goto(target_step)
         QTimer.singleShot(settle_ms, lambda: capture(name))
 
     def capture(name: str):
-        img = window.grabWindow()
         out = OUT / f"{name}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        img = window.grabWindow()
         img.save(str(out))
         print(f"saved {out.relative_to(OUT.parent)}  ({img.width()}x{img.height()})")
         idx["i"] += 1

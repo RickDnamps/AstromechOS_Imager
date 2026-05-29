@@ -40,38 +40,38 @@ Button {
 
     // ── Derived colors per variant + state ────────────────────────────
     readonly property color _bgIdle:
-        variant === "primary"   ? Theme.colorAccent
-      : variant === "danger"    ? Theme.colorBorderError
-      : selected                ? Theme.colorSurfaceAccent
+        variant === "primary"   ? theme.colors.colorAccent
+      : variant === "danger"    ? theme.colors.colorBorderError
+      : selected                ? theme.colors.colorSurfaceAccent
       :                            "transparent"
 
     readonly property color _bgHover:
-        variant === "primary"   ? Theme.colorAccentBright
-      : variant === "danger"    ? Qt.lighter(Theme.colorBorderError, 1.10)
-      : selected                ? Qt.lighter(Theme.colorSurfaceAccent, 1.15)
-      :                            Theme.colorSurface2
+        variant === "primary"   ? theme.colors.colorAccentBright
+      : variant === "danger"    ? Qt.lighter(theme.colors.colorBorderError, 1.10)
+      : selected                ? Qt.lighter(theme.colors.colorSurfaceAccent, 1.15)
+      :                            theme.colors.colorSurface2
 
     readonly property color _bgPressed:
-        variant === "primary"   ? Theme.colorAccentDim
-      : variant === "danger"    ? Qt.darker(Theme.colorBorderError, 1.10)
-      :                            Theme.colorBg
+        variant === "primary"   ? theme.colors.colorAccentDim
+      : variant === "danger"    ? Qt.darker(theme.colors.colorBorderError, 1.10)
+      :                            theme.colors.colorBg
 
     readonly property color _borderIdle:
-        variant === "primary"   ? Theme.colorAccent
-      : variant === "danger"    ? Theme.colorBorderError
-      : selected                ? Theme.colorBorderAccent
-      :                            Theme.colorBorderIdle
+        variant === "primary"   ? theme.colors.colorAccent
+      : variant === "danger"    ? theme.colors.colorBorderError
+      : selected                ? theme.colors.colorBorderAccent
+      :                            theme.colors.colorBorderIdle
 
     readonly property color _borderHover:
-        variant === "primary"   ? Theme.colorAccentBright
-      : variant === "danger"    ? Qt.lighter(Theme.colorBorderError, 1.20)
-      :                            Theme.colorBorderAccent
+        variant === "primary"   ? theme.colors.colorAccentBright
+      : variant === "danger"    ? Qt.lighter(theme.colors.colorBorderError, 1.20)
+      :                            theme.colors.colorBorderAccent
 
     readonly property color _fgIdle:
-        variant === "primary"   ? Theme.colorTextOnAccent
-      : variant === "danger"    ? Theme.colorTextPrimary
-      : selected                ? Theme.colorAccent
-      :                            Theme.colorAccent
+        variant === "primary"   ? theme.colors.colorTextOnAccent
+      : variant === "danger"    ? theme.colors.colorTextPrimary
+      : selected                ? theme.colors.colorAccent
+      :                            theme.colors.colorAccent
 
     background: Rectangle {
         radius: Theme.radiusButton
@@ -87,7 +87,7 @@ Button {
         Rectangle {
             anchors.fill: parent
             radius: parent.radius
-            color: btn.variant === "danger" ? Theme.colorBorderError : Theme.colorAccent
+            color: btn.variant === "danger" ? theme.colors.colorBorderError : theme.colors.colorAccent
             opacity: btn.hovered && btn.enabled && (btn.variant === "primary" || btn.variant === "danger") ? 0.28 : 0
             z: -1
             Behavior on opacity { NumberAnimation { duration: Theme.durFast } }
@@ -105,7 +105,7 @@ Button {
     contentItem: Text {
         text: btn.text
         font: btn.font
-        color: btn.enabled ? btn._fgIdle : Theme.colorTextTertiary
+        color: btn.enabled ? btn._fgIdle : theme.colors.colorTextTertiary
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight

@@ -5,15 +5,20 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
 class WizardState(QObject):
-    """Tracks the current wizard step (1–6) and exposes navigation slots.
+    """Tracks the current wizard step (1–5) and exposes navigation slots.
 
-    Steps:
+    Steps (Zero-Touch):
         1 — Mode (flash both / master only / slave only)
         2 — Images (browse source .img/.xz/.gz/.zip per role)
         3 — Storage (pick target SD card per role)
-        4 — Customize (authorized_keys + advanced)
-        5 — Confirm & Flash (summary, big red WRITE button, progress)
-        6 — Done (recap + next steps)
+        4 — Confirm & Flash (summary, big red WRITE button, progress)
+        5 — Done (recap + next steps)
+
+    SSH key handling is fully automatic (no user input required): the
+    Imager generates a Master↔Slave keypair on each flash session, drops
+    the private half on the Master's boot partition and the matching
+    public half into the Slave's authorized_keys. PC↔Master access is
+    handled at first login by the operator (password or own ssh-copy-id).
     """
     currentStepChanged = Signal(int)
     modeChanged = Signal(str)
@@ -21,17 +26,15 @@ class WizardState(QObject):
     slaveImagePathChanged = Signal(str)
     masterDriveIdChanged = Signal(int)
     slaveDriveIdChanged = Signal(int)
-    authorizedKeysChanged = Signal(str)
     hostnameMasterChanged = Signal(str)
     hostnameSlaveChanged = Signal(str)
     repoUrlChanged = Signal(str)
-    reusePairKeyChanged = Signal(bool)
     reuseHotspotChanged = Signal(bool)
     wifiSsidChanged = Signal(str)
     wifiPskChanged = Signal(str)
 
     MIN_STEP = 1
-    MAX_STEP = 6
+    MAX_STEP = 5
 
     MODE_BOTH = "both"
     MODE_MASTER_ONLY = "master_only"
@@ -48,11 +51,9 @@ class WizardState(QObject):
         self._slave_image_path = ""
         self._master_drive_id = -1
         self._slave_drive_id = -1
-        self._authorized_keys = ""
         self._hostname_master = "astromech-master"
         self._hostname_slave = "astromech-slave"
         self._repo_url = ""
-        self._reuse_pair_key = False
         self._reuse_hotspot = False
         self._wifi_ssid = ""
         self._wifi_psk = ""
@@ -178,28 +179,10 @@ class WizardState(QObject):
             pass  # collision — silently ignore
 
     # ------------------------------------------------------------------
-    # Step 4 — Customize
+    # Defaults (hostnames / fork URL / Wi-Fi) — internal, no UI surface.
+    # Kept as properties so future Settings panels can hook in without a
+    # data-model change.
     # ------------------------------------------------------------------
-
-    @Property(str, notify=authorizedKeysChanged)
-    def authorizedKeys(self) -> str:
-        return self._authorized_keys
-
-    @Slot(str)
-    def setAuthorizedKeys(self, txt: str) -> None:
-        if txt != self._authorized_keys:
-            self._authorized_keys = txt
-            self.authorizedKeysChanged.emit(txt)
-
-    @Slot(str, result=bool)
-    def hasValidAuthorizedKey(self, txt: str) -> bool:
-        """True if at least one line matches the OpenSSH pubkey regex."""
-        from astromechos_imager.core.validators import OPENSSH_PUBKEY_RE
-        for line in txt.splitlines():
-            s = line.strip()
-            if s and OPENSSH_PUBKEY_RE.match(s):
-                return True
-        return False
 
     @Property(str, notify=hostnameMasterChanged)
     def hostnameMaster(self) -> str:
@@ -231,16 +214,6 @@ class WizardState(QObject):
             self._repo_url = val
             self.repoUrlChanged.emit(val)
 
-    @Property(bool, notify=reusePairKeyChanged)
-    def reusePairKey(self) -> bool:
-        return self._reuse_pair_key
-
-    @Slot(bool)
-    def setReusePairKey(self, val: bool) -> None:
-        if val != self._reuse_pair_key:
-            self._reuse_pair_key = val
-            self.reusePairKeyChanged.emit(val)
-
     @Property(bool, notify=reuseHotspotChanged)
     def reuseHotspot(self) -> bool:
         return self._reuse_hotspot
@@ -252,7 +225,7 @@ class WizardState(QObject):
             self.reuseHotspotChanged.emit(val)
 
     # ------------------------------------------------------------------
-    # Step 4 — Wi-Fi (optional, wlan1 home network) — Phase 8.10
+    # Wi-Fi (optional, wlan1 home network) — Phase 8.10
     # ------------------------------------------------------------------
 
     @Property(str, notify=wifiSsidChanged)

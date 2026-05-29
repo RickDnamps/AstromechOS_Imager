@@ -5,7 +5,7 @@ import Qt.labs.platform 1.1
 import "Theme.js" as Theme
 
 Rectangle {
-    color: Theme.colorBg
+    color: theme.colors.colorBg
 
     property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
     property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
@@ -30,7 +30,7 @@ Rectangle {
 
         Text {
             text: "SELECT SOURCE IMAGES"
-            color: Theme.colorTextPrimary
+            color: theme.colors.colorTextPrimary
             font.family: Theme.fontTitle
             font.pixelSize: 18
             font.bold: true
@@ -39,7 +39,7 @@ Rectangle {
         }
         Text {
             text: "Locate the .img / .img.xz / .img.gz files you extracted from each Pi 4B."
-            color: Theme.colorTextSecondary
+            color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
             Layout.bottomMargin: 4
@@ -51,8 +51,8 @@ Rectangle {
             Layout.fillWidth: true
             height: 92
             radius: Theme.radiusCard
-            color: Theme.colorSurface
-            border.color: wizardState.masterImagePath ? Theme.colorBorderAccent : Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: wizardState.masterImagePath ? theme.colors.colorBorderAccent : theme.colors.colorBorderIdle
             border.width: 1
             Behavior on border.color { ColorAnimation { duration: Theme.durBase } }
 
@@ -72,7 +72,7 @@ Rectangle {
                     spacing: 12
                     Text {
                         text: "MASTER IMAGE"
-                        color: Theme.colorTextPrimary
+                        color: theme.colors.colorTextPrimary
                         font.family: Theme.fontTitle
                         font.pixelSize: 12
                         font.bold: true
@@ -87,7 +87,7 @@ Rectangle {
                 }
                 Text {
                     text: wizardState.masterImagePath || "— no image selected —"
-                    color: wizardState.masterImagePath ? Theme.colorTextAccent : Theme.colorTextTertiary
+                    color: wizardState.masterImagePath ? theme.colors.colorTextAccent : theme.colors.colorTextTertiary
                     font.family: Theme.fontMono
                     font.pixelSize: 11
                     elide: Text.ElideMiddle
@@ -103,8 +103,8 @@ Rectangle {
             Layout.fillWidth: true
             height: 92
             radius: Theme.radiusCard
-            color: Theme.colorSurface
-            border.color: wizardState.slaveImagePath ? Theme.colorBorderAccent : Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: wizardState.slaveImagePath ? theme.colors.colorBorderAccent : theme.colors.colorBorderIdle
             border.width: 1
             Behavior on border.color { ColorAnimation { duration: Theme.durBase } }
 
@@ -123,7 +123,7 @@ Rectangle {
                     spacing: 12
                     Text {
                         text: "SLAVE IMAGE"
-                        color: Theme.colorTextPrimary
+                        color: theme.colors.colorTextPrimary
                         font.family: Theme.fontTitle
                         font.pixelSize: 12
                         font.bold: true
@@ -138,7 +138,7 @@ Rectangle {
                 }
                 Text {
                     text: wizardState.slaveImagePath || "— no image selected —"
-                    color: wizardState.slaveImagePath ? Theme.colorTextAccent : Theme.colorTextTertiary
+                    color: wizardState.slaveImagePath ? theme.colors.colorTextAccent : theme.colors.colorTextTertiary
                     font.family: Theme.fontMono
                     font.pixelSize: 11
                     elide: Text.ElideMiddle

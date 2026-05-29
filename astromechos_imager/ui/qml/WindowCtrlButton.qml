@@ -15,7 +15,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: hover.containsMouse
-            ? (btn.closeStyle ? Theme.colorBorderError : Theme.colorSurface2)
+            ? (btn.closeStyle ? theme.colors.colorBorderError : theme.colors.colorSurface2)
             : "transparent"
         Behavior on color { ColorAnimation { duration: Theme.durFast } }
     }
@@ -24,8 +24,8 @@ Item {
         anchors.centerIn: parent
         text: btn.glyph
         color: (hover.containsMouse && btn.closeStyle)
-            ? Theme.colorTextPrimary
-            : Theme.colorTextSecondary
+            ? theme.colors.colorTextPrimary
+            : theme.colors.colorTextSecondary
         font.family: Theme.fontSubtitle
         font.pixelSize: 14
         Behavior on color { ColorAnimation { duration: Theme.durFast } }

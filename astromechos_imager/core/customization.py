@@ -174,14 +174,22 @@ class FirstbootBundle:
             validate_hostname(obj["hostname"])
             keys_text = bp.read_bytes("/astromech_secrets/authorized_keys").decode("utf-8")  # type: ignore[union-attr]
             keys = [k.strip() for k in keys_text.splitlines() if k.strip()]
-            if not any(OPENSSH_PUBKEY_RE.match(k) for k in keys):
-                raise BundleSelfValidationFailedError("no valid OpenSSH key in authorized_keys")
             if role is Role.MASTER:
+                # Zero-Touch: authorized_keys on the Master may legitimately
+                # be empty — the operator authenticates by password at first
+                # login. Only the master keypair (used outbound, master→slave)
+                # is strictly required.
                 if not bp.exists("/astromech_secrets/id_ed25519"):  # type: ignore[union-attr]
                     raise BundleSelfValidationFailedError("master missing id_ed25519")
                 if not bp.exists("/astromech_secrets/id_ed25519.pub"):  # type: ignore[union-attr]
                     raise BundleSelfValidationFailedError("master missing id_ed25519.pub")
             if role is Role.SLAVE:
+                # Slave must hold the Master's pubkey, otherwise master→slave
+                # SSH never works — the whole Zero-Touch invariant.
+                if not any(OPENSSH_PUBKEY_RE.match(k) for k in keys):
+                    raise BundleSelfValidationFailedError(
+                        "slave authorized_keys missing valid OpenSSH key"
+                    )
                 master_pub_line = self.master_pair.public_openssh.decode().strip()
                 if not any(master_pub_line in k for k in keys):
                     raise BundleSelfValidationFailedError(

@@ -37,6 +37,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from astromechos_imager.ui.messages import M
 from astromechos_imager.ui.wizard_state import WizardState
 from astromechos_imager.ui.flash_view_model import FlashViewModel
+from astromechos_imager.ui.theme_manager import ThemeManager
 
 
 _QT_MSG_LEVEL = {
@@ -148,14 +149,17 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
 
     state = WizardState()
     flash_vm = FlashViewModel(state)
+    theme = ThemeManager()
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     ctx.setContextProperty("splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path())))
     ctx.setContextProperty("wizardState", state)
     ctx.setContextProperty("flashViewModel", flash_vm)
+    ctx.setContextProperty("theme", theme)
     from astromechos_imager import __version__ as _app_version
     ctx.setContextProperty("appVersion", _app_version)
     engine.flashViewModel = flash_vm   # keepalive
+    engine.themeManager = theme         # keepalive
 
     # Drive list model — Windows-only; tests inject their own
     if sys.platform == "win32":

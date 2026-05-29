@@ -182,21 +182,25 @@ def _build_flash_job(wizard_state, platform_io=None):
         from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
         from astromechos_imager.core.keygen import (
             generate_ed25519, generate_hotspot_bootstrap, generate_linux_account,
+            load_persisted_pair, save_persisted_pair,
         )
 
-        # Parse authorized_keys
-        keys = [
-            line.strip()
-            for line in wizard_state.authorizedKeys.splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
-
-        ed25519 = generate_ed25519()
+        # Zero-Touch: no user-pasted keys, ever. The Master↔Slave pair is
+        # auto-generated and persisted in %APPDATA% — reusing the same pair
+        # across runs lets the operator re-flash the Master alone without
+        # invalidating the existing Slave's authorized_keys.
+        existing = load_persisted_pair()
+        ed25519 = existing if existing is not None else generate_ed25519()
+        if existing is None:
+            # First run — persist the freshly-generated pair so future flashes
+            # (master_only, slave_only) reuse the same keys and keep the pair
+            # symmetric across cards.
+            save_persisted_pair(ed25519)
         hotspot = generate_hotspot_bootstrap()
         linux_account = generate_linux_account()
 
         firstboot = FirstbootConfig(
-            authorized_keys=keys,
+            authorized_keys=[],   # zero-touch: no operator keys injected
             hostname_master=wizard_state.hostnameMaster,
             hostname_slave=wizard_state.hostnameSlave,
             install_user=linux_account.username,

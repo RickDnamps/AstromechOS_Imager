@@ -10,44 +10,46 @@ pytestmark = pytest.mark.skipif(
 
 def _qml_path():
     here = Path(__file__).resolve().parent.parent.parent
-    return here / "astromechos_imager" / "ui" / "qml" / "Step6Done.qml"
+    return here / "astromechos_imager" / "ui" / "qml" / "Step5Done.qml"
 
 
-def test_step6_done_file_exists():
+def test_step5_done_file_exists():
     assert _qml_path().is_file()
 
 
-def test_step6_done_contains_astromechos_branding():
+def test_step5_done_contains_astromechos_branding():
     """Verify AstromechOS branding in the QML source."""
     content = _qml_path().read_text(encoding="utf-8")
     assert "AstromechOS" in content
 
 
-def test_step6_done_contains_next_steps():
+def test_step5_done_contains_next_steps():
     """Verify that next-steps guidance text is present."""
     content = _qml_path().read_text(encoding="utf-8")
-    assert "Next steps" in content
+    assert "NEXT STEPS" in content
     assert "astromech-master.local" in content
     assert "astromech-slave.local" in content
 
 
-def test_step6_done_qml_syntax(qtbot):
+def test_step5_done_qml_syntax(qtbot):
     """Load the QML file in an engine to check for parse errors."""
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtCore import QUrl
     from astromechos_imager.ui.wizard_state import WizardState
     from astromechos_imager.ui.flash_view_model import FlashViewModel
+    from astromechos_imager.ui.theme_manager import ThemeManager
 
     state = WizardState()
     flash_vm = FlashViewModel(state)
+    theme = ThemeManager()
 
     eng = QQmlApplicationEngine()
     ctx = eng.rootContext()
     ctx.setContextProperty("wizardState", state)
     ctx.setContextProperty("flashViewModel", flash_vm)
+    ctx.setContextProperty("theme", theme)
 
-    # Step6Done uses wizardState context — provide it before loading
     eng.load(QUrl.fromLocalFile(str(_qml_path())))
     # A root Rectangle is a valid top-level item for QQmlApplicationEngine
-    # If parse fails, rootObjects() is empty
+    # If parse fails, rootObjects() is empty.
     assert len(eng.rootObjects()) > 0

@@ -5,7 +5,7 @@ import "Theme.js" as Theme
 
 Rectangle {
     // Root sized by StackView — do NOT set anchors.fill here.
-    color: Theme.colorBg
+    color: theme.colors.colorBg
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -14,7 +14,7 @@ Rectangle {
 
         Text {
             text: "WHAT DO YOU WANT TO FLASH?"
-            color: Theme.colorTextPrimary
+            color: theme.colors.colorTextPrimary
             font.family: Theme.fontTitle
             font.pixelSize: 18
             font.bold: true
@@ -23,7 +23,7 @@ Rectangle {
         }
         Text {
             text: "Pick the SD cards you need to (re)write. The recommended path covers both."
-            color: Theme.colorTextSecondary
+            color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
             Layout.bottomMargin: 4

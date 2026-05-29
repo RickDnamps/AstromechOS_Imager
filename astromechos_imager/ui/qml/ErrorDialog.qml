@@ -27,18 +27,18 @@ Dialog {
 
     function _accentColor() {
         switch (sdState) {
-            case "GARBAGE":                 return Theme.colorBorderError
+            case "GARBAGE":                 return theme.colors.colorBorderError
             case "UNCERTAIN":
-            case "BOOTABLE_NO_FIRSTBOOT":   return Theme.colorBorderWarn
+            case "BOOTABLE_NO_FIRSTBOOT":   return theme.colors.colorBorderWarn
             case "OK":
-            case "SAFE":                    return Theme.colorAccent
-            default:                        return Theme.colorBorderIdle
+            case "SAFE":                    return theme.colors.colorAccent
+            default:                        return theme.colors.colorBorderIdle
         }
     }
 
     background: Rectangle {
         radius: Theme.radiusCard
-        color: Theme.colorSurface
+        color: theme.colors.colorSurface
         border.color: root._accentColor()
         border.width: 1
         // Top glass highlight
@@ -79,7 +79,7 @@ Dialog {
         }
         Rectangle {
             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-            height: 1; color: Theme.colorDivider
+            height: 1; color: theme.colors.colorDivider
         }
     }
 
@@ -87,7 +87,7 @@ Dialog {
         spacing: 10
         Text {
             text: root.message
-            color: Theme.colorTextPrimary
+            color: theme.colors.colorTextPrimary
             font.family: Theme.fontBody
             font.pixelSize: 13
             wrapMode: Text.Wrap
@@ -99,7 +99,7 @@ Dialog {
         Text {
             visible: root.hint !== ""
             text: "→ " + root.hint
-            color: Theme.colorTextSecondary
+            color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
             wrapMode: Text.Wrap

@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import "Theme.js" as Theme
 
 Rectangle {
-    color: Theme.colorBg
+    color: theme.colors.colorBg
 
     property bool isFlashing: flashViewModel.status === "flashing"
     property bool isDone:     flashViewModel.status === "done"
@@ -27,9 +27,9 @@ Rectangle {
                     : isError    ? "FLASH FAILED"
                     : isDone     ? "FLASH COMPLETE"
                     :              "CONFIRM AND FLASH"
-                color: isError    ? Theme.colorBorderError
-                     : isDone     ? Theme.colorAccent
-                     :              Theme.colorTextPrimary
+                color: isError    ? theme.colors.colorBorderError
+                     : isDone     ? theme.colors.colorAccent
+                     :              theme.colors.colorTextPrimary
                 font.family: Theme.fontTitle
                 font.pixelSize: 18
                 font.bold: true
@@ -41,7 +41,7 @@ Rectangle {
                     : isError    ? "Review the message below, fix the cause, then retry."
                     : isDone     ? "Eject the card(s) and insert into the Pi 4B."
                     :              "Review the plan below. Writing will erase the targets."
-                color: Theme.colorTextSecondary
+                color: theme.colors.colorTextSecondary
                 font.family: Theme.fontBody
                 font.pixelSize: 12
             }
@@ -53,8 +53,8 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 180
             radius: Theme.radiusCard
-            color: Theme.colorSurface
-            border.color: Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderIdle
             border.width: 1
 
             // Top edge highlight
@@ -80,7 +80,7 @@ Rectangle {
                         spacing: 12
                         Text {
                             text: modelData.role
-                            color: Theme.colorTextAccent
+                            color: theme.colors.colorTextAccent
                             font.family: Theme.fontTitle
                             font.pixelSize: 10
                             font.bold: true
@@ -89,7 +89,7 @@ Rectangle {
                         }
                         Text {
                             text: modelData.img
-                            color: Theme.colorTextPrimary
+                            color: theme.colors.colorTextPrimary
                             font.family: Theme.fontMono
                             font.pixelSize: 12
                             elide: Text.ElideMiddle
@@ -97,7 +97,7 @@ Rectangle {
                         }
                         Text {
                             text: "→ drive " + modelData.drv
-                            color: Theme.colorTextSecondary
+                            color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 12
                         }
@@ -110,20 +110,20 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 1
-                    color: Theme.colorBorderWarn
+                    color: theme.colors.colorBorderWarn
                     opacity: 0.4
                 }
                 RowLayout {
                     spacing: 8
                     Text {
                         text: "⚠"
-                        color: Theme.colorBorderWarn
+                        color: theme.colors.colorBorderWarn
                         font.family: Theme.fontTitle
                         font.pixelSize: 14
                     }
                     Text {
                         text: "ALL DATA ON THE TARGET DRIVE(S) WILL BE ERASED."
-                        color: Theme.colorBorderWarn
+                        color: theme.colors.colorBorderWarn
                         font.family: Theme.fontTitle
                         font.pixelSize: 11
                         font.bold: true
@@ -139,8 +139,8 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 200
             radius: Theme.radiusCard
-            color: Theme.colorSurface
-            border.color: isError ? Theme.colorBorderError : Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: isError ? theme.colors.colorBorderError : theme.colors.colorBorderIdle
             border.width: 1
             Behavior on border.color { ColorAnimation { duration: Theme.durBase } }
 
@@ -164,7 +164,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Text {
                             text: "MASTER"
-                            color: Theme.colorTextAccent
+                            color: theme.colors.colorTextAccent
                             font.family: Theme.fontTitle
                             font.pixelSize: 10
                             font.bold: true
@@ -173,7 +173,7 @@ Rectangle {
                         Item { Layout.fillWidth: true }
                         Text {
                             text: flashViewModel.masterPhase
-                            color: Theme.colorTextSecondary
+                            color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
                         }
@@ -183,8 +183,8 @@ Rectangle {
                         Layout.fillWidth: true
                         height: 6
                         radius: 3
-                        color: Theme.colorBg
-                        border.color: Theme.colorBorderIdle
+                        color: theme.colors.colorBg
+                        border.color: theme.colors.colorBorderIdle
                         border.width: 1
                         Rectangle {
                             anchors.left: parent.left
@@ -193,7 +193,7 @@ Rectangle {
                             anchors.margins: 1
                             width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.masterProgress))
                             radius: 2
-                            color: Theme.colorAccent
+                            color: theme.colors.colorAccent
                             Behavior on width { NumberAnimation { duration: 120 } }
                         }
                     }
@@ -207,7 +207,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Text {
                             text: "SLAVE"
-                            color: Theme.colorTextAccent
+                            color: theme.colors.colorTextAccent
                             font.family: Theme.fontTitle
                             font.pixelSize: 10
                             font.bold: true
@@ -216,7 +216,7 @@ Rectangle {
                         Item { Layout.fillWidth: true }
                         Text {
                             text: flashViewModel.slavePhase
-                            color: Theme.colorTextSecondary
+                            color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
                         }
@@ -225,8 +225,8 @@ Rectangle {
                         Layout.fillWidth: true
                         height: 6
                         radius: 3
-                        color: Theme.colorBg
-                        border.color: Theme.colorBorderIdle
+                        color: theme.colors.colorBg
+                        border.color: theme.colors.colorBorderIdle
                         border.width: 1
                         Rectangle {
                             anchors.left: parent.left
@@ -235,7 +235,7 @@ Rectangle {
                             anchors.margins: 1
                             width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.slaveProgress))
                             radius: 2
-                            color: Theme.colorAccent
+                            color: theme.colors.colorAccent
                             Behavior on width { NumberAnimation { duration: 120 } }
                         }
                     }
@@ -246,7 +246,7 @@ Rectangle {
                 Text {
                     visible: isDone
                     text: "✓ FLASH COMPLETE"
-                    color: Theme.colorAccent
+                    color: theme.colors.colorAccent
                     font.family: Theme.fontTitle
                     font.pixelSize: 13
                     font.bold: true
@@ -255,7 +255,7 @@ Rectangle {
                 Text {
                     visible: isError
                     text: "✗ " + flashViewModel.errorMessage
-                    color: Theme.colorBorderError
+                    color: theme.colors.colorBorderError
                     font.family: Theme.fontBody
                     font.pixelSize: 12
                     wrapMode: Text.Wrap
@@ -310,8 +310,8 @@ Rectangle {
 
         background: Rectangle {
             radius: Theme.radiusCard
-            color: Theme.colorSurface
-            border.color: Theme.colorBorderError
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderError
             border.width: 1
         }
 
@@ -323,7 +323,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: 20
                 text: "⚠ ERASE TARGET DRIVE(S)?"
-                color: Theme.colorBorderError
+                color: theme.colors.colorBorderError
                 font.family: Theme.fontTitle
                 font.pixelSize: 13
                 font.bold: true
@@ -331,14 +331,14 @@ Rectangle {
             }
             Rectangle {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                height: 1; color: Theme.colorDivider
+                height: 1; color: theme.colors.colorDivider
             }
         }
 
         contentItem: Text {
             text: "This will ERASE the target SD card(s) and write the selected image. " +
                   "There is no undo. Proceed only if the drive letters look correct."
-            color: Theme.colorTextPrimary
+            color: theme.colors.colorTextPrimary
             font.family: Theme.fontBody
             font.pixelSize: 13
             wrapMode: Text.Wrap

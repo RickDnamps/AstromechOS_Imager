@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import "Theme.js" as Theme
 
 Rectangle {
-    color: Theme.colorBg
+    color: theme.colors.colorBg
 
     property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
     property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
@@ -17,7 +17,7 @@ Rectangle {
 
         Text {
             text: "SELECT TARGET SD CARDS"
-            color: Theme.colorTextPrimary
+            color: theme.colors.colorTextPrimary
             font.family: Theme.fontTitle
             font.pixelSize: 18
             font.bold: true
@@ -27,7 +27,7 @@ Rectangle {
             // System drive is excluded at the enumerate_removable_drives() layer
             // (platform/windows.py Phase 4.2) — it never appears in this list.
             text: "Removable drives only — the system drive is hidden for safety."
-            color: Theme.colorTextSecondary
+            color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
             Layout.bottomMargin: 6
@@ -36,8 +36,8 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            color: Theme.colorSurface
-            border.color: Theme.colorBorderIdle
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderIdle
             border.width: 1
             radius: Theme.radiusCard
 
@@ -48,7 +48,7 @@ Rectangle {
                 visible: !driveList.count
                 Text {
                     text: "⌖"   // crosshair / waiting glyph
-                    color: Theme.colorAccentDim
+                    color: theme.colors.colorAccentDim
                     font.family: Theme.fontTitle
                     font.pixelSize: 56
                     horizontalAlignment: Text.AlignHCenter
@@ -65,7 +65,7 @@ Rectangle {
                 }
                 Text {
                     text: "AWAITING SD CARD"
-                    color: Theme.colorTextPrimary
+                    color: theme.colors.colorTextPrimary
                     font.family: Theme.fontTitle
                     font.pixelSize: 13
                     font.bold: true
@@ -75,7 +75,7 @@ Rectangle {
                 }
                 Text {
                     text: "Insert a removable card — it will appear here within ~2 s."
-                    color: Theme.colorTextSecondary
+                    color: theme.colors.colorTextSecondary
                     font.family: Theme.fontBody
                     font.pixelSize: 12
                     horizontalAlignment: Text.AlignHCenter
@@ -97,7 +97,7 @@ Rectangle {
                     Rectangle {
                         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                         height: 1
-                        color: Theme.colorDivider
+                        color: theme.colors.colorDivider
                         opacity: 0.6
                     }
                     Row {
@@ -108,7 +108,7 @@ Rectangle {
 
                         Text {
                             text: driveLetters !== "" ? driveLetters : "—"
-                            color: Theme.colorTextAccent
+                            color: theme.colors.colorTextAccent
                             font.family: Theme.fontMono
                             font.pixelSize: 13
                             font.bold: true
@@ -117,7 +117,7 @@ Rectangle {
                         }
                         Text {
                             text: model.model + " · " + sizeHuman
-                            color: Theme.colorTextSecondary
+                            color: theme.colors.colorTextSecondary
                             font.family: Theme.fontBody
                             font.pixelSize: 13
                             width: 280

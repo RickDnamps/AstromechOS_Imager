@@ -1,2 +1,25 @@
 # Base de départ — ne pas committer
 rpi-imager-main/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Build artefacts
+build/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/

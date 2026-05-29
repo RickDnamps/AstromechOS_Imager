@@ -37,7 +37,7 @@ The companion AstromechOS scripts (`software/scripts/firstboot_setup.sh`) define
 | Path | Purpose | Source ref |
 |---|---|---|
 | `/ASTROMECH_FIRSTBOOT_READY` | Empty marker. Without it, firstboot_setup.sh does nothing. **Must be written LAST.** | `firstboot_setup.sh:67-72` |
-| `/astromech_init.cfg` | INI-format bootstrap config. Sections: `[system]`, `[github]` (opt.), `[hotspot]`, `[slave]` (opt.) | `firstboot_setup.sh:80, 300-445, 451, lib_config.sh::cfg_get` |
+| `/astromech_init.cfg` | INI-format bootstrap config. Sections: `[system]`, `[github]` (opt.), `[hotspot]`, `[slave]` (opt.), `[admin]` (master-only) | `firstboot_setup.sh:80, 300-445, 451, lib_config.sh::cfg_get` |
 | `/astromech_secrets/init_config.json` | `{role, hostname, imager_version, flashed_at}` | `firstboot_setup.sh:161-185` |
 | `/astromech_secrets/authorized_keys` | OpenSSH public keys (one per line, trailing newline required for awk dedup) | `firstboot_setup.sh:124-141` |
 | `/astromech_secrets/id_ed25519` | **Master only.** Outbound keypair private half. Mode 0600 re-applied by firstboot. | `firstboot_setup.sh:146-158` |
@@ -51,7 +51,7 @@ The companion AstromechOS scripts (`software/scripts/firstboot_setup.sh`) define
 # DO NOT EDIT — consumed and self-destructed on first boot.
 
 [system]
-user = pi                                    # install user (defaults: pi → astromech → artoo)
+user = artoo                                 # final username (matches what the Imager renamed UID 1000 to)
 
 [github]                                     # optional — switch repo origin via DNA validation
 repo_url = https://github.com/<fork>/AstromechOS.git
@@ -63,8 +63,30 @@ password = <32 hex chars>                    # WPA2-PSK 8-63 ASCII printable
 
 [slave]                                      # optional — only emit when slave hostname is non-default
 host = astromech-slave.local                 # how the Master finds the Slave via avahi (firstboot_setup.sh:355)
-user = pi                                    # SSH user on the Slave; defaults to [system] user (firstboot_setup.sh:356)
+user = artoo                                 # SSH user on the Slave; defaults to [system] user (firstboot_setup.sh:356)
+
+[admin]                                      # MASTER-ONLY — Flask UI password (separate from Linux SSH password)
+password = <22-char-random-urlsafe>          # firstboot_setup.sh:310 persists to local.cfg [admin] password
 ```
+
+### 2.2.1 Linux user personalization — cold rootfs modification
+
+The source `.img.xz` images are **Golden Images** containing a configured Linux user at **UID 1000** (canonical name TBD per image but commonly `pi` or `astromech`). The Imager personalizes this user **offline**, before the Pi ever boots, by editing the ext4 rootfs partition directly. No firstboot-time rename is performed — the AstromechOS security audit explicitly rejected runtime renames over plaintext-leak and process-race risks.
+
+**Cold modifications applied to the rootfs partition** (per role, same payload on both SDs of a pair):
+
+1. Parse `/etc/passwd` → locate the row whose UID = `1000`, rewrite its **login name** and **home dir** fields to `<new_user>` and `/home/<new_user>`.
+2. Parse `/etc/shadow` → update the matching row's **password hash field** (column 2) with `$6$<salt>$<sha512>` produced by `passlib.hash.sha512_crypt` on the Windows host.
+3. Parse `/etc/group` → rewrite the primary group name (UID-1000 maps to the GID matching the user's primary group, also typically 1000) AND any group memberships listing the old user name.
+4. Rename the directory `/home/<old_user>` → `/home/<new_user>` preserving permissions and ownership.
+
+**SSH key injection** continues through firstboot's `/astromech_secrets/authorized_keys` channel (firstboot_setup.sh:124-141) — the Imager does **not** touch `/home/<new_user>/.ssh/` itself, so firstboot is the sole owner of authorized_keys post-imaging.
+
+The cleartext password is shown to the operator in step 6 "Done" and persisted to `%APPDATA%\AstromechOS Imager\sessions\<id>\linux_account.json` (current-user DACL) for later lookup.
+
+**Both SD cards in a pair share the same `(username, password)`** so the operator only memorises one credential per robot.
+
+Implementation lives in **Phase 5.5** of the implementation plan — see `docs/superpowers/plans/2026-05-29-astromechos-imager-implementation.md` for the choice of ext4-on-Windows backend (Python lib vs bundled `e2tools.exe`).
 
 ### 2.3 Pair-level invariants
 
@@ -411,6 +433,20 @@ class HotspotBootstrap:
     password: str      # WPA2-PSK 8–63 ASCII printable
 
 @dataclass(frozen=True)
+class LinuxAccount:
+    """Cold-modification target for the Golden Image's UID-1000 Linux user.
+
+    The Imager renames UID-1000 to `username` and sets its password to
+    `cleartext_password` (hashed as `crypt_sha512` for /etc/shadow). All
+    three fields populated by generate_linux_account(). The cleartext is
+    shown once to the operator and persisted to
+    %APPDATA%\\…\\sessions\\<id>\\linux_account.json (DACL: current user).
+    """
+    username: str            # New POSIX login replacing the Golden Image's UID-1000 name
+    cleartext_password: str  # ~16 chars from secrets.token_urlsafe(12) — shown once to operator
+    crypt_sha512: str        # $6$<salt>$<hash> written directly to /etc/shadow (Phase 5.5)
+
+@dataclass(frozen=True)
 class Ed25519Pair:
     private_openssh: bytes   # for /astromech_secrets/id_ed25519
     public_openssh: bytes    # for /astromech_secrets/id_ed25519.pub (with trailing \n)
@@ -418,7 +454,7 @@ class Ed25519Pair:
 @dataclass(frozen=True)
 class FirstbootConfig:
     authorized_keys: list[str]                 # ≥1 valid OpenSSH pubkey line
-    install_user: str = "pi"
+    install_user: str = "artoo"                # final username (matches the cold-renamed UID-1000)
     repo_url: str | None = None
     repo_branch: str = "main"
     hostname_master: str = "astromech-master"
@@ -426,6 +462,8 @@ class FirstbootConfig:
     hw_layout_master: Path | None = None
     hw_layout_slave: Path | None = None
     hotspot_bootstrap: HotspotBootstrap | None = None    # auto-generated by orchestrator if None
+    linux_account: LinuxAccount | None = None            # auto-generated if None — drives Phase 5.5 rootfs cold-mod
+    admin_password: str | None = None                    # MASTER-ONLY — auto-generated 22-char urlsafe
     # Auto-managed by the orchestrator — NOT user input. Empty defaults exist
     # only to keep the dataclass instantiable in unit tests; production code
     # must always set them before passing to FirstbootBundle.
@@ -461,6 +499,20 @@ def generate_hotspot_bootstrap() -> HotspotBootstrap:
         ssid=f"Astromech_Boot_{suffix}",
         password=secrets.token_hex(16),                # 32 hex = 128-bit entropy
     )
+
+def generate_linux_account(username: str = "artoo") -> LinuxAccount:
+    """Personalization payload for the Phase 5.5 rootfs cold-mod. Same on both SDs of a pair."""
+    from passlib.hash import sha512_crypt
+    cleartext = secrets.token_urlsafe(12)              # ~16 chars, no I/l/0/O ambiguity
+    return LinuxAccount(
+        username=username,
+        cleartext_password=cleartext,
+        crypt_sha512=sha512_crypt.using(rounds=5000).hash(cleartext),
+    )
+
+def generate_admin_password() -> str:
+    """Flask UI password for master's astromech_init.cfg [admin] password."""
+    return secrets.token_urlsafe(16)                   # ~22 chars
 ```
 
 Persistence in `%APPDATA%\AstromechOS Imager\last_pair\` (DACL: current user only). Saved **only after** successful verify+customize for both SDs.

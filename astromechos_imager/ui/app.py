@@ -10,6 +10,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from astromechos_imager.ui.messages import M
+from astromechos_imager.ui.wizard_state import WizardState
 
 
 def _excepthook(exc_type, exc_value, tb) -> None:
@@ -25,10 +26,8 @@ def splash_asset_path() -> Path:
     return Path(__file__).resolve().parent / "resources" / "images" / "startup_screen_final.png"
 
 
-def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, "WizardState"]:
+def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     """Construct the QApplication + QML engine + WizardState. Used by main() and tests."""
-    from astromechos_imager.ui.wizard_state import WizardState
-
     # Reuse existing instance if pytest-qt already created one
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     app.setApplicationName(M["app_title"])
@@ -39,6 +38,21 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, "WizardState"]:
     ctx = engine.rootContext()
     ctx.setContextProperty("splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path())))
     ctx.setContextProperty("wizardState", state)
+
+    # Drive list model — Windows-only; tests inject their own
+    if sys.platform == "win32":
+        try:
+            from astromechos_imager.platform.windows import WindowsPlatformIO
+            from astromechos_imager.ui.drive_list_model import DriveListModel
+            drive_model = DriveListModel(WindowsPlatformIO())
+            drive_model.start_polling()
+            ctx.setContextProperty("driveListModel", drive_model)
+            # Hold a reference so it doesn't get GC'd
+            engine.driveListModel = drive_model
+        except Exception:
+            # WMI may fail in CI offscreen environments — just don't expose the model
+            pass
+
     qml_main = Path(__file__).resolve().parent / "qml" / "main.qml"
     engine.load(QUrl.fromLocalFile(str(qml_main)))
     return app, engine, state

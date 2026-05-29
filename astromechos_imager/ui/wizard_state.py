@@ -19,6 +19,8 @@ class WizardState(QObject):
     modeChanged = Signal(str)
     masterImagePathChanged = Signal(str)
     slaveImagePathChanged = Signal(str)
+    masterDriveIdChanged = Signal(int)
+    slaveDriveIdChanged = Signal(int)
 
     MIN_STEP = 1
     MAX_STEP = 6
@@ -36,6 +38,8 @@ class WizardState(QObject):
         self._mode = self.MODE_BOTH  # default = recommended
         self._master_image_path = ""
         self._slave_image_path = ""
+        self._master_drive_id = -1
+        self._slave_drive_id = -1
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -124,3 +128,35 @@ class WizardState(QObject):
             return False
         suffixes = [s.lower() for s in fp.suffixes[-2:]]
         return any(s in self.SUPPORTED_IMAGE_EXTENSIONS for s in suffixes)
+
+    # ------------------------------------------------------------------
+    # Step 3 — Storage / drive assignment
+    # ------------------------------------------------------------------
+
+    @Property(int, notify=masterDriveIdChanged)
+    def masterDriveId(self) -> int:
+        return self._master_drive_id
+
+    @Property(int, notify=slaveDriveIdChanged)
+    def slaveDriveId(self) -> int:
+        return self._slave_drive_id
+
+    @Slot(int)
+    def setMasterDriveId(self, drive_id: int) -> None:
+        if drive_id != self._master_drive_id and drive_id != self._slave_drive_id:
+            # Accept — no conflict with slave
+            self._master_drive_id = drive_id
+            self.masterDriveIdChanged.emit(drive_id)
+        elif drive_id == self._slave_drive_id and drive_id != -1:
+            # Same drive selected for master as for slave — silently ignore
+            pass
+        elif drive_id == self._master_drive_id:
+            pass  # idempotent
+
+    @Slot(int)
+    def setSlaveDriveId(self, drive_id: int) -> None:
+        if drive_id != self._slave_drive_id and drive_id != self._master_drive_id:
+            self._slave_drive_id = drive_id
+            self.slaveDriveIdChanged.emit(drive_id)
+        elif drive_id == self._master_drive_id and drive_id != -1:
+            pass  # collision — silently ignore

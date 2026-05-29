@@ -176,3 +176,42 @@ def test_valid_image_path_rejects_wrong_ext(qtbot, tmp_path):
     f = tmp_path / "doc.pdf"
     f.write_bytes(b"x")
     assert not s.isValidImagePath(str(f))
+
+
+# ---------------------------------------------------------------------------
+# Task 8.5 — drive ID assignment
+# ---------------------------------------------------------------------------
+
+def test_drive_ids_default_to_minus_one(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.masterDriveId == -1
+    assert s.slaveDriveId == -1
+
+
+def test_set_master_drive_id_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.masterDriveIdChanged.connect(lambda v: received.append(v))
+    s.setMasterDriveId(2)
+    assert s.masterDriveId == 2
+    assert received == [2]
+
+
+def test_set_master_rejects_same_as_slave(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setSlaveDriveId(3)
+    s.setMasterDriveId(3)  # collision — ignored
+    assert s.masterDriveId == -1
+    assert s.slaveDriveId == 3
+
+
+def test_set_slave_rejects_same_as_master(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setMasterDriveId(2)
+    s.setSlaveDriveId(2)  # collision — ignored
+    assert s.slaveDriveId == -1
+    assert s.masterDriveId == 2

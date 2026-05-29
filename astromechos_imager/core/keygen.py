@@ -30,3 +30,18 @@ def generate_ed25519(comment: str = "astromech-master@imager") -> Ed25519Pair:
     )
     pub_with_comment = pub + b" " + comment.encode("ascii") + b"\n"
     return Ed25519Pair(private_openssh=priv, public_openssh=pub_with_comment)
+
+
+def generate_hotspot_bootstrap() -> HotspotBootstrap:
+    """Generate a fresh per-pair WPA2-PSK bootstrap.
+
+    SSID format: ``Astromech_Boot_<4 hex uppercase>`` — matches the visual
+    convention of ``Astromech_Control_XXXX`` used by gen_hotspot_ssid.sh.
+    PSK: 32 hex chars = 128 bits of entropy, comfortably inside the WPA2-PSK
+    8–63 ASCII printable bound (per design spec §6.2, validators §6.5).
+    """
+    suffix = secrets.token_hex(2).upper()          # 4 hex chars
+    return HotspotBootstrap(
+        ssid=f"Astromech_Boot_{suffix}",
+        password=secrets.token_hex(16),            # 32 hex chars
+    )

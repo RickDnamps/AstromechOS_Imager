@@ -37,3 +37,7 @@ tests/fixtures/*.fat32
 # Vendored binaries (must be populated locally — see vendor/README.md)
 vendor/*.exe
 vendor/*.dll
+
+# Local-only dev artifacts (kept on disk, never tracked)
+CLAUDE.md
+docs/superpowers/

@@ -7,8 +7,6 @@ Master→Slave keypair, hotspot bootstrap creds) and personalizes the
 rootfs offline (rename UID-1000 user, set Linux password, inject
 init_resize.sh for first-boot rootfs expansion).
 
-Design: `docs/superpowers/specs/2026-05-29-astromechos-imager-design.md`
-Plan: `docs/superpowers/plans/2026-05-29-astromechos-imager-implementation.md`
 Companion: https://github.com/RickDnamps/AstromechOS
 
 ## Requirements

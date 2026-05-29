@@ -3568,146 +3568,291 @@ git commit -m "feat(core/diskwriter): verify_readback with SHA256 round-trip"
 
 ## Phase 5.5 — Rootfs personalization (cold ext4 modification)
 
-**Status: spec frozen, library choice deferred to Task 5.5.0 POC.**
+**Status: POC done 2026-05-29. Backend = bundled `debugfs.exe` from e2fsprogs Windows port. See spec §13 for full rationale.**
 
 Per design spec §2.2.1, the Imager must offline-edit the rootfs ext4 partition to rename the Golden Image's UID-1000 user (login + `/home/<name>` dir + `/etc/{passwd,shadow,group}` rows + group memberships). The AstromechOS security audit explicitly rejected a firstboot-time rename (plaintext leaks via running procs + race conditions), so cold modification is the only acceptable path.
 
 **Scope** : restricted to the four operations enumerated in §2.2.1 — no other rootfs edits. SSH key injection stays on its existing firstboot path. Phase 5.5 runs **after** the verify step of each `FlashJob` and **before** the FAT32 customize step, so a Phase 5.5 failure leaves the SD in `BOOTABLE_NO_FIRSTBOOT` (image fully written, rootfs partially modified, no trigger marker) — same safety class as a customize-phase failure.
 
-### Task 5.5.0: Choose ext4-on-Windows backend (POC)
+### Task 5.5.0: Choose ext4-on-Windows backend (POC) — ✅ DONE 2026-05-29
 
-**Files:**
-- Create: `tests/poc/test_ext4_backends.py`
-- Add docs decision in: `docs/superpowers/specs/2026-05-29-astromechos-imager-design.md` §13 (new appendix)
+**Outcome**: `debugfs.exe` from e2fsprogs Windows port. Decision rationale in spec §13.
 
-Evaluate 2-3 candidates against a fixture ext4 image (~64 MB sparse, formatted via `mkfs.ext4` on Linux CI runner or a checked-in pre-formatted blob):
+**Artifacts**:
+- `tests/poc/populate.sh` — builds 80 MB ext4 fixture via WSL (mkfs.ext4 + debugfs scripted writes)
+- `tests/poc/test_mutations.sh` — POC of read/modify/write/rename via debugfs
+- `tests/poc/test_rename.sh` — POC of `link + unlink` directory rename
+- `tests/poc/test_offset.sh` — POC of `image?offset=N` partition addressing
+- `tests/poc/test_fsck_offset.sh` — POC of e2fsck via offset
+- `tests/poc/bench.sh` — 50 cycles in 160 ms confirms perf
 
-| Candidate | Pros | Cons |
-|---|---|---|
-| **Python lib `ext4`** | Pure-Python, no external binary | Mostly read-oriented historically; write support varies by version |
-| **Python lib `ext4fs`** | More recent fork | Smaller community, less battle-tested |
-| **Bundled `e2tools.exe`** (Cygwin port: `e2cp`, `e2mv`, `e2ln`, `e2rm`) | Battle-tested code from e2fsprogs; supports write + dir rename | ~200 KB extra in `.exe`, subprocess overhead per op, Windows binary licensing check needed |
+**Outcomes captured**:
+- `debugfs "image?offset=N"` syntax works (read + write + e2fsck)
+- `link <src> <dst>` + `unlink <src>` = directory rename without copying data (inode preserved)
+- 3 ms per mutation cycle, e2fsck clean across 50 cycles
+- Binary footprint: debugfs.exe 256 KB + e2fsck.exe 360 KB + msys-2.0.dll ~3 MB ≈ 4-5 MB bundle overhead
 
-POC tests for each candidate:
-1. Open a fresh ext4 fixture.
-2. Read `/etc/passwd`, mutate one row, write back.
-3. Rename a top-level directory (`/home/pi` → `/home/artoo`).
-4. Re-open, assert mutations persisted.
-5. Run `e2fsck -n` on the mutated image (no errors).
-
-Decision criteria (in priority order): correctness on `e2fsck`, ease of error handling, package weight. Document the chosen backend in a new spec appendix §13 with the test scores.
-
-- [ ] **Step 1: Write candidate matrix tests**
-- [ ] **Step 2: Run each candidate against the fixture**
-- [ ] **Step 3: Document the choice + reasoning in spec §13**
-- [ ] **Step 4: Add the chosen dependency (Python lib OR bundled binary path) to `pyproject.toml`**
-- [ ] **Step 5: Commit POC + decision**
-
-```bash
-git add tests/poc/ docs/superpowers/specs/2026-05-29-astromechos-imager-design.md pyproject.toml
-git commit -m "feat(rootfs): ext4-on-Windows backend POC + decision (see spec §13)"
-```
-
-NOTE — every downstream task in Phase 5.5 imports the chosen backend through a `RootfsPartition` Protocol declared in `core/platform_io.py`, so a future switch costs at most one adapter rewrite.
+**Production verification deferred to Task 5.5.4**: confirm `debugfs.exe` accepts `\\.\PhysicalDrive2?offset=N` for raw-device addressing. If not, fallback = extract-mutate-rewrite (same backend, different I/O wrapper).
 
 ---
 
-### Task 5.5.1: `/etc/passwd` parser + line writer
+### Task 5.5.1: `/etc/passwd` / `/etc/shadow` / `/etc/group` parsers
 
 **Files:**
 - Create: `astromechos_imager/core/passwd_files.py`
 - Test: `tests/unit/test_passwd_files.py`
 
-Pure-Python parsing of the colon-delimited formats. No I/O — all functions take `bytes` input, return `bytes` output. Lets us round-trip without touching ext4 yet.
+Pure-Python parsing of colon-delimited formats. All functions take `bytes` input, return `bytes` output. No ext4 dependency at this layer.
 
-Tasks:
-- `parse_passwd(content: bytes) -> list[PasswdRow]` — one row per `name:x:uid:gid:gecos:home:shell`.
-- `parse_shadow(content: bytes) -> list[ShadowRow]` — `name:hash:lastchg:min:max:warn:inactive:expire:reserved`.
-- `parse_group(content: bytes) -> list[GroupRow]` — `name:x:gid:members_csv`.
-- `serialize_*` round-trip preservers (trailing newline, ordering).
-- `rename_user_in_passwd(rows, old, new)` — mutates name + home, returns new list.
-- `rename_user_in_shadow(rows, old, new, new_crypt)` — mutates name + hash.
-- `rename_user_in_group(rows, old, new)` — mutates primary group name (matched by UID's GID) + every membership list.
+API:
 
-**TDD pattern**: each function gets a golden fixture + property-based round-trip via Hypothesis. Estimated effort: ~45 min.
+```python
+@dataclass(frozen=True)
+class PasswdRow:
+    name: str; pw: str; uid: int; gid: int; gecos: str; home: str; shell: str
+
+@dataclass(frozen=True)
+class ShadowRow:
+    name: str; hash: str; lastchg: str; min_: str; max_: str
+    warn: str; inactive: str; expire: str; reserved: str
+
+@dataclass(frozen=True)
+class GroupRow:
+    name: str; pw: str; gid: int; members: tuple[str, ...]
+
+def parse_passwd(content: bytes) -> list[PasswdRow]
+def parse_shadow(content: bytes) -> list[ShadowRow]
+def parse_group(content: bytes) -> list[GroupRow]
+def serialize_passwd(rows: list[PasswdRow]) -> bytes      # trailing \n preserved
+def serialize_shadow(rows: list[ShadowRow]) -> bytes
+def serialize_group(rows: list[GroupRow]) -> bytes
+def rename_user_in_passwd(rows, old: str, new: str) -> list[PasswdRow]
+    # finds row by uid=1000 OR by name match; rewrites name + home (`/home/<old>` → `/home/<new>`)
+def rename_user_in_shadow(rows, old: str, new: str, new_crypt: str) -> list[ShadowRow]
+    # rewrites name + hash
+def rename_user_in_group(rows, old: str, new: str) -> list[GroupRow]
+    # rewrites primary group name (gid matches user's gid) + every membership listing old
+```
+
+**TDD pattern** for each function:
+1. Golden snapshot test: known input bytes → expected output bytes (syrupy).
+2. Property-based round-trip: hypothesis generates random colon-delimited rows, asserts `serialize(parse(x)) == x` modulo whitespace normalization.
+3. Mutation tests: `rename_user_in_*(rows, "pi", "artoo")` matches a hand-crafted golden output.
+
+**Estimated effort**: ~45 min.
 
 ---
 
-### Task 5.5.2: `RootfsPartition` Protocol + chosen backend adapter
+### Task 5.5.2: `RootfsPartition` Protocol + `Ext4DebugfsBackend` adapter
 
 **Files:**
 - Modify: `astromechos_imager/core/platform_io.py` (add `RootfsPartition` Protocol)
-- Create: `astromechos_imager/core/rootfs.py` (adapter wrapping the Task 5.5.0 chosen backend)
+- Create: `astromechos_imager/core/rootfs.py` (Ext4DebugfsBackend implementing the Protocol)
 - Test: `tests/integration/test_rootfs_adapter.py`
 
-Same pattern as `BootPartition` from Task 4.5: a thin Protocol exposing `read_bytes(path)`, `write_bytes(path, data)`, `rename(src, dst)`, `chown(path, uid, gid)`, `close()`. Implementation routes to the Task 5.5.0 backend.
+```python
+# core/platform_io.py — append
+class RootfsPartition(Protocol):
+    """ext4 rootfs accessor. Implementations route through debugfs.exe subprocess."""
+    def read_bytes(self, path: str) -> bytes: ...
+    def write_bytes(self, path: str, data: bytes) -> None: ...
+    def rename(self, src: str, dst: str) -> None: ...           # via link + unlink
+    def fsck_clean(self) -> bool: ...                            # e2fsck -fn returns 0
+    def close(self) -> None: ...
+```
 
-Integration test: open a fixture ext4 image, write a file, rename a dir, verify with `e2fsck -n`.
+```python
+# core/rootfs.py
+class Ext4DebugfsBackend:
+    def __init__(self, image_path: str, offset_bytes: int,
+                 debugfs_exe: Path, e2fsck_exe: Path,
+                 temp_dir: Path | None = None):
+        self.image = image_path
+        self.offset = offset_bytes
+        self.debugfs = debugfs_exe
+        self.e2fsck = e2fsck_exe
+        self.temp = temp_dir or Path(tempfile.mkdtemp(prefix="astro-rootfs-"))
 
-Estimated effort: ~1 h.
+    def _device_arg(self) -> str:
+        return f"{self.image}?offset={self.offset}"
+
+    def _run_script(self, commands: list[str]) -> str:
+        # 1. Write commands + "quit" to temp script file
+        # 2. subprocess.run([debugfs_exe, "-w", "-f", script, self._device_arg()],
+        #                    check=True, capture_output=True, text=True)
+        # 3. Return stdout
+        ...
+
+    def read_bytes(self, path: str) -> bytes:
+        # dump <path> <temp_out>
+        # then read temp_out
+        ...
+
+    def write_bytes(self, path: str, data: bytes) -> None:
+        # write data to a temp host file, then:
+        # rm <path>
+        # write <temp_host_file> <path>
+        ...
+
+    def rename(self, src: str, dst: str) -> None:
+        # link <src> <dst>
+        # unlink <src>
+        # (works for both files and dirs; inode preserved)
+        ...
+
+    def fsck_clean(self) -> bool:
+        # subprocess.run([e2fsck_exe, "-fn", self._device_arg()], check=False)
+        # return rc == 0
+        ...
+
+    def close(self) -> None:
+        shutil.rmtree(self.temp, ignore_errors=True)
+```
+
+**Integration test** uses a fixture ext4 image (built once via `tests/poc/populate.sh` or a fresh one via `tests/fixtures/make_ext4_fixture.py`):
+- Write a file via `write_bytes`, re-read, assert content
+- Rename `/home/pi → /home/artoo`, re-read, assert files in `/home/artoo` match originals
+- After both mutations, `fsck_clean()` returns True
+
+**Estimated effort**: ~1 h.
+
+NOTE — the `debugfs_exe` and `e2fsck_exe` paths are injected so tests use system binaries (on Linux/WSL) and production uses the bundled .exe paths. A `default_backend_paths()` helper resolves them based on the platform + bundle environment (PyInstaller sets `sys._MEIPASS`).
 
 ---
 
-### Task 5.5.3: `RootfsPersonalizer` — orchestrates the rename
+### Task 5.5.3: `RootfsPersonalizer` orchestrates the cold rename
 
 **Files:**
 - Create: `astromechos_imager/core/rootfs_personalizer.py`
 - Test: `tests/integration/test_rootfs_personalizer.py`
 
-Single class consuming a `LinuxAccount` + a `RootfsPartition`, executing the §2.2.1 four steps in order:
-1. Read `/etc/passwd`, locate UID-1000 row, rewrite name + home.
-2. Read `/etc/shadow`, rewrite matching row's hash to `account.crypt_sha512`.
-3. Read `/etc/group`, rewrite primary group name + membership lists.
-4. `rootfs.rename(f"/home/{old}", f"/home/{new}")`.
-5. Self-validate: re-read passwd/shadow/group, assert mutations stuck.
+Single class consuming `LinuxAccount` + `RootfsPartition`, executing the §2.2.1 four steps:
 
-Errors raise typed exceptions in `core/errors.py` (`RootfsModError`, `UidNotFoundError`, `RootfsSelfValidationFailedError`) — all with `sd_state = "BOOTABLE_NO_FIRSTBOOT"`.
+```python
+class RootfsPersonalizer:
+    def __init__(self, account: LinuxAccount, fs: RootfsPartition):
+        self.account = account
+        self.fs = fs
 
-Estimated effort: ~1 h.
+    def apply(self) -> None:
+        # 1. read + rewrite /etc/passwd (locate UID-1000 row, rename + change home)
+        passwd_bytes = self.fs.read_bytes("/etc/passwd")
+        rows = parse_passwd(passwd_bytes)
+        old_user = next(r.name for r in rows if r.uid == 1000)
+        rows = rename_user_in_passwd(rows, old_user, self.account.username)
+        self.fs.write_bytes("/etc/passwd", serialize_passwd(rows))
+
+        # 2. read + rewrite /etc/shadow (rename + replace hash)
+        shadow = parse_shadow(self.fs.read_bytes("/etc/shadow"))
+        shadow = rename_user_in_shadow(shadow, old_user, self.account.username,
+                                        self.account.crypt_sha512)
+        self.fs.write_bytes("/etc/shadow", serialize_shadow(shadow))
+
+        # 3. read + rewrite /etc/group (rename + memberships)
+        group = parse_group(self.fs.read_bytes("/etc/group"))
+        group = rename_user_in_group(group, old_user, self.account.username)
+        self.fs.write_bytes("/etc/group", serialize_group(group))
+
+        # 4. rename /home/<old> → /home/<new>
+        self.fs.rename(f"/home/{old_user}", f"/home/{self.account.username}")
+
+        # 5. self-validate: re-read passwd and assert UID-1000 row has new name + home
+        rows2 = parse_passwd(self.fs.read_bytes("/etc/passwd"))
+        new_row = next(r for r in rows2 if r.uid == 1000)
+        if new_row.name != self.account.username or new_row.home != f"/home/{self.account.username}":
+            raise RootfsSelfValidationFailedError(
+                f"UID-1000 row not properly renamed: {new_row}"
+            )
+
+        # 6. e2fsck sanity
+        if not self.fs.fsck_clean():
+            raise RootfsModError("e2fsck reports errors after personalization")
+```
+
+**Typed errors in `core/errors.py`** (extend Phase 1.1's hierarchy):
+```python
+class RootfsModError(CustomizationError): ...           # sd_state = BOOTABLE_NO_FIRSTBOOT
+class UidNotFoundError(RootfsModError): ...
+class RootfsSelfValidationFailedError(RootfsModError): ...
+```
+
+**Test** uses the populated fixture from Task 5.5.2's adapter test; runs `RootfsPersonalizer.apply()` and asserts the mutations.
+
+**Estimated effort**: ~1 h.
 
 ---
 
-### Task 5.5.4: Locate rootfs partition + wire into FlashJob
+### Task 5.5.4: Locate rootfs partition + wire into FlashJob + verify Windows raw-device offset
 
 **Files:**
-- Modify: `astromechos_imager/core/bootpartition.py` (extend `find_first_fat32_partition` to also yield the 2nd partition's layout — the ext4 rootfs)
+- Modify: `astromechos_imager/core/bootpartition.py` (add `find_rootfs_partition(mbr_bytes) -> RootfsLayout`)
 - Modify: `astromechos_imager/core/orchestrator.py` (FlashJob runs `RootfsPersonalizer` between verify and customize)
 - Test: `tests/integration/test_flashjob_rootfs.py`
+- Test: `tests/integration/test_debugfs_raw_device.py` (Windows-only, skipped without `INTEGRATION_REAL_SD`)
 
-Pi OS MBR layout is fixed: partition 1 = FAT32 boot (~512 MB), partition 2 = ext4 rootfs (rest of card). Parse both entries, expose `find_rootfs_partition(mbr_bytes)` returning a `RootfsLayout(offset, size, partition_type)`.
+```python
+@dataclass(frozen=True)
+class RootfsLayout:
+    offset: int           # bytes from start of disk
+    size: int             # bytes
+    partition_type: int   # 0x83 for ext4
 
-The FlashJob ordering becomes:
-1. lock + dismount volumes
+def find_rootfs_partition(mbr_bytes: bytes) -> RootfsLayout:
+    """Return the FIRST ext4-typed partition (0x83) in the MBR. Pi OS's standard
+    layout is partition 1 = FAT32 boot, partition 2 = ext4 rootfs."""
+    ...
+```
+
+FlashJob ordering becomes:
+1. lock + dismount
 2. raw write image
 3. verify SHA256
-4. **NEW**: open rootfs partition → run `RootfsPersonalizer`
-5. open boot partition → write firstboot bundle
+4. **NEW**: find_rootfs_partition + Ext4DebugfsBackend + RootfsPersonalizer.apply()
+5. open boot partition (β pyfatfs or α drive letter) → FirstbootBundle.write_to
 6. trigger marker
 
-Cancellation at step 4 leaves the SD in `BOOTABLE_NO_FIRSTBOOT` (data + verified, rootfs partially modified, no trigger). The `sd_state` matrix in §7.5 of the spec covers this without changes.
+The **production verification** test (`test_debugfs_raw_device.py`) only runs with a real SD attached:
+- Writes a sparse Pi-OS-shaped image to a real SD via the existing DiskWriter
+- Invokes `debugfs.exe "\\.\PHYSICALDRIVE2?offset=<rootfs_offset>" -R 'cat /etc/passwd'`
+- Asserts exit code 0 + non-empty output
 
-Estimated effort: ~1 h.
+If Windows debugfs.exe **rejects** `\\.\PHYSICAL...?offset=N`, fallback strategy (implementable in same task):
+- Read rootfs bytes from raw device → write to temp file
+- Run debugfs.exe against the temp file
+- Write modified bytes back to raw device at rootfs offset
+- Slower (5-30 GB I/O) but architecturally identical at the `RootfsPartition` Protocol level
+
+**Estimated effort**: ~1 h plus verification time on real hardware.
 
 ---
 
 ### Task 5.5.5: End-to-end integration test against a Pi OS-shaped fixture
 
 **Files:**
-- Test: `tests/integration/test_end_to_end_personalize.py`
-- Fixture script: `tests/fixtures/make_pi_os_fixture.py`
+- Create: `tests/integration/test_end_to_end_personalize.py`
+- Create: `tests/fixtures/make_pi_os_fixture.py` (idempotent fixture builder, builds on demand if missing)
 
-Build a tiny "Pi OS-shaped" sparse image (~80 MB total, MBR with FAT32 + ext4), pre-populated with a fake UID-1000 user (`pi:x:1000:1000:...:/home/pi:/bin/bash`). Run the full `FlashJob` against it (skip raw image write, just personalize a pre-flashed sparse image). Verify:
-- `/etc/passwd` row 1000 renamed.
-- `/etc/shadow` row 1000 has new hash.
-- `/etc/group` rewrites.
-- `/home/<new>` exists, `/home/<old>` doesn't.
-- `e2fsck -n` clean.
+The fixture builder (run inside WSL on dev machines, or via a checked-in pre-built tarball on CI):
+- 96 MB sparse image
+- MBR with partition 1 = FAT32 boot (16 MB), partition 2 = ext4 rootfs (80 MB)
+- ext4 pre-populated with `/etc/passwd`, `/etc/shadow`, `/etc/group` rows for `pi:x:1000:1000:...:/home/pi:/bin/bash` and root
+- `/home/pi/` with `welcome.txt`
 
-Estimated effort: ~45 min.
+E2E test exercises the full `FlashJob` against this fixture:
+- Skip the raw write step (the fixture is pre-flashed)
+- Run rootfs personalization with a `LinuxAccount(username="artoo", cleartext_password="test123", crypt_sha512="$6$salt$hash")`
+- Assert `/etc/passwd` UID 1000 row renamed to `artoo` + home rewritten
+- Assert `/home/artoo/welcome.txt` exists and reads "hello from pi"
+- Assert `/home/pi/` does not exist
+- Assert e2fsck clean
+- Assert FAT32 firstboot bundle written correctly (existing Phase 3 assertions)
+- Assert `pair_symmetry` invariant if running pair mode
+
+**Estimated effort**: ~45 min.
 
 ---
 
-NOTE — **Phase 5.5 is intentionally only sketched at this depth** because Task 5.5.0's POC outcome determines a chunk of the downstream code shape. Once 5.5.0 lands, tasks 5.5.1-5.5.5 get the same 5-step TDD detail as earlier phases via a plan-amendment commit before any of them are dispatched.
+NOTE — POC done. Tasks 5.5.1-5.5.5 are now ready for TDD dispatch.
 
 ---
 

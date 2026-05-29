@@ -23,3 +23,8 @@ dist/
 # IDE
 .vscode/
 .idea/
+
+# POC artifacts (binary fixtures rebuildable on demand via tests/poc/*.sh)
+tests/poc/*.img
+tests/poc/*.ext4
+/tmp/

@@ -880,3 +880,63 @@ Contract surface frozen for the Imager:
 | **Trigger marker** | `/ASTROMECH_FIRSTBOOT_READY`. Empty file. Without it, `firstboot_setup.sh` does nothing. Imager writes this LAST in every flash. |
 | **Pair symmetry** | The invariants of §2.3, asserted by `assert_pair_symmetry()` after both cards flashed |
 | **DNA validation** | The paternity check `dna_validate` performs on a custom GitHub fork URL on the Pi side (firstboot_setup.sh:312) before swapping origin |
+
+---
+
+## 13. Appendix — ext4-on-Windows backend decision (Phase 5.5.0 POC)
+
+**POC date**: 2026-05-29
+**Outcome**: bundle `debugfs.exe` + `e2fsck.exe` from the Windows port of `e2fsprogs` (mainstream candidate: msys2 mingw build).
+
+### 13.1 Candidates evaluated
+
+| Candidate | Verdict | Reason |
+|---|---|---|
+| Python lib `ext4` 1.4.1 | **REJECTED** | API is **read-only** — `Volume` has `read/seek/block_read/inode_at` but no `write/block_write`; `File` and `Directory` expose only readers. Confirmed by surface inspection of pypi 1.4.1. |
+| Python lib `ext4fs`, `pyext4`, `python-ext4`, `ext2fs`, `libext2fs` | **NOT AVAILABLE** | None published on PyPI. |
+| Bundled `e2tools.exe` (Cygwin port) | **DEFERRED** | Functional but smaller community + older release cadence than e2fsprogs. Our use case is covered by `debugfs` primitives alone — no e2tools dependency needed. |
+| **Bundled `debugfs.exe` (e2fsprogs)** | **CHOSEN** | All 4 required ops covered by primitives; actively maintained (1.47.2 from Jan 2025); small binary footprint. |
+| WSL passthrough | **REJECTED** | Cannot rely on WSL being installed on target operator's Windows host. Used during POC for fixture builds only. |
+
+### 13.2 Operations validated by POC
+
+POC scripts at `tests/poc/`:
+
+| Operation | debugfs command(s) | POC result |
+|---|---|---|
+| Read `/etc/passwd` | `cat /etc/passwd` | ✓ stdout |
+| Write modified `/etc/passwd` | `rm /etc/passwd` + `write <host_path> /etc/passwd` | ✓ persisted, e2fsck clean |
+| Rename `/home/pi` → `/home/artoo` | `link /home/pi /home/artoo` + `unlink /home/pi` | ✓ inode preserved (15), content preserved (welcome.txt), e2fsck clean |
+| Verify `e2fsck -fn` | (same exe family) | ✓ no errors across 50 mutation cycles |
+
+### 13.3 Partition addressing
+
+`debugfs` and `e2fsck` accept the syntax `image_or_device?offset=BYTES` to address an ext4 filesystem starting at a non-zero offset within a partitioned image. POC confirmed this works for **both** read and write operations on a combined MBR + FAT32-boot + ext4-rootfs synthetic image (file-backed).
+
+Pi OS rootfs partition typically starts at sector 1056768 (byte offset 540819456). The Imager reads the MBR after raw-flashing the source `.img`, extracts the ext4 partition's LBA-start, and passes `?offset=<lba_start * 512>` to debugfs.
+
+**Production verification deferred to Task 5.5.4**: confirm that the Windows port of debugfs.exe accepts `\\.\PhysicalDrive2?offset=N` syntax for raw-device addressing. If it doesn't, fallback is the extract-modify-rewrite pattern (slower but architecturally identical).
+
+### 13.4 Performance
+
+50 full mutation cycles (read + write + rename round-trip) on an 80 MB ext4 partition completed in **160 ms** (3 ms per cycle). e2fsck after every mutation: clean.
+
+The Imager's real workload is **~6 debugfs invocations per SD** (read passwd / shadow / group, write back modified, rename `/home/<old>` → `/home/<new>`). Total ext4 mutation time: **~20 ms per SD**, negligible compared to the multi-minute raw write of the OS image.
+
+### 13.5 Bundle footprint
+
+| Binary | Linux size | Estimated Windows size |
+|---|---|---|
+| `debugfs` | 256 KB | ~600 KB |
+| `e2fsck` | 360 KB | ~800 KB |
+| `libext2fs.so.2`, `libe2p.so.2`, `libcom_err.so.2` | ~400 KB combined | bundled into the .exes on Windows build |
+| Runtime (msys-2.0.dll if msys2 build) | n/a | ~3 MB |
+
+**Total Windows overhead**: ~4-5 MB added to the PyInstaller bundle. Acceptable.
+
+### 13.6 Risks accepted
+
+- **Dependency on a Windows e2fsprogs port**: msys2's `e2fsprogs` package is the planned source. Alternative builds (sourceforge, cgsecurity) exist as fallbacks if msys2 becomes unavailable.
+- **Subprocess overhead per mutation**: ~3 ms per debugfs invocation. Negligible.
+- **Windows raw-device path syntax**: needs end-to-end verification in Task 5.5.4. Fallback (extract-mutate-rewrite) is implementable without changing the chosen backend.
+- **No transactional rollback** if a mutation half-completes: mitigated by the order-of-operations contract (rootfs mutations happen AFTER verify but BEFORE the firstboot bundle's trigger marker, so a half-mutated rootfs leaves the SD in `BOOTABLE_NO_FIRSTBOOT` per §7.1 — safe re-flash possible).

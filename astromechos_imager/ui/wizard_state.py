@@ -21,6 +21,12 @@ class WizardState(QObject):
     slaveImagePathChanged = Signal(str)
     masterDriveIdChanged = Signal(int)
     slaveDriveIdChanged = Signal(int)
+    authorizedKeysChanged = Signal(str)
+    hostnameMasterChanged = Signal(str)
+    hostnameSlaveChanged = Signal(str)
+    repoUrlChanged = Signal(str)
+    reusePairKeyChanged = Signal(bool)
+    reuseHotspotChanged = Signal(bool)
 
     MIN_STEP = 1
     MAX_STEP = 6
@@ -40,6 +46,12 @@ class WizardState(QObject):
         self._slave_image_path = ""
         self._master_drive_id = -1
         self._slave_drive_id = -1
+        self._authorized_keys = ""
+        self._hostname_master = "astromech-master"
+        self._hostname_slave = "astromech-slave"
+        self._repo_url = ""
+        self._reuse_pair_key = False
+        self._reuse_hotspot = False
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -160,3 +172,77 @@ class WizardState(QObject):
             self.slaveDriveIdChanged.emit(drive_id)
         elif drive_id == self._master_drive_id and drive_id != -1:
             pass  # collision — silently ignore
+
+    # ------------------------------------------------------------------
+    # Step 4 — Customize
+    # ------------------------------------------------------------------
+
+    @Property(str, notify=authorizedKeysChanged)
+    def authorizedKeys(self) -> str:
+        return self._authorized_keys
+
+    @Slot(str)
+    def setAuthorizedKeys(self, txt: str) -> None:
+        if txt != self._authorized_keys:
+            self._authorized_keys = txt
+            self.authorizedKeysChanged.emit(txt)
+
+    @Slot(str, result=bool)
+    def hasValidAuthorizedKey(self, txt: str) -> bool:
+        """True if at least one line matches the OpenSSH pubkey regex."""
+        from astromechos_imager.core.validators import OPENSSH_PUBKEY_RE
+        for line in txt.splitlines():
+            s = line.strip()
+            if s and OPENSSH_PUBKEY_RE.match(s):
+                return True
+        return False
+
+    @Property(str, notify=hostnameMasterChanged)
+    def hostnameMaster(self) -> str:
+        return self._hostname_master
+
+    @Slot(str)
+    def setHostnameMaster(self, val: str) -> None:
+        if val != self._hostname_master:
+            self._hostname_master = val
+            self.hostnameMasterChanged.emit(val)
+
+    @Property(str, notify=hostnameSlaveChanged)
+    def hostnameSlave(self) -> str:
+        return self._hostname_slave
+
+    @Slot(str)
+    def setHostnameSlave(self, val: str) -> None:
+        if val != self._hostname_slave:
+            self._hostname_slave = val
+            self.hostnameSlaveChanged.emit(val)
+
+    @Property(str, notify=repoUrlChanged)
+    def repoUrl(self) -> str:
+        return self._repo_url
+
+    @Slot(str)
+    def setRepoUrl(self, val: str) -> None:
+        if val != self._repo_url:
+            self._repo_url = val
+            self.repoUrlChanged.emit(val)
+
+    @Property(bool, notify=reusePairKeyChanged)
+    def reusePairKey(self) -> bool:
+        return self._reuse_pair_key
+
+    @Slot(bool)
+    def setReusePairKey(self, val: bool) -> None:
+        if val != self._reuse_pair_key:
+            self._reuse_pair_key = val
+            self.reusePairKeyChanged.emit(val)
+
+    @Property(bool, notify=reuseHotspotChanged)
+    def reuseHotspot(self) -> bool:
+        return self._reuse_hotspot
+
+    @Slot(bool)
+    def setReuseHotspot(self, val: bool) -> None:
+        if val != self._reuse_hotspot:
+            self._reuse_hotspot = val
+            self.reuseHotspotChanged.emit(val)

@@ -215,3 +215,147 @@ def test_set_slave_rejects_same_as_master(qtbot):
     s.setSlaveDriveId(2)  # collision — ignored
     assert s.slaveDriveId == -1
     assert s.masterDriveId == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 8.6 — Step 4 Customize fields
+# ---------------------------------------------------------------------------
+
+def test_authorized_keys_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.authorizedKeys == ""
+
+
+def test_set_authorized_keys_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.authorizedKeysChanged.connect(lambda v: received.append(v))
+    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")
+    assert s.authorizedKeys == "ssh-ed25519 AAAA... user@host"
+    assert received == ["ssh-ed25519 AAAA... user@host"]
+
+
+def test_set_authorized_keys_same_value_no_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")
+    received = []
+    s.authorizedKeysChanged.connect(lambda v: received.append(v))
+    s.setAuthorizedKeys("ssh-ed25519 AAAA... user@host")  # same — no signal
+    assert received == []
+
+
+def test_has_valid_authorized_key_valid_ed25519(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    # Use a syntactically valid ed25519 key format
+    key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@host"
+    assert s.hasValidAuthorizedKey(key) is True
+
+
+def test_has_valid_authorized_key_valid_rsa(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC user@example"
+    assert s.hasValidAuthorizedKey(key) is True
+
+
+def test_has_valid_authorized_key_empty_returns_false(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.hasValidAuthorizedKey("") is False
+
+
+def test_has_valid_authorized_key_garbage_returns_false(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.hasValidAuthorizedKey("not-a-key") is False
+
+
+def test_has_valid_authorized_key_multiline_with_one_valid(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    txt = "# comment\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl user@host\n"
+    assert s.hasValidAuthorizedKey(txt) is True
+
+
+def test_hostname_master_default(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.hostnameMaster == "astromech-master"
+
+
+def test_hostname_slave_default(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.hostnameSlave == "astromech-slave"
+
+
+def test_set_hostname_master_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.hostnameMasterChanged.connect(lambda v: received.append(v))
+    s.setHostnameMaster("r2d2-master")
+    assert s.hostnameMaster == "r2d2-master"
+    assert received == ["r2d2-master"]
+
+
+def test_set_hostname_slave_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.hostnameSlaveChanged.connect(lambda v: received.append(v))
+    s.setHostnameSlave("r2d2-slave")
+    assert s.hostnameSlave == "r2d2-slave"
+    assert received == ["r2d2-slave"]
+
+
+def test_repo_url_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.repoUrl == ""
+
+
+def test_set_repo_url_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.repoUrlChanged.connect(lambda v: received.append(v))
+    s.setRepoUrl("https://github.com/user/AstromechOS.git")
+    assert s.repoUrl == "https://github.com/user/AstromechOS.git"
+    assert received == ["https://github.com/user/AstromechOS.git"]
+
+
+def test_reuse_pair_key_default_false(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.reusePairKey is False
+
+
+def test_set_reuse_pair_key_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.reusePairKeyChanged.connect(lambda v: received.append(v))
+    s.setReusePairKey(True)
+    assert s.reusePairKey is True
+    assert received == [True]
+
+
+def test_reuse_hotspot_default_false(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.reuseHotspot is False
+
+
+def test_set_reuse_hotspot_emits(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.reuseHotspotChanged.connect(lambda v: received.append(v))
+    s.setReuseHotspot(True)
+    assert s.reuseHotspot is True
+    assert received == [True]

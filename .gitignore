@@ -33,3 +33,7 @@ tests/poc/*.ext4
 tests/fixtures/*.img
 tests/fixtures/*.ext4
 tests/fixtures/*.fat32
+
+# Vendored binaries (must be populated locally — see vendor/README.md)
+vendor/*.exe
+vendor/*.dll

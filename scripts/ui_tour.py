@@ -1,9 +1,11 @@
-"""Capture one PNG per wizard step into tour/ — for design review.
+"""Capture one PNG per wizard step into screenshots/ — for design review.
 
 Forces fake wizard state so Steps 2-6 render with realistic content even
 without SD cards / real images present. Run from project root:
 
     .venv\\Scripts\\python.exe scripts\\ui_tour.py
+
+Output directory is gitignored (see .gitignore -> screenshots/).
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from astromechos_imager.ui.app import build_app   # noqa: E402
 
-OUT = Path(__file__).resolve().parents[1] / "tour"
+OUT = Path(__file__).resolve().parents[1] / "screenshots"
 OUT.mkdir(parents=True, exist_ok=True)
 
 

@@ -30,6 +30,7 @@ tests/poc/*.ext4
 /tmp/
 
 # UI tour screenshots — regenerated on demand via scripts/ui_tour.py
+screenshots/
 tour/
 
 # E2E test fixtures (rebuildable via tests/fixtures/make_pi_os_fixture.py)

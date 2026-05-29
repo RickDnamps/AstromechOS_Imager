@@ -1,0 +1,50 @@
+"""QApplication entry point + crash hook for AstromechOS Imager."""
+from __future__ import annotations
+
+import sys
+import traceback
+from pathlib import Path
+
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+
+from astromechos_imager.ui.messages import M
+
+
+def _excepthook(exc_type, exc_value, tb) -> None:
+    """Last-resort crash logger. Replaced by the JSONL logging hook in a later phase."""
+    sys.stderr.write("\n=== AstromechOS Imager — UNCAUGHT EXCEPTION ===\n")
+    traceback.print_exception(exc_type, exc_value, tb)
+
+
+def splash_asset_path() -> Path:
+    """Resolve the startup splash PNG in dev and frozen (PyInstaller) modes."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "astromechos_imager" / "ui" / "resources" / "images" / "startup_screen_final.png"
+    return Path(__file__).resolve().parent / "resources" / "images" / "startup_screen_final.png"
+
+
+def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine]:
+    """Construct the QApplication + QML engine. Used by main() and tests."""
+    # Reuse existing instance if pytest-qt already created one
+    app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+    app.setApplicationName(M["app_title"])
+    sys.excepthook = _excepthook
+
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty(
+        "splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path()))
+    )
+    qml_main = Path(__file__).resolve().parent / "qml" / "main.qml"
+    engine.load(QUrl.fromLocalFile(str(qml_main)))
+    return app, engine
+
+
+def main() -> int:
+    app, _engine = build_app()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -82,7 +82,7 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignVCenter
                 Text {
                     text: "ASTROMECHOS IMAGER"
-                    color: theme.colors.colorTextPrimary
+                    color: theme.colors.colorTextOnChrome
                     font.family: Theme.fontTitle
                     font.pixelSize: 13
                     font.bold: true
@@ -90,7 +90,7 @@ ApplicationWindow {
                 }
                 Text {
                     text: root.displayedStepIdx >= 0 ? root.stepLabels[root.displayedStepIdx + 1] : root.stepLabels[0]
-                    color: theme.colors.colorTextAccent
+                    color: theme.colors.colorAccent   // accent ressort assez sur le chrome sombre
                     font.family: Theme.fontSubtitle
                     font.pixelSize: 10
                     font.letterSpacing: 1.8
@@ -117,7 +117,7 @@ ApplicationWindow {
                             radius: width / 2
                             color: isActive    ? theme.colors.colorAccent
                                  : isCompleted ? theme.colors.colorAccentDim
-                                 :                theme.colors.colorDivider
+                                 :                theme.colors.colorChromePipInactive
                             border.color: isActive ? theme.colors.colorAccentBright : "transparent"
                             border.width: isActive ? 1 : 0
                             Behavior on color  { ColorAnimation  { duration: Theme.durBase } }
@@ -184,7 +184,7 @@ ApplicationWindow {
             anchors.rightMargin: 16
             Text {
                 text: "v" + appVersion + " · BUILD READY"
-                color: theme.colors.colorTextTertiary
+                color: theme.colors.colorTextOnChromeDim
                 font.family: Theme.fontSubtitle
                 font.pixelSize: 9
                 font.letterSpacing: 1.5
@@ -192,7 +192,7 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Text {
                 text: "ASTROMECHOS © 2026 · GPLv3"
-                color: theme.colors.colorTextTertiary
+                color: theme.colors.colorTextOnChromeDim
                 font.family: Theme.fontSubtitle
                 font.pixelSize: 9
                 font.letterSpacing: 1.5

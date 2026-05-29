@@ -14,6 +14,16 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
+# Tokens for elements that sit on the dark chrome (header + footer).
+# The chrome bg is `#0e1217` in BOTH modes, so its foregrounds must stay
+# constant too — otherwise the navy text-on-navy-bg vanishes in Light.
+_ON_CHROME = {
+    "colorTextOnChrome":     "#e6e8ea",   # primary chrome label (title)
+    "colorTextOnChromeDim":  "#7a8086",   # secondary chrome label / icons
+    "colorChromePipInactive": "#2a2f34",  # future-step pip on header
+}
+
+
 _DARK = {
     # Surfaces (deep dark, blue undertone) ────────────────────────────
     "colorBg":            "#101418",
@@ -40,6 +50,7 @@ _DARK = {
     "colorAccentBright":  "#7eb8e8",
     "colorAccentDim":     "#3d6e9e",
     "colorAccentGlow":    "#5e9bd6",
+    **_ON_CHROME,
 }
 
 
@@ -68,6 +79,7 @@ _LIGHT = {
     "colorAccentBright":  "#2c70d4",
     "colorAccentDim":     "#7099c6",
     "colorAccentGlow":    "#1e5db8",
+    **_ON_CHROME,
 }
 
 

@@ -24,3 +24,34 @@ def fixed_iso_time(monkeypatch: pytest.MonkeyPatch) -> str:
     iso = "2026-05-29T02:15:00Z"
     monkeypatch.setattr("astromechos_imager.core.models._utc_iso_now", lambda: iso)
     return iso
+
+
+@pytest.fixture
+def fake_boot_partition():
+    """In-memory BootPartition impl for testing renderers + FirstbootBundle."""
+
+    class _Fake:
+        def __init__(self):
+            self.files: dict[str, bytes] = {}
+            self.dirs: set[str] = {"/"}
+
+        def write_bytes(self, p, d):
+            parent = "/" + "/".join(p.lstrip("/").split("/")[:-1])
+            parent = parent.rstrip("/") or "/"
+            if parent not in self.dirs:
+                raise FileNotFoundError(f"parent {parent} missing")
+            self.files[p] = d
+
+        def read_bytes(self, p):
+            return self.files[p]
+
+        def mkdir(self, p):
+            self.dirs.add(p)
+
+        def exists(self, p):
+            return p in self.files or p in self.dirs
+
+        def close(self):
+            pass
+
+    return _Fake()

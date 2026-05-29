@@ -4,8 +4,8 @@ import QtQuick.Layouts
 import Qt.labs.platform 1.1
 
 Rectangle {
+    // Root sized by StackView — do NOT set anchors.fill here.
     color: "#1a1f24"
-    anchors.fill: parent
 
     property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
     property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"

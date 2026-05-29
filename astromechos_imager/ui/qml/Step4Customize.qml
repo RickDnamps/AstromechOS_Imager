@@ -2,8 +2,8 @@ import QtQuick
 import QtQuick.Controls
 
 Rectangle {
+    // Root sized by StackView — do NOT set anchors.fill here.
     color: "#1a1f24"
-    anchors.fill: parent
 
     Text {
         anchors.centerIn: parent

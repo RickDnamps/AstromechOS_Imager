@@ -3,8 +3,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
+    // Root sized by StackView — do NOT set anchors.fill here.
     color: "#1a1f24"
-    anchors.fill: parent
 
     ColumnLayout {
         anchors.centerIn: parent

@@ -10,10 +10,11 @@ ApplicationWindow {
     title: "AstromechOS Imager"
     color: "#101418"
 
-    // Step components — created lazily so QML errors in one don't kill startup
+    // Step components — created lazily so QML errors in one don't kill startup.
+    // Root items intentionally do NOT set anchors.fill: parent — StackView
+    // manages their geometry by setting width/height directly.
     Component { id: splashComponent
         Image {
-            anchors.fill: parent
             source: splashImageUrl
             fillMode: Image.PreserveAspectFit
             smooth: true

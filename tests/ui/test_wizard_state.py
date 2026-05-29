@@ -83,3 +83,39 @@ def test_signal_not_emitted_on_clamp(qtbot):
     s.back()  # at 1, clamps — no signal
     s.back()  # still at 1
     assert received == []
+
+
+# ---------------------------------------------------------------------------
+# Task 8.3 — mode picker
+# ---------------------------------------------------------------------------
+
+def test_mode_default_is_both(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.mode == "both"
+
+
+def test_set_mode_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.modeChanged.connect(lambda v: received.append(v))
+    s.setMode("master_only")
+    assert s.mode == "master_only"
+    assert received == ["master_only"]
+
+
+def test_set_mode_invalid_noop(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setMode("nonsense")
+    assert s.mode == "both"
+
+
+def test_set_mode_same_value_no_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.modeChanged.connect(lambda v: received.append(v))
+    s.setMode("both")  # already default
+    assert received == []

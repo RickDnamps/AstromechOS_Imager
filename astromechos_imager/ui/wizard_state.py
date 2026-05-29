@@ -16,13 +16,20 @@ class WizardState(QObject):
         6 — Done (recap + next steps)
     """
     currentStepChanged = Signal(int)
+    modeChanged = Signal(str)
 
     MIN_STEP = 1
     MAX_STEP = 6
 
+    MODE_BOTH = "both"
+    MODE_MASTER_ONLY = "master_only"
+    MODE_SLAVE_ONLY = "slave_only"
+    VALID_MODES = (MODE_BOTH, MODE_MASTER_ONLY, MODE_SLAVE_ONLY)
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._step = self.MIN_STEP
+        self._mode = self.MODE_BOTH  # default = recommended
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -48,3 +55,17 @@ class WizardState(QObject):
         if self.MIN_STEP <= step <= self.MAX_STEP and step != self._step:
             self._step = step
             self.currentStepChanged.emit(self._step)
+
+    # ------------------------------------------------------------------
+    # Step 1 — Mode
+    # ------------------------------------------------------------------
+
+    @Property(str, notify=modeChanged)
+    def mode(self) -> str:
+        return self._mode
+
+    @Slot(str)
+    def setMode(self, mode: str) -> None:
+        if mode in self.VALID_MODES and mode != self._mode:
+            self._mode = mode
+            self.modeChanged.emit(self._mode)

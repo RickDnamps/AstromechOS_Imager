@@ -7,9 +7,9 @@ Processing pipeline
 -------------------
 1. Normalise source to RGBA.
 2. Thumbnail to fit within 800x600 (LANCZOS, aspect-ratio preserving).
-3. Paste the thumbnail centred on a solid-black 800x600 canvas. The opaque
-   background is intentional — a transparent canvas would render invisible
-   when the splash is shown against an undefined backdrop.
+3. Paste the thumbnail centred on a fully transparent 800x600 canvas. The
+   top/bottom letterbox bands stay transparent so the splash blends into
+   whatever backdrop the host UI provides.
 4. Save as PNG with optimize=True and no embedded timestamp metadata,
    so repeated runs produce byte-identical output.
 
@@ -36,7 +36,7 @@ OUTPUT_IMAGE = (
 )
 
 CANVAS_W, CANVAS_H = 800, 600
-CANVAS_BG = (0, 0, 0, 255)   # opaque black — splash backdrop
+CANVAS_BG = (0, 0, 0, 0)   # fully transparent letterbox bands
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def main() -> int:
     thumb = src.copy()
     thumb.thumbnail((CANVAS_W, CANVAS_H), Image.LANCZOS)
 
-    # 3. Paste centred on an opaque 800x600 canvas
+    # 3. Paste centred on a transparent 800x600 canvas
     canvas = Image.new("RGBA", (CANVAS_W, CANVAS_H), CANVAS_BG)
     x_off = (CANVAS_W - thumb.width) // 2
     y_off = (CANVAS_H - thumb.height) // 2

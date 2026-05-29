@@ -144,3 +144,35 @@ class GzSource(_BaseSource):
             if not chunk:
                 break
             yield chunk
+
+
+import zipfile
+
+
+class ZipSource(_BaseSource):
+    """Streams the single .img entry inside a ZIP. Refuses zero or 2+ .img entries."""
+    def __init__(self, path: Path):
+        super().__init__(path)
+        with zipfile.ZipFile(path, "r") as zf:
+            imgs = [n for n in zf.namelist() if n.lower().endswith(".img")]
+        if len(imgs) != 1:
+            raise ImageFormatError(
+                f"ZIP must contain exactly one .img entry, found {len(imgs)}: {imgs!r}"
+            )
+        self._entry = imgs[0]
+        with zipfile.ZipFile(path, "r") as zf:
+            self.uncompressed_size = zf.getinfo(self._entry).file_size
+
+    def __iter__(self) -> Iterator[bytes]:
+        zf = zipfile.ZipFile(self.path, "r")
+        self._fh = zf.open(self._entry, "r")
+        try:
+            while True:
+                chunk = self._fh.read(self.CHUNK_SIZE)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            self._fh.close()
+            zf.close()
+            self._fh = None

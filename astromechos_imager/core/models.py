@@ -29,6 +29,20 @@ class HotspotBootstrap:
 
 
 @dataclass(frozen=True)
+class LinuxAccount:
+    """Cold-modification target for the Golden Image's UID-1000 Linux user.
+
+    The Imager renames UID-1000 to ``username`` and sets its password to
+    ``cleartext_password`` (hashed as ``crypt_sha512`` for /etc/shadow).
+    All three fields populated by ``generate_linux_account()``.
+    """
+
+    username: str            # New POSIX login replacing the Golden Image's UID-1000 name
+    cleartext_password: str  # ~16 chars from secrets.token_urlsafe(12) — shown once to operator
+    crypt_sha512: str        # $6$<salt>$<hash> written directly to /etc/shadow (Phase 5.5)
+
+
+@dataclass(frozen=True)
 class Ed25519Pair:
     private_openssh: bytes
     public_openssh: bytes

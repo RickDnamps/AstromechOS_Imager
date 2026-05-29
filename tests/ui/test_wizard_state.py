@@ -119,3 +119,60 @@ def test_set_mode_same_value_no_signal(qtbot):
     s.modeChanged.connect(lambda v: received.append(v))
     s.setMode("both")  # already default
     assert received == []
+
+
+# ---------------------------------------------------------------------------
+# Task 8.4 — image paths
+# ---------------------------------------------------------------------------
+
+def test_master_image_path_setter(qtbot, tmp_path):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    f = tmp_path / "x.img"
+    f.write_bytes(b"x" * 100)
+    received = []
+    s.masterImagePathChanged.connect(lambda v: received.append(v))
+    s.setMasterImagePath(str(f))
+    assert s.masterImagePath == str(f)
+    assert received == [str(f)]
+
+
+def test_image_path_file_url_normalized(qtbot, tmp_path):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    f = tmp_path / "y.img.xz"
+    f.write_bytes(b"x" * 100)
+    s.setMasterImagePath(f"file:///{str(f).replace(chr(92), '/')}")
+    assert s.masterImagePath == str(f).replace("\\", "/").lstrip("/") or s.masterImagePath.endswith("y.img.xz")
+
+
+def test_valid_image_path_returns_true(qtbot, tmp_path):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    for ext in [".img", ".img.xz", ".img.gz", ".zip"]:
+        name = "test" + ext if not ext.startswith(".img.") else "test.img" + ext[4:]
+        if ext == ".img":
+            name = "test.img"
+        elif ext == ".img.xz":
+            name = "test.img.xz"
+        elif ext == ".img.gz":
+            name = "test.img.gz"
+        else:
+            name = "test.zip"
+        f = tmp_path / name
+        f.write_bytes(b"x")
+        assert s.isValidImagePath(str(f)), f"Expected {f} to be valid"
+
+
+def test_valid_image_path_rejects_nonexistent(qtbot, tmp_path):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert not s.isValidImagePath(str(tmp_path / "missing.img"))
+
+
+def test_valid_image_path_rejects_wrong_ext(qtbot, tmp_path):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    f = tmp_path / "doc.pdf"
+    f.write_bytes(b"x")
+    assert not s.isValidImagePath(str(f))

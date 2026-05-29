@@ -17,6 +17,8 @@ class WizardState(QObject):
     """
     currentStepChanged = Signal(int)
     modeChanged = Signal(str)
+    masterImagePathChanged = Signal(str)
+    slaveImagePathChanged = Signal(str)
 
     MIN_STEP = 1
     MAX_STEP = 6
@@ -26,10 +28,14 @@ class WizardState(QObject):
     MODE_SLAVE_ONLY = "slave_only"
     VALID_MODES = (MODE_BOTH, MODE_MASTER_ONLY, MODE_SLAVE_ONLY)
 
+    SUPPORTED_IMAGE_EXTENSIONS = (".img", ".xz", ".gz", ".zip")  # .img.xz, .img.gz handled by stem-check
+
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._step = self.MIN_STEP
         self._mode = self.MODE_BOTH  # default = recommended
+        self._master_image_path = ""
+        self._slave_image_path = ""
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -69,3 +75,52 @@ class WizardState(QObject):
         if mode in self.VALID_MODES and mode != self._mode:
             self._mode = mode
             self.modeChanged.emit(self._mode)
+
+    # ------------------------------------------------------------------
+    # Step 2 — Image paths
+    # ------------------------------------------------------------------
+
+    @Property(str, notify=masterImagePathChanged)
+    def masterImagePath(self) -> str:
+        return self._master_image_path
+
+    @Property(str, notify=slaveImagePathChanged)
+    def slaveImagePath(self) -> str:
+        return self._slave_image_path
+
+    @Slot(str)
+    def setMasterImagePath(self, p: str) -> None:
+        p = self._normalize_path(p)
+        if p != self._master_image_path:
+            self._master_image_path = p
+            self.masterImagePathChanged.emit(p)
+
+    @Slot(str)
+    def setSlaveImagePath(self, p: str) -> None:
+        p = self._normalize_path(p)
+        if p != self._slave_image_path:
+            self._slave_image_path = p
+            self.slaveImagePathChanged.emit(p)
+
+    @staticmethod
+    def _normalize_path(p: str) -> str:
+        """Strip file:// scheme and decode."""
+        from urllib.parse import urlparse, unquote
+        if p.startswith("file://"):
+            u = urlparse(p)
+            # Handle Windows file:///J:/foo and file:///J:\foo cases
+            return unquote(u.path.lstrip("/")) if u.path else ""
+        return p
+
+    @Slot(str, result=bool)
+    def isValidImagePath(self, p: str) -> bool:
+        """True if path exists AND has a supported extension."""
+        from pathlib import Path
+        if not p:
+            return False
+        norm = self._normalize_path(p)
+        fp = Path(norm)
+        if not fp.is_file():
+            return False
+        suffixes = [s.lower() for s in fp.suffixes[-2:]]
+        return any(s in self.SUPPORTED_IMAGE_EXTENSIONS for s in suffixes)

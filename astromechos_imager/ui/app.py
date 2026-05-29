@@ -11,6 +11,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from astromechos_imager.ui.messages import M
 from astromechos_imager.ui.wizard_state import WizardState
+from astromechos_imager.ui.flash_view_model import FlashViewModel
 
 
 def _excepthook(exc_type, exc_value, tb) -> None:
@@ -34,10 +35,13 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     sys.excepthook = _excepthook
 
     state = WizardState()
+    flash_vm = FlashViewModel(state)
     engine = QQmlApplicationEngine()
     ctx = engine.rootContext()
     ctx.setContextProperty("splashImageUrl", QUrl.fromLocalFile(str(splash_asset_path())))
     ctx.setContextProperty("wizardState", state)
+    ctx.setContextProperty("flashViewModel", flash_vm)
+    engine.flashViewModel = flash_vm   # keepalive
 
     # Drive list model — Windows-only; tests inject their own
     if sys.platform == "win32":

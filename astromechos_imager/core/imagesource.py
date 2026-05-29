@@ -98,3 +98,49 @@ def open_image(path: Path) -> ImageSource:
     if path.suffix.lower() == ".img" and path.stat().st_size >= 512:
         return RawSource(path)
     raise ImageFormatError(f"unrecognized image format: {path}")
+
+
+import gzip
+import lzma
+import struct
+
+
+class XzSource(_BaseSource):
+    """Streaming xz decompression via stdlib lzma."""
+    def __init__(self, path: Path):
+        super().__init__(path)
+        self.uncompressed_size = None  # xz format does not always store this
+
+    def __iter__(self) -> Iterator[bytes]:
+        self._fh = lzma.open(self.path, "rb")
+        while True:
+            chunk = self._fh.read(self.CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk
+
+
+class GzSource(_BaseSource):
+    """Streaming gzip decompression."""
+    def __init__(self, path: Path):
+        super().__init__(path)
+        self.uncompressed_size = self._read_isize()
+
+    def _read_isize(self) -> int | None:
+        """Last 4 bytes of a gzip file = uncompressed size mod 2^32."""
+        size = self.path.stat().st_size
+        if size < 4:
+            return None
+        with self.path.open("rb") as f:
+            f.seek(-4, 2)
+            isize = struct.unpack("<I", f.read(4))[0]
+        # For images > 4 GB this wraps. Caller treats None and 0 as "unknown".
+        return isize if isize > 0 else None
+
+    def __iter__(self) -> Iterator[bytes]:
+        self._fh = gzip.open(self.path, "rb")
+        while True:
+            chunk = self._fh.read(self.CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk

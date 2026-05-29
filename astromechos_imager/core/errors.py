@@ -1,0 +1,67 @@
+"""Typed error hierarchy. Per design spec §7.1."""
+from __future__ import annotations
+
+from typing import Literal
+
+Severity = Literal["ERROR", "WARNING"]
+SDState = Literal["SAFE", "GARBAGE", "UNCERTAIN", "BOOTABLE_NO_FIRSTBOOT", "OK"]
+
+
+class ImagerError(Exception):
+    severity: Severity = "ERROR"
+    sd_state: SDState = "SAFE"
+    retryable: bool = False
+    recovery_hint: str = ""
+
+
+# ── Preflight: SD untouched ───────────────────────────────────────────────
+class PreflightError(ImagerError):
+    sd_state: SDState = "SAFE"
+
+class ImageFormatError(PreflightError): ...
+class ImageTooLargeError(PreflightError): ...
+class DriveNotFoundError(PreflightError): ...
+class DrivePermissionError(PreflightError): ...
+class DriveLockError(PreflightError): ...
+class ConfigValidationError(PreflightError): ...
+
+
+# ── Flash: SD = garbage ───────────────────────────────────────────────────
+class FlashError(ImagerError):
+    sd_state: SDState = "GARBAGE"
+    retryable: bool = True
+
+class DecompressError(FlashError): ...
+class WriteError(FlashError): ...
+class DriveDisconnectedError(FlashError): ...
+
+
+# ── Verify: SD content uncertain ──────────────────────────────────────────
+class VerifyError(ImagerError):
+    sd_state: SDState = "UNCERTAIN"
+    retryable: bool = True
+
+class HashMismatchError(VerifyError):
+    def __init__(self, msg: str, first_diff_offset: int = -1) -> None:
+        super().__init__(msg)
+        self.first_diff_offset = first_diff_offset
+
+class ReadbackError(VerifyError): ...
+
+
+# ── Customization: OS image valid but firstboot bundle incomplete ─────────
+class CustomizationError(ImagerError):
+    sd_state: SDState = "BOOTABLE_NO_FIRSTBOOT"
+
+class BootPartitionMountError(CustomizationError): ...
+class BootPartitionWriteError(CustomizationError): ...
+class BundleSelfValidationFailedError(CustomizationError): ...
+class PairAsymmetryError(CustomizationError): ...
+
+
+# ── Cleanup: non-fatal ────────────────────────────────────────────────────
+class CleanupError(ImagerError):
+    severity: Severity = "WARNING"
+    sd_state: SDState = "OK"
+
+class EjectFailedError(CleanupError): ...

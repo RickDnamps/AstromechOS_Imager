@@ -45,9 +45,18 @@ def test_openssh_pubkey_invalid(k):
         validate_authorized_keys([k])
 
 
-def test_authorized_keys_empty_list_rejected():
-    with pytest.raises(InvalidAuthorizedKeysError):
-        validate_authorized_keys([])
+def test_authorized_keys_empty_list_accepted_zero_touch():
+    """Zero-Touch contract: an empty authorized_keys is permitted.
+
+    The Master ships without an operator pubkey (operator authenticates
+    with the Pi user's password at first login). The Slave receives the
+    Master's public key at write time via render_authorized_keys; the
+    role-aware FirstbootBundle._self_validate enforces that the Slave
+    actually carries a valid OpenSSH key before the trigger marker is
+    written. So this validator does not need to gate on emptiness.
+    """
+    # Must not raise.
+    validate_authorized_keys([])
 
 
 # ── Install user (POSIX login) ────────────────────────────────────────────

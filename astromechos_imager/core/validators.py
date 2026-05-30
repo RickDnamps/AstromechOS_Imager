@@ -44,8 +44,20 @@ def validate_hostname(h: str) -> None:
 
 
 def validate_authorized_keys(keys: list[str]) -> None:
-    if not keys:
-        raise InvalidAuthorizedKeysError("at least one key required")
+    """Validate an authorized_keys list.
+
+    Zero-Touch contract: an empty list is **permitted**. The Master ships
+    without an operator pubkey (the operator authenticates with the Pi
+    user's password at first login). The Slave still receives the
+    Master's public key at write time via
+    ``core/customization.py:render_authorized_keys``, and the role-aware
+    ``FirstbootBundle._self_validate`` (the same module) enforces that
+    the Slave actually carries a valid OpenSSH key before the
+    ``ASTROMECHOS_FIRSTBOOT_READY`` trigger marker is written. So an
+    empty list here is safe.
+
+    Every non-empty entry must still match ``OPENSSH_PUBKEY_RE``.
+    """
     for k in keys:
         if not OPENSSH_PUBKEY_RE.match(k.strip()):
             raise InvalidAuthorizedKeysError(f"not an OpenSSH pubkey: {k!r}")

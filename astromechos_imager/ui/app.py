@@ -143,9 +143,16 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     if icon_path is not None and icon_path.is_file():
         app.setWindowIcon(QIcon(str(icon_path)))
     if getattr(sys, "frozen", False):
-        sys.stderr.write(f"[boot] frozen={sys.frozen} MEIPASS={getattr(sys, '_MEIPASS', None)}\n")
-        sys.stderr.write(f"[boot] __file__={__file__}\n")
-        sys.stderr.write(f"[boot] cwd={os.getcwd()}\n")
+        # Audit High #20: when the startup-log open above failed (disk full,
+        # ACL denied), sys.stderr stays None and an unconditional write here
+        # would raise AttributeError BEFORE the QML window appears —
+        # exactly the symptom the log was meant to diagnose. Guard via the
+        # same fallback pattern as _qt_message_handler.
+        sink = sys.stderr if sys.stderr is not None else sys.__stderr__
+        if sink is not None:
+            sink.write(f"[boot] frozen={sys.frozen} MEIPASS={getattr(sys, '_MEIPASS', None)}\n")
+            sink.write(f"[boot] __file__={__file__}\n")
+            sink.write(f"[boot] cwd={os.getcwd()}\n")
 
     state = WizardState()
     flash_vm = FlashViewModel(state)

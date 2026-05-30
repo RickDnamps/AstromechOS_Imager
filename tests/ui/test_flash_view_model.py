@@ -89,10 +89,14 @@ def test_cancel_sets_job_cancel_event(qtbot):
     vm.startWithJob(job)
     vm.cancel()
     assert job.cancel_event.is_set()
-    # Wait for the thread to finish to avoid crashes during teardown
+    # Audit High #10/#14: cancel() now flips status immediately to
+    # "cancelling", and _on_finished routes to "cancelled" (not "error").
+    assert vm.status in ("cancelling", "cancelled")
+    # Drain the worker thread before teardown.
     deadline = time.time() + 5
-    while vm.status == "flashing" and time.time() < deadline:
+    while vm.status not in ("cancelled", "done", "error") and time.time() < deadline:
         qtbot.wait(50)
+    assert vm.status == "cancelled"
 
 
 def test_start_while_flashing_is_noop(qtbot):

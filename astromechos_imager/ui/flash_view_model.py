@@ -108,7 +108,10 @@ class _HashWorker(QObject):
                 cancel_event=self._cancel,
             )
         except HashCancelled:
-            self.finished.emit(self._role, "", False)
+            # Audit High #8 / #10: distinguish a user-initiated cancel from
+            # a sidecar mismatch. The orchestrator looks for the literal
+            # ``"CANCELLED"`` sentinel in the digest slot.
+            self.finished.emit(self._role, "CANCELLED", False)
             return
         except Exception as exc:
             self.finished.emit(self._role, f"ERR:{type(exc).__name__}:{exc}", False)
@@ -218,6 +221,15 @@ class FlashViewModel(QObject):
         if self._status == "flashing":
             return
         self._cancel_event.clear()
+        # Audit High #9: route the view-model's cancel event into the job so
+        # cancel() flips the same flag that DiskWriter / verify_readback
+        # consult. Without this, the job has its own internal Event that
+        # cancel() never reaches and the destructive write proceeds.
+        if hasattr(job_obj, "cancel_event"):
+            try:
+                job_obj.cancel_event = self._cancel_event
+            except AttributeError:
+                pass  # frozen dataclass instance — best-effort
         self._status = "flashing"
         self.statusChanged.emit()
         is_pair = hasattr(job_obj, "master_target")
@@ -239,9 +251,27 @@ class FlashViewModel(QObject):
         present, and only proceeds to the actual flash on success. On a
         hash mismatch the wizard short-circuits to ``error`` and the
         operator never reaches the destructive write phase.
+
+        Build-time failures (e.g. drive removed since Step 3, keygen
+        I/O error, missing image file) surface as an ``error`` status
+        with the exception message — the WRITE button never becomes a
+        silent no-op (Audit High #18).
         """
-        job = _build_flash_job(self._wizard_state)
+        try:
+            job = _build_flash_job(self._wizard_state)
+        except Exception as exc:
+            self._status = "error"
+            self._error_message = f"Could not prepare flash job: {exc}"
+            self.statusChanged.emit()
+            self.errorMessageChanged.emit()
+            return
         if job is None:
+            # Legitimate "not enough info" — wizard validation should have
+            # prevented WRITE from being clickable, but be defensive.
+            self._status = "error"
+            self._error_message = "Could not prepare flash job (no platform IO available)"
+            self.statusChanged.emit()
+            self.errorMessageChanged.emit()
             return
         if not getattr(self._wizard_state, "verifyIntegrity", True):
             self.startWithJob(job)
@@ -327,6 +357,19 @@ class FlashViewModel(QObject):
             self._hash_thread = None
             self._hash_worker = None
 
+        if digest == "CANCELLED":
+            # Audit High #8 / #10: user-initiated cancel during hashing.
+            # Distinct from a sidecar mismatch — go to a clean "cancelled"
+            # state rather than telling the operator their file looks
+            # corrupted (which is what _fail_verify would say).
+            self._pending_verify_job = None
+            self._pending_verify_roles = []
+            self._status = "cancelled"
+            self._error_message = ""
+            self.statusChanged.emit()
+            self.errorMessageChanged.emit()
+            return
+
         if digest.startswith("ERR:"):
             # Worker raised — abort the verify phase entirely.
             self._fail_verify(f"hash failed for {role} image: {digest[4:]}")
@@ -365,9 +408,24 @@ class FlashViewModel(QObject):
 
     @Slot()
     def cancel(self) -> None:
+        """Request cancellation of the current verify / flash phase.
+
+        Audit High #10 / #14: previously this flipped events without any UI
+        feedback, so the operator kept seeing "VERIFYING" or "FLASHING" for
+        seconds and would spam-click. Now the status flips to ``cancelling``
+        immediately; the worker finish handler transitions to ``cancelled``
+        once the in-flight chunk completes.
+        """
+        if self._status not in ("verifying", "flashing"):
+            return  # nothing to cancel
         self._cancel_event.set()
         if self._worker is not None and hasattr(self._worker._job, "cancel_event"):
-            self._worker._job.cancel_event.set()
+            try:
+                self._worker._job.cancel_event.set()
+            except AttributeError:
+                pass
+        self._status = "cancelling"
+        self.statusChanged.emit()
 
     def _update_master(self, frac, phase):
         self._master_progress = frac
@@ -382,8 +440,15 @@ class FlashViewModel(QObject):
         self.slavePhaseChanged.emit()
 
     def _on_finished(self, ok, err):
-        self._status = "done" if ok else "error"
-        self._error_message = err
+        # Audit High #14: detect cancel-by-operator and route to a clean
+        # "cancelled" state rather than "error" — the operator clicked
+        # CANCEL themselves and shouldn't see an error message about it.
+        if self._cancel_event.is_set():
+            self._status = "cancelled"
+            self._error_message = ""
+        else:
+            self._status = "done" if ok else "error"
+            self._error_message = err
         self.statusChanged.emit()
         self.errorMessageChanged.emit()
         if self._thread is not None:
@@ -408,13 +473,10 @@ def _build_flash_job(wizard_state, platform_io=None):
             else:
                 return None
 
-        from astromechos_imager.core.imagesource import open_image
-        from astromechos_imager.core.models import (
-            FirstbootConfig, Role, DiskRef,
-        )
+        from astromechos_imager.core.models import FirstbootConfig, Role
         from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
         from astromechos_imager.core.keygen import (
-            generate_ed25519, generate_hotspot_bootstrap, generate_linux_account,
+            generate_ed25519, generate_hotspot_bootstrap,
             load_persisted_pair, save_persisted_pair,
         )
 
@@ -430,56 +492,74 @@ def _build_flash_job(wizard_state, platform_io=None):
             # symmetric across cards.
             save_persisted_pair(ed25519)
         hotspot = generate_hotspot_bootstrap()
-        linux_account = generate_linux_account()
 
+        # Zero-Touch FirstbootConfig:
+        #   * authorized_keys=[] — validator now permits empty (the Master is
+        #     reached by password at first login; the Slave gets the Master's
+        #     public key injected by render_authorized_keys at write time).
+        #   * install_user defaults to "pi" — Zero-Touch leaves the Golden
+        #     Image's UID-1000 user untouched (no rootfs personalization,
+        #     no debugfs / e2fsck required).
+        #   * The ed25519 keypair lives on the *job* (master_pair=), not on
+        #     FirstbootConfig — that's the contract of FlashJob /
+        #     PairFlashJob and what FirstbootBundle consumes.
         firstboot = FirstbootConfig(
-            authorized_keys=[],   # zero-touch: no operator keys injected
+            authorized_keys=[],
             hostname_master=wizard_state.hostnameMaster,
             hostname_slave=wizard_state.hostnameSlave,
-            install_user=linux_account.username,
-            ed25519_pair=ed25519,
-            hotspot=hotspot,
+            hotspot_bootstrap=hotspot,
             repo_url=wizard_state.repoUrl or None,
         )
 
         mode = wizard_state.mode
         drives = {d.physical_drive_id: d for d in platform_io.enumerate_removable_drives()}
 
+        master_drive = None
+        slave_drive = None
         if mode in ("both", "master_only"):
             master_drive = drives.get(wizard_state.masterDriveId)
+            if master_drive is None:
+                raise RuntimeError(
+                    f"master drive id={wizard_state.masterDriveId} not found "
+                    f"(was it removed since Step 3?)"
+                )
         if mode in ("both", "slave_only"):
             slave_drive = drives.get(wizard_state.slaveDriveId)
+            if slave_drive is None:
+                raise RuntimeError(
+                    f"slave drive id={wizard_state.slaveDriveId} not found "
+                    f"(was it removed since Step 3?)"
+                )
 
         if mode == "both":
-            master_src = open_image(wizard_state.masterImagePath)
-            slave_src = open_image(wizard_state.slaveImagePath)
             return PairFlashJob(
-                master_image=master_src,
-                slave_image=slave_src,
+                platform_io=platform_io,
+                master_image=Path(wizard_state.masterImagePath),
                 master_target=master_drive,
+                slave_image=Path(wizard_state.slaveImagePath),
                 slave_target=slave_drive,
                 firstboot_config=firstboot,
-                platform_io=platform_io,
+                master_pair=ed25519,
             )
-        elif mode == "master_only":
-            master_src = open_image(wizard_state.masterImagePath)
+        if mode == "master_only":
             return FlashJob(
-                image=master_src,
+                platform_io=platform_io,
+                image_path=Path(wizard_state.masterImagePath),
                 target=master_drive,
                 role=Role.MASTER,
                 firstboot_config=firstboot,
-                platform_io=platform_io,
+                master_pair=ed25519,
             )
-        else:  # slave_only
-            slave_src = open_image(wizard_state.slaveImagePath)
-            return FlashJob(
-                image=slave_src,
-                target=slave_drive,
-                role=Role.SLAVE,
-                firstboot_config=firstboot,
-                platform_io=platform_io,
-            )
-    except Exception as exc:
-        import sys
-        print(f"[FlashViewModel] _build_flash_job failed: {exc}", file=sys.stderr)
-        return None
+        # slave_only
+        return FlashJob(
+            platform_io=platform_io,
+            image_path=Path(wizard_state.slaveImagePath),
+            target=slave_drive,
+            role=Role.SLAVE,
+            firstboot_config=firstboot,
+            master_pair=ed25519,
+        )
+    except Exception:
+        # Audit High #18: don't swallow silently. Re-raise so startFromWizard
+        # can surface the failure in the UI instead of leaving WRITE a no-op.
+        raise

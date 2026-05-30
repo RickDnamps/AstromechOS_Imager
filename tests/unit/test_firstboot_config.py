@@ -38,9 +38,11 @@ def test_rejects_invalid_hostname():
         FirstbootConfig(authorized_keys=[VALID_KEY], hostname_master="bad host")
 
 
-def test_rejects_empty_keys():
-    with pytest.raises(InvalidAuthorizedKeysError):
-        FirstbootConfig(authorized_keys=[])
+def test_accepts_empty_keys_zero_touch():
+    """Empty authorized_keys is permitted under the Zero-Touch contract
+    (see ``core/validators.py::validate_authorized_keys`` docstring)."""
+    cfg = FirstbootConfig(authorized_keys=[])
+    assert cfg.authorized_keys == []
 
 
 def test_rejects_invalid_repo_url():

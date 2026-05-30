@@ -117,52 +117,89 @@ class FlashJob:
     ext4_e2fsck_exe: Path | None = None
 
     def run(self) -> FlashJobResult:
+        # Audit High #15: lock_and_dismount returns kernel32 HANDLEs that
+        # MUST be closed, otherwise volumes stay locked until process exit
+        # and "Flash another" never gets remount + the operator can't see
+        # the freshly-written SD in Explorer.
+        locked_handles: list[int] = []
+        write_result = None
         try:
-            # 1. Lock + dismount any drive letters for this physical drive
-            self.platform_io.lock_and_dismount(self.target.drive_letters)
-            # 2. Open raw device + flash
-            dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
             try:
-                with open_image(self.image_path) as src:
-                    dw = DiskWriter(src, dev, on_progress=self.on_progress,
-                                    cancel_event=self.cancel_event)
-                    write_result = dw.run()
-                # 3. Verify
-                if not self.skip_verify and not self.cancel_event.is_set():
-                    verify_readback(dev,
-                                    expected_sha256=write_result.source_sha256,
-                                    length=write_result.bytes_written,
-                                    on_progress=self.on_progress,
-                                    cancel_event=self.cancel_event)
-                # 4. Rootfs personalization + boot partition customize
-                if not self.skip_customize and not self.cancel_event.is_set():
-                    self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
-                    mbr = dev.read(0, 512)
-                    bp = _bootpartition_open(
-                        raw_device_path=self.target.device_path,
-                        mbr_bytes=mbr,
-                        known_letters_before=set(),
-                    )
-                    if bp is not None:
-                        try:
-                            # 4a. Rootfs personalization (if linux_account provided)
-                            if (
-                                self.linux_account is not None
-                                and not self.cancel_event.is_set()
-                            ):
-                                self._run_rootfs_personalization(mbr, bp)
-                            # 4b. Firstboot bundle (boot partition)
-                            if not self.cancel_event.is_set():
-                                FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
-                                    bp, self.role)
-                        finally:
-                            bp.close()
-            finally:
-                dev.close()
-            return FlashJobResult(ok=True, bytes_written=write_result.bytes_written,
-                                   source_sha256=write_result.source_sha256)
-        except ImagerError as e:
-            return FlashJobResult(ok=False, bytes_written=0, source_sha256="", error=e)
+                # 1. Lock + dismount any drive letters for this physical drive.
+                locked_handles = list(
+                    self.platform_io.lock_and_dismount(self.target.drive_letters) or []
+                )
+                # 2. Open raw device + flash.
+                dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
+                try:
+                    with open_image(self.image_path) as src:
+                        dw = DiskWriter(src, dev, on_progress=self.on_progress,
+                                        cancel_event=self.cancel_event)
+                        write_result = dw.run()
+                    # 3. Verify
+                    if not self.skip_verify and not self.cancel_event.is_set():
+                        verify_readback(dev,
+                                        expected_sha256=write_result.source_sha256,
+                                        length=write_result.bytes_written,
+                                        on_progress=self.on_progress,
+                                        cancel_event=self.cancel_event)
+                    # 4. Rootfs personalization + boot partition customize
+                    if not self.skip_customize and not self.cancel_event.is_set():
+                        self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
+                        mbr = dev.read(0, 512)
+                        bp = _bootpartition_open(
+                            raw_device_path=self.target.device_path,
+                            mbr_bytes=mbr,
+                            known_letters_before=set(),
+                        )
+                        if bp is not None:
+                            try:
+                                # 4a. Rootfs personalization (if linux_account provided)
+                                if (
+                                    self.linux_account is not None
+                                    and not self.cancel_event.is_set()
+                                ):
+                                    self._run_rootfs_personalization(mbr, bp)
+                                # 4b. Firstboot bundle (boot partition)
+                                if not self.cancel_event.is_set():
+                                    FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
+                                        bp, self.role)
+                            finally:
+                                bp.close()
+                finally:
+                    dev.close()
+                return FlashJobResult(ok=True,
+                                      bytes_written=write_result.bytes_written,
+                                      source_sha256=write_result.source_sha256)
+            except ImagerError as e:
+                # Domain error already carries SDState — propagate as-is.
+                return FlashJobResult(
+                    ok=False,
+                    bytes_written=write_result.bytes_written if write_result else 0,
+                    source_sha256=write_result.source_sha256 if write_result else "",
+                    error=e,
+                )
+            except Exception as e:
+                # Audit High #19: bare OSError / RuntimeError from Win32 paths
+                # used to escape the FlashJobResult contract and crash the
+                # worker thread. Wrap unexpected exceptions in a generic
+                # FlashError so callers still get a result.
+                from astromechos_imager.core.errors import FlashError
+                wrapped = FlashError(f"unexpected error during flash: {e!r}")
+                wrapped.__cause__ = e
+                return FlashJobResult(
+                    ok=False,
+                    bytes_written=write_result.bytes_written if write_result else 0,
+                    source_sha256=write_result.source_sha256 if write_result else "",
+                    error=wrapped,
+                )
+        finally:
+            # Always release the volume locks — failure path included.
+            for h in locked_handles:
+                try:
+                    self.platform_io.close_handle(h)
+                except Exception:
+                    pass  # best-effort; we're already in a finally
 
     def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
         """Open the ext4 rootfs partition and apply RootfsPersonalizer.

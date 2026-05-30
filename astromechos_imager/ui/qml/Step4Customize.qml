@@ -229,9 +229,9 @@ Rectangle {
                 font.letterSpacing: 1.4
             }
 
-            // ── Section 1: Robot login ────────────────────────────────
+            // ── Section 1: Linux account ──────────────────────────────
             SectionCard {
-                title: "ROBOT LOGIN"
+                title: "LINUX ACCOUNT  ·  UID-1000"
                 subtitle: "Account used to log into the robot."
 
                 RowLayout {
@@ -257,9 +257,9 @@ Rectangle {
                 }
             }
 
-            // ── Section 2: Home Wi-Fi (wlan1) ─────────────────────────
+            // ── Section 2: Domestic Wi-Fi (wlan1) ─────────────────────
             SectionCard {
-                title: "HOME Wi-Fi"
+                title: "EXTERNAL / DOMESTIC NETWORK  ·  wlan1"
                 subtitle: "Optional — connects your robot to your home network."
 
                 RowLayout {
@@ -269,7 +269,7 @@ Rectangle {
                         id: wifiSsidField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
-                        label: "Wi-Fi NAME"
+                        label: "DOMESTIC Wi-Fi SSID"
                         placeholder: "Your home Wi-Fi name (optional)"
                         helper: "Leave both fields empty to skip."
                         ok: wifiSsidOk
@@ -290,14 +290,14 @@ Rectangle {
                 }
             }
 
-            // ── Section 3: Internal robot link (wlan0) ────────────────
+            // ── Section 3: Private Robot Hotspot (wlan0) ──────────────
             SectionCard {
-                title: "INTERNAL ROBOT LINK"
+                title: "PRIVATE ROBOT HOTSPOT  ·  wlan0"
                 subtitle: "Used by the two halves of the robot to find each other."
 
                 AstroField {
                     id: hotspotField
-                    label: "LINK PASSWORD"
+                    label: "PRIVATE ROBOT HOTSPOT PASSWORD"
                     ok: hotspotPasswordOk
                     echoMode: TextInput.Password
                     onEdited: _flush()

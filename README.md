@@ -14,6 +14,38 @@ The **AstromechOS Imager** is the dedicated, opinionated flashing utility used t
 
 ---
 
+## 📸 Interface & Walkthrough
+
+The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cyan-blue (`#5e9bd6`) accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart.
+
+### Step 1 — Selection
+
+The operator picks **what** to flash: both cards (recommended), only the Master, or only the Slave. R2 line-art glyphs reinforce the choice.
+
+![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection.png)
+
+### Step 2 — Target Drives
+
+Removable drives are enumerated live (system disk is hidden for safety). Each row carries `MASTER` and `SLAVE` assignment buttons that lock the chosen physical device to the chosen role.
+
+![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives.png)
+
+### Step 3 — Security Validation
+
+Once images are selected, the wizard runs the FAT32 role-marker validation (Strategy D) and the filename pattern check in the background. Each image row gets a colored badge: green = certified, amber = legacy without marker but plausible by filename, red = hard mismatch → `NEXT` disabled.
+
+![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation.png)
+
+### Step 4 — Confirm & Flash
+
+Final summary with optional SHA-256 integrity toggle. The destructive `⚡ WRITE` button only goes live after the confirmation dialog and (if enabled) a clean checksum verification. The flashing phase shows live progress per role.
+
+![Step 4 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_confirm_flash.png)
+
+> 🗂️ **For maintainers** — production screenshots are captured locally to `J:\R2-D2_Build\AstromechOS_Screenshots\Screenshots_Imager\` and mirrored to the [`AstromechOS_Screenshots`](https://github.com/RickDnamps/AstromechOS_Screenshots) sibling repository so that this README always renders the latest UI from GitHub raw-content URLs.
+
+---
+
 ## 🚀 Project Overview & Architecture
 
 A purpose-built Windows desktop wizard (Python 3.12 + **PySide6 / QML**, distributed as a single signed installer) that drives the entire AstromechOS provisioning pipeline.
@@ -200,38 +232,6 @@ AstromechOS-slave-<version>.img.xz.sha256
 ```
 
 These images ship with the strict `/astromech_role.json` marker pre-installed — the hard-block validator passes them immediately. They are **shrunken** (rootfs trimmed and `init_resize.sh` re-injected) so downloads stay reasonable while still expanding to fill any ≥ 8 GB SD card on first boot.
-
----
-
-## 📸 Interface & Walkthrough
-
-The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cyan-blue (`#5e9bd6`) accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart.
-
-> 🗂️ **For maintainers** — production screenshots are captured locally to `J:\R2-D2_Build\AstromechOS_Screenshots\Screenshots_Imager\` and mirrored to the [`AstromechOS_Screenshots`](https://github.com/RickDnamps/AstromechOS_Screenshots) sibling repository so that this README always renders the latest UI from GitHub raw-content URLs.
-
-### Step 1 — Selection
-
-The operator picks **what** to flash: both cards (recommended), only the Master, or only the Slave. R2 line-art glyphs reinforce the choice.
-
-![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection.png)
-
-### Step 2 — Target Drives
-
-Removable drives are enumerated live (system disk is hidden for safety). Each row carries `MASTER` and `SLAVE` assignment buttons that lock the chosen physical device to the chosen role.
-
-![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives.png)
-
-### Step 3 — Security Validation
-
-Once images are selected, the wizard runs the FAT32 role-marker validation (Strategy D) and the filename pattern check in the background. Each image row gets a colored badge: green = certified, amber = legacy without marker but plausible by filename, red = hard mismatch → `NEXT` disabled.
-
-![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation.png)
-
-### Step 4 — Confirm & Flash
-
-Final summary with optional SHA-256 integrity toggle. The destructive `⚡ WRITE` button only goes live after the confirmation dialog and (if enabled) a clean checksum verification. The flashing phase shows live progress per role.
-
-![Step 4 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_confirm_flash.png)
 
 ---
 

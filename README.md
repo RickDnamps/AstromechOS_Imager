@@ -16,37 +16,49 @@ The **AstromechOS Imager** is the dedicated, opinionated flashing utility used t
 
 ## 📸 Interface & Walkthrough
 
-The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cobalt-blue accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart — the screenshots below show the **Light** variant.
+The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cobalt-blue accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart — the screenshots below show the **Light** variant (now the default theme on launch).
 
 ### Step 0 — Splash
 
 The startup splash auto-advances to Step 1 after ~1.5 s. The dark navy chrome stays constant across both themes for visual continuity with the rest of the AstromechOS toolchain.
 
-![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=2)
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=3)
 
 ### Step 1 — Selection
 
 The operator picks **what** to flash: both cards (recommended), only the Master, or only the Slave. R2 line-art glyphs reinforce the choice.
 
-![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection_light.png?v=2)
+![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection_light.png?v=3)
 
 ### Step 2 — Target Drives
 
 Removable drives are enumerated live (system disk is hidden for safety). Each row carries `MASTER` and `SLAVE` assignment buttons that lock the chosen physical device to the chosen role.
 
-![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=2)
+![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=3)
 
 ### Step 3 — Security Validation
 
 Once images are selected, the wizard runs the FAT32 role-marker validation (Strategy D) and the filename pattern check in the background. Each image row gets a colored badge: green = certified, amber = legacy without marker but plausible by filename, red = hard mismatch → `NEXT` disabled.
 
-![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=2)
+![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=3)
 
-### Step 4 — Confirm & Flash
+### Step 4 — Customize
+
+The operator declares the UID-1000 Linux account (username + password — written to `/etc/passwd` and `/etc/shadow` offline via cold libext2fs surgery), the optional domestic Wi-Fi for `wlan1`, and the WPA2 password for the private `wlan0` Master ↔ Slave hotspot (the bootstrap SSID is auto-generated per burn as `Astromech-XXXX`). Every field has live ✓/✗ validation and the `NEXT` button is hard-gated until the form is valid.
+
+![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=3)
+
+### Step 5 — Confirm & Flash
 
 Final summary with optional SHA-256 integrity toggle. The destructive `⚡ WRITE` button only goes live after the confirmation dialog and (if enabled) a clean checksum verification. The flashing phase shows live progress per role.
 
-![Step 4 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_confirm_flash_light.png?v=2)
+![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=3)
+
+### Step 6 — Complete
+
+Once both cards have been flashed, verified and personalized, the wizard surfaces the next-step recap and a `FLASH ANOTHER` shortcut.
+
+![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=3)
 
 > 🗂️ **For maintainers** — production screenshots are captured locally to `J:\R2-D2_Build\AstromechOS_Screenshots\Screenshots_Imager\` and mirrored to the [`AstromechOS_Screenshots`](https://github.com/RickDnamps/AstromechOS_Screenshots) sibling repository so that this README always renders the latest UI from GitHub raw-content URLs.
 

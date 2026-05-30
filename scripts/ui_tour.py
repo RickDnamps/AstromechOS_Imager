@@ -1,8 +1,10 @@
 """Capture one PNG per wizard step into screenshots/ — for design review.
 
-Forces fake wizard state so Steps 2-5 render with realistic content even
-without SD cards / real images present. Captures both Dark and Light
-themes back-to-back (sun/moon toggle wiring). Run from project root:
+Forces fake wizard state so Steps 2-6 render with realistic content even
+without SD cards / real images present. 6-step wizard:
+  Mode → Images → Storage → Customize → Flash → Done.
+Captures both Dark and Light themes back-to-back (sun/moon toggle wiring).
+Run from project root:
 
     .venv\\Scripts\\python.exe scripts\\ui_tour.py
 
@@ -29,29 +31,35 @@ def main() -> int:
     window = engine.rootObjects()[0]
     window.show()
 
-    # Seed realistic wizard state — Zero-Touch dropped Step 4 / authorizedKeys.
+    # Seed realistic wizard state — 6-step wizard with restored Customize.
     state.setMode("both")
-    state.setMasterImagePath(r"C:\images\AstromechOS-master-2026-05-29.img.xz")
-    state.setSlaveImagePath(r"C:\images\AstromechOS-slave-2026-05-29.img.xz")
+    state.setMasterImagePath(r"C:\images\AstromechOS-master-2026-05-30.img.xz")
+    state.setSlaveImagePath(r"C:\images\AstromechOS-slave-2026-05-30.img.xz")
     state.setMasterDriveId(2)
     state.setSlaveDriveId(3)
     state.setHostnameMaster("astromech-master")
     state.setHostnameSlave("astromech-slave")
     state.setRepoUrl("https://github.com/RickDnamps/AstromechOS")
+    # Step 4 Customize — all 5 fields seeded with valid values so the
+    # ✓ glyphs render green for the screenshot.
+    state.setInstallUser("artoo")
+    state.setInstallPassword("Astr0mech!42")
     state.setWifiSsid("HomeNetwork")
-    state.setWifiPsk("hunter2")
+    state.setWifiPsk("hunter2024")
+    state.setHotspotPassword("R2D2-Workshop42")
 
     # Splash auto-advances via a 1500 ms Timer inside main.qml — wait it
-    # out for the step-1 capture instead of fighting it. For 2-5 we drive
+    # out for the step-1 capture instead of fighting it. For 2-6 we drive
     # navigation explicitly via WizardState.goto(). We capture each step
     # in dark mode, then re-walk in light mode.
     base_plan = [
-        ("00-splash",   None,   200),   # captured during the splash
-        ("01-mode",     None,  1800),   # let the splash timer fire
-        ("02-images",      2,   700),
-        ("03-storage",     3,   700),
-        ("04-flash",       4,   700),
-        ("05-done",        5,   700),
+        ("00-splash",      None,   200),   # captured during the splash
+        ("01-mode",        None,  1800),   # let the splash timer fire
+        ("02-images",         2,   700),
+        ("03-storage",        3,   700),
+        ("04-customize",      4,   700),
+        ("05-flash",          5,   700),
+        ("06-done",           6,   700),
     ]
     themes = ["dark", "light"]
 

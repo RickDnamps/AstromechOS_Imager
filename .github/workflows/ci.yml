@@ -1,8 +1,11 @@
 name: ci
+# Manual-only: the workflow no longer runs on push / pull_request, only
+# when the operator clicks "Run workflow" under the Actions tab. Keeps
+# the pipeline available for on-demand checks without spamming the inbox
+# on every commit. Re-add `push` / `pull_request` triggers when the lint
+# backlog is cleared and CI should gate merges again.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

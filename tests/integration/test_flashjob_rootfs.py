@@ -18,7 +18,7 @@ import pytest
 
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, LinuxAccount, Role
-from astromechos_imager.core.orchestrator import FlashJob, FlashJobResult
+from astromechos_imager.core.orchestrator import FlashJob, FlashJobResult, PairFlashJob
 from astromechos_imager.core.rootfs_personalizer import RESIZE_INIT_ARG
 
 pytestmark = pytest.mark.integration
@@ -158,7 +158,7 @@ def _make_cfg() -> FirstbootConfig:
         authorized_keys=[VALID_KEY],
         imager_version="0.1.0",
         flashed_at_iso="2026-05-29T02:15:00Z",
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
 
 
@@ -215,13 +215,171 @@ def test_flashjob_with_linux_account_touches_rootfs_and_boot(
     assert b"artoo:x:1000" in fake_rootfs.files["/etc/passwd"]
     assert b"pi:x:1000" not in fake_rootfs.files["/etc/passwd"]
 
-    # /cmdline.txt got the resize init arg
+    # /cmdline.txt got the resize init arg — exactly once. SD-fill safety
+    # invariant: Pi OS first-boot rootfs auto-resize MUST be wired for the
+    # Master card too, not just the Slave. Without it, the Master's rootfs
+    # stays pinned at the Golden Image's ~3 GB and runs out of disk within
+    # days. Idempotent: re-running apply() must not duplicate the arg.
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
+    cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
+    assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1, (
+        f"resize arg appears {cmdline_text.split().count(RESIZE_INIT_ARG)} times "
+        f"in MASTER cmdline.txt — must be exactly 1"
+    )
 
     # Firstboot bundle was written (trigger marker is last)
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
     assert fake_boot.exists("/astromech_secrets/init_config.json")
     assert fake_boot.exists("/astromech_secrets/authorized_keys")
+
+
+def test_flashjob_slave_role_also_injects_resize_arg(
+    tmp_path, fake_platform_io, monkeypatch
+):
+    """SD-fill safety lockdown: the Pi OS first-boot rootfs auto-resize
+    arg MUST be injected for BOTH cards of a paired flash, not just the
+    Master. Without it, the Slave's rootfs stays at the Golden Image's
+    ~3 GB partition size and runs out of disk space within days. Per
+    CLAUDE.md hard invariant: cold rootfs surgery is role-symmetric."""
+    payload = _mbr_payload(_make_pi_os_mbr())
+    img = tmp_path / "slave.img.xz"
+    img.write_bytes(lzma.compress(payload))
+    fake_platform_io.add_drive(4, size=len(payload) + 1024)
+
+    cfg = _make_cfg()
+    pair = generate_ed25519()
+    acc = LinuxAccount(
+        username="artoo",
+        cleartext_password="test123",
+        crypt_sha512="$6$salt$fakehash",
+    )
+
+    fake_rootfs = FakeRootfsPartition()
+    fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
+
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._bootpartition_open",
+        lambda *a, **kw: fake_boot,
+    )
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._open_rootfs_partition",
+        lambda *a, **kw: fake_rootfs,
+    )
+
+    job = FlashJob(
+        platform_io=fake_platform_io,
+        image_path=img,
+        target=fake_platform_io.enumerate_removable_drives()[0],
+        role=Role.SLAVE,
+        firstboot_config=cfg,
+        master_pair=pair,
+        linux_account=acc,
+        skip_verify=True,
+    )
+    result = job.run()
+    assert result.ok, f"FlashJob (SLAVE) failed: {result.error}"
+
+    # Rootfs personalization ran for slave too
+    assert b"artoo:x:1000" in fake_rootfs.files["/etc/passwd"]
+
+    # /cmdline.txt got the resize init arg — the critical lockdown
+    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
+    # And exactly once (idempotent), even though apply() always touches it
+    cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
+    assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
+
+
+def test_pair_flash_resize_arg_injected_on_both_cards(
+    tmp_path, fake_platform_io, monkeypatch
+):
+    """End-to-end PairFlashJob symmetry lockdown.
+
+    A real pair burn runs TWO ``FlashJob`` instances (sequentially or in
+    parallel) with the SAME ``linux_account``. Each opens its OWN ext4
+    rootfs + FAT32 boot partition. This test stubs both partitions per
+    role and asserts that BOTH ``cmdline.txt`` files end up with the
+    Pi-OS first-boot resize arg present and exactly once — i.e. the
+    Pi-OS first-boot rootfs auto-resize is wired for BOTH cards, not
+    just whichever one the FlashJob saw first. Without this guarantee,
+    one half of the pair would run out of disk space within days while
+    the other expanded fine.
+    """
+    payload = _mbr_payload(_make_pi_os_mbr())
+    img_m = tmp_path / "master.img.xz"
+    img_s = tmp_path / "slave.img.xz"
+    compressed = lzma.compress(payload)
+    img_m.write_bytes(compressed)
+    img_s.write_bytes(compressed)
+    fake_platform_io.add_drive(10, size=len(payload) + 1024)
+    fake_platform_io.add_drive(11, size=len(payload) + 1024)
+
+    cfg = _make_cfg()
+    pair = generate_ed25519()
+    acc = LinuxAccount(
+        username="artoo",
+        cleartext_password="test123",
+        crypt_sha512="$6$salt$fakehash",
+    )
+
+    # Per-card partition fakes — one rootfs + one boot each, so we can
+    # introspect them independently after the run.
+    fake_rootfs_master = FakeRootfsPartition()
+    fake_rootfs_slave  = FakeRootfsPartition()
+    fake_boot_master   = FakeBootPartitionForFlash(STOCK_CMDLINE)
+    fake_boot_slave    = FakeBootPartitionForFlash(STOCK_CMDLINE)
+
+    # The orchestrator calls _bootpartition_open / _open_rootfs_partition
+    # keyword-only with raw_device_path=\\.\PHYSICALDRIVEN. Route by the
+    # trailing physical drive number so each role gets its own partition
+    # fakes (master ⇒ id 10 ⇒ PHYSICALDRIVE10, slave ⇒ id 11).
+    def _route_boot(*a, raw_device_path: str = "", **kw):
+        return fake_boot_master if raw_device_path.endswith("10") else fake_boot_slave
+
+    def _route_rootfs(*a, raw_device_path: str = "", **kw):
+        return fake_rootfs_master if raw_device_path.endswith("10") else fake_rootfs_slave
+
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._bootpartition_open", _route_boot,
+    )
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._open_rootfs_partition", _route_rootfs,
+    )
+
+    drives = {d.physical_drive_id: d for d in fake_platform_io.enumerate_removable_drives()}
+    job = PairFlashJob(
+        platform_io=fake_platform_io,
+        master_image=img_m,
+        master_target=drives[10],
+        slave_image=img_s,
+        slave_target=drives[11],
+        firstboot_config=cfg,
+        master_pair=pair,
+        linux_account=acc,
+        parallel=False,        # serial = deterministic per-side assertions
+        skip_verify=True,
+    )
+    result = job.run()
+    assert result.master.ok and result.slave.ok, (
+        f"PairFlashJob failed: master={result.master.error!r} "
+        f"slave={result.slave.error!r}"
+    )
+
+    # ── BOTH rootfs partitions personalized ──────────────────────────
+    assert b"artoo:x:1000" in fake_rootfs_master.files["/etc/passwd"]
+    assert b"artoo:x:1000" in fake_rootfs_slave.files["/etc/passwd"]
+
+    # ── BOTH cmdline.txt files got the resize arg, exactly once each ─
+    for role, fake_boot in (("MASTER", fake_boot_master), ("SLAVE", fake_boot_slave)):
+        cmdline_bytes = fake_boot.files["/cmdline.txt"]
+        assert RESIZE_INIT_ARG.encode("ascii") in cmdline_bytes, (
+            f"{role}: resize arg missing from cmdline.txt"
+        )
+        count = cmdline_bytes.decode("ascii").split().count(RESIZE_INIT_ARG)
+        assert count == 1, f"{role}: resize arg appears {count} times — must be exactly 1"
+
+    # ── BOTH cards have the trigger marker (write order honoured) ────
+    assert fake_boot_master.exists("/ASTROMECH_FIRSTBOOT_READY")
+    assert fake_boot_slave.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
 def test_flashjob_without_linux_account_skips_rootfs(

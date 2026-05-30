@@ -16,17 +16,19 @@ ApplicationWindow {
     // Frameless: no native title bar — we draw our own header.
     flags: Qt.Window | Qt.FramelessWindowHint
 
-    // Step labels: index 0 = splash; 1..5 mirror WizardState.currentStep.
-    // (Zero-Touch: step 4 "Customize" is gone — SSH keys are auto-injected.)
+    // Step labels: index 0 = splash; 1..6 mirror WizardState.currentStep.
+    // Step 4 "Customize" captures the UID-1000 account + dual-WLAN
+    // credentials before the Confirm & Flash step.
     readonly property var stepLabels: [
         "WELCOME",
         "01 / MODE",
         "02 / IMAGES",
         "03 / STORAGE",
-        "04 / CONFIRM & FLASH",
-        "05 / COMPLETE",
+        "04 / CUSTOMIZE",
+        "05 / CONFIRM & FLASH",
+        "06 / COMPLETE",
     ]
-    // -1 while splash is showing, 0..4 = currentStep-1 once advanced.
+    // -1 while splash is showing, 0..5 = currentStep-1 once advanced.
     property int displayedStepIdx: -1
 
     // ── Custom header (drag region + controls) ────────────────────────
@@ -104,7 +106,7 @@ ApplicationWindow {
                 spacing: 8
                 visible: root.displayedStepIdx >= 0
                 Repeater {
-                    model: 5
+                    model: 6
                     delegate: Item {
                         width: 18; height: 18
                         Rectangle {
@@ -227,8 +229,9 @@ ApplicationWindow {
     Component { id: step1Component; Step1Mode {} }
     Component { id: step2Component; Step2Images {} }
     Component { id: step3Component; Step3Storage {} }
-    Component { id: step4Component; Step4Flash {} }
-    Component { id: step5Component; Step5Done {} }
+    Component { id: step4Component; Step4Customize {} }
+    Component { id: step5Component; Step5Flash {} }
+    Component { id: step6Component; Step6Done {} }
 
     function _componentForStep(s) {
         switch (s) {
@@ -237,6 +240,7 @@ ApplicationWindow {
             case 3: return step3Component;
             case 4: return step4Component;
             case 5: return step5Component;
+            case 6: return step6Component;
             default: return step1Component;
         }
     }

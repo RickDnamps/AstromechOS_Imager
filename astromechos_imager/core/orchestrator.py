@@ -259,6 +259,16 @@ class PairFlashJob:
     parallel: bool = True
     skip_verify: bool = False
     skip_customize: bool = False
+    # Phase 5.5.4 / Customize-step restoration: optional cold rootfs
+    # surgery. When ``linux_account`` is set, BOTH child FlashJobs run
+    # rootfs personalization with the same account — the operator
+    # provisions a single UID-1000 identity shared across Master and
+    # Slave for SSH key-trust and the runtime side-by-side rsync
+    # workflow. Per-role accounts would diverge ``/etc/passwd`` and
+    # break the firstboot identity contract.
+    linux_account: LinuxAccount | None = None
+    ext4_debugfs_exe: Path | None = None
+    ext4_e2fsck_exe: Path | None = None
 
     def _make_job(self, role: Role, image: Path, target: DiskRef) -> FlashJob:
         return FlashJob(
@@ -269,6 +279,9 @@ class PairFlashJob:
             on_progress=lambda p, _r=role: self.on_progress(_r, p),
             cancel_event=self.cancel_event,
             skip_verify=self.skip_verify, skip_customize=self.skip_customize,
+            linux_account=self.linux_account,
+            ext4_debugfs_exe=self.ext4_debugfs_exe,
+            ext4_e2fsck_exe=self.ext4_e2fsck_exe,
         )
 
     def run(self) -> PairFlashResult:

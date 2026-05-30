@@ -13,7 +13,7 @@ VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUSER user@laptop"
 def _cfg(**kw):
     base = dict(authorized_keys=[VALID_KEY], imager_version="0.1.0",
                 flashed_at_iso="2026-05-29T02:15:00Z",
-                hotspot_bootstrap=generate_hotspot_bootstrap())
+                hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"))
     base.update(kw)
     return FirstbootConfig(**base)
 
@@ -91,13 +91,19 @@ def test_wlan_conf_written_when_both_creds_set(fake_boot_partition):
 
 
 def test_wlan_conf_content_correct(fake_boot_partition):
-    """Written /astromech_wlan.conf has exact SSID=...\nPSK=...\n format."""
+    """Written /astromech_wlan.conf has the exact INI [home_wifi] format
+    consumed by ``astromech_wlan_setup.sh``'s awk parser (live script
+    lines 81-92)."""
     pair = generate_ed25519()
     cfg = _cfg(wifi_ssid="MySSID", wifi_psk="mypassword")
     FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
     content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
-    # Audit Info #51: values are now single-quoted (POSIX shell escape).
-    assert content == b"SSID='MySSID'\nPSK='mypassword'\n"
+    assert content == (
+        b"[home_wifi]\n"
+        b"ssid = MySSID\n"
+        b"password = mypassword\n"
+        b"key_mgmt = wpa-psk\n"
+    )
 
 
 def test_wlan_conf_not_written_when_both_none(fake_boot_partition):
@@ -140,4 +146,9 @@ def test_wlan_conf_written_for_slave_role(fake_boot_partition):
     FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
     assert fake_boot_partition.exists("/astromech_wlan.conf")
     content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
-    assert content == b"SSID='HomeNet'\nPSK='secret12'\n"
+    assert content == (
+        b"[home_wifi]\n"
+        b"ssid = HomeNet\n"
+        b"password = secret12\n"
+        b"key_mgmt = wpa-psk\n"
+    )

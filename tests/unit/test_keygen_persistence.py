@@ -24,7 +24,7 @@ def test_pair_roundtrip(tmp_appdata):
 
 
 def test_hotspot_roundtrip(tmp_appdata):
-    original = generate_hotspot_bootstrap()
+    original = generate_hotspot_bootstrap("test-psk-12345")
     save_persisted_hotspot(original)
     loaded = load_persisted_hotspot()
     assert loaded is not None

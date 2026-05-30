@@ -9,7 +9,7 @@ def test_role_values():
 
 
 def test_hotspot_bootstrap_is_frozen():
-    b = HotspotBootstrap(ssid="Astromech_Boot_3F2A", password="x" * 32)
+    b = HotspotBootstrap(ssid="Astromech-3742", password="x" * 32)
     with pytest.raises(AttributeError):  # dataclass(frozen=True)
         b.ssid = "other"  # type: ignore[misc]
 

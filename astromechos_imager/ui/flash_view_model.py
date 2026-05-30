@@ -477,6 +477,7 @@ def _build_flash_job(wizard_state, platform_io=None):
         from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
         from astromechos_imager.core.keygen import (
             generate_ed25519, generate_hotspot_bootstrap,
+            generate_linux_account,
             load_persisted_pair, save_persisted_pair,
             load_persisted_hotspot, save_persisted_hotspot,
         )
@@ -493,33 +494,76 @@ def _build_flash_job(wizard_state, platform_io=None):
             # symmetric across cards.
             save_persisted_pair(ed25519)
 
-        # Audit High #7: honour wizard_state.reuseHotspot. Same symmetry
-        # argument as the keypair — a re-flashed master needs the SAME
-        # hotspot bootstrap as the existing slave, otherwise they can't
-        # pair on boot.
+        # wlan0 private interconnect: SSID is auto-generated per burn
+        # (random ``Astromech-<4 digits>``), PSK is operator-supplied
+        # via Step 4. Audit High #7: honour wizard_state.reuseHotspot —
+        # a re-flashed master needs the SAME bootstrap as the existing
+        # slave, otherwise they can't pair on boot. With reuseHotspot,
+        # we re-use the persisted SSID but still apply the operator's
+        # current PSK (so they can rotate it without re-burning both
+        # cards).
+        from astromechos_imager.core.models import HotspotBootstrap
+        hotspot_psk = wizard_state.hotspotPassword or ""
+        if not hotspot_psk:
+            raise RuntimeError(
+                "Step 4 (Customize) requires a Private Robot Hotspot "
+                "Password — UI validity gate should have blocked this"
+            )
         hotspot = None
         if getattr(wizard_state, "reuseHotspot", False):
-            hotspot = load_persisted_hotspot()
+            persisted = load_persisted_hotspot()
+            if persisted is not None:
+                hotspot = HotspotBootstrap(
+                    ssid=persisted.ssid, password=hotspot_psk
+                )
         if hotspot is None:
-            hotspot = generate_hotspot_bootstrap()
-            save_persisted_hotspot(hotspot)
+            hotspot = generate_hotspot_bootstrap(hotspot_psk)
+        save_persisted_hotspot(hotspot)
 
-        # Zero-Touch FirstbootConfig:
-        #   * authorized_keys=[] — validator now permits empty (the Master is
+        # Customize-step restoration: the operator fills Step 4 with a
+        # UID-1000 username + password (mandatory, CLAUDE.md forbids any
+        # hardcoded fallback) and an optional domestic Wi-Fi SSID/PSK
+        # for the wlan1 dongle. The Wi-Fi pair is fully optional; the
+        # account credentials are not — _build_flash_job is only ever
+        # called from startFromWizard, which is gated behind the QML
+        # WRITE-button validity check on the same fields.
+        install_user = (wizard_state.installUser or "").strip()
+        install_password = wizard_state.installPassword or ""
+        if not install_user or not install_password:
+            raise RuntimeError(
+                "Step 4 (Customize) requires a username AND a password "
+                "before WRITE — UI validity gate should have blocked this"
+            )
+        linux_account = generate_linux_account(install_user, install_password)
+
+        wifi_ssid = (wizard_state.wifiSsid or "").strip() or None
+        wifi_psk = wizard_state.wifiPsk or None
+        if (wifi_ssid is None) != (wifi_psk is None):
+            # FirstbootConfig.__post_init__ would catch this too, but the
+            # error there is opaque; surface a wizard-shaped message.
+            raise RuntimeError(
+                "Domestic Wi-Fi requires both SSID and PSK, or leave both empty"
+            )
+
+        # FirstbootConfig:
+        #   * authorized_keys=[] — validator permits empty (the Master is
         #     reached by password at first login; the Slave gets the Master's
         #     public key injected by render_authorized_keys at write time).
-        #   * install_user defaults to "pi" — Zero-Touch leaves the Golden
-        #     Image's UID-1000 user untouched (no rootfs personalization,
-        #     no debugfs / e2fsck required).
+        #   * install_user reflects the COLD-surgery username so firstboot's
+        #     home-dir creation / role-marker placement target the same
+        #     UID-1000 the Imager just renamed.
         #   * The ed25519 keypair lives on the *job* (master_pair=), not on
         #     FirstbootConfig — that's the contract of FlashJob /
         #     PairFlashJob and what FirstbootBundle consumes.
         firstboot = FirstbootConfig(
             authorized_keys=[],
+            install_user=install_user,
             hostname_master=wizard_state.hostnameMaster,
             hostname_slave=wizard_state.hostnameSlave,
             hotspot_bootstrap=hotspot,
             repo_url=wizard_state.repoUrl or None,
+            wifi_ssid=wifi_ssid,
+            wifi_psk=wifi_psk,
         )
 
         mode = wizard_state.mode

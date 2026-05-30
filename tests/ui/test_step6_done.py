@@ -10,20 +10,20 @@ pytestmark = pytest.mark.skipif(
 
 def _qml_path():
     here = Path(__file__).resolve().parent.parent.parent
-    return here / "astromechos_imager" / "ui" / "qml" / "Step5Done.qml"
+    return here / "astromechos_imager" / "ui" / "qml" / "Step6Done.qml"
 
 
-def test_step5_done_file_exists():
+def test_step6_done_file_exists():
     assert _qml_path().is_file()
 
 
-def test_step5_done_contains_astromechos_branding():
+def test_step6_done_contains_astromechos_branding():
     """Verify AstromechOS branding in the QML source."""
     content = _qml_path().read_text(encoding="utf-8")
     assert "AstromechOS" in content
 
 
-def test_step5_done_contains_next_steps():
+def test_step6_done_contains_next_steps():
     """Verify that next-steps guidance text is present."""
     content = _qml_path().read_text(encoding="utf-8")
     assert "NEXT STEPS" in content
@@ -31,7 +31,7 @@ def test_step5_done_contains_next_steps():
     assert "astromech-slave.local" in content
 
 
-def test_step5_done_qml_syntax(qtbot):
+def test_step6_done_qml_syntax(qtbot):
     """Load the QML file in an engine to check for parse errors."""
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtCore import QUrl

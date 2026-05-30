@@ -12,15 +12,17 @@
 
 // ── Fonts ────────────────────────────────────────────────────────────
 // Orbitron is bundled in resources/fonts as OTF and registered at
-// startup (app.py _load_fonts). Segoe UI is the safe Windows fallback.
-//
-// Audit High #23: Orbitron is a *display* face, not a body face — at
-// 11–12 px it slows reading and breaks the title/body hierarchy. Body
-// copy now falls back to the system humanist sans (Segoe UI on Win10+).
-// Titles, subtitles, button captions, badges keep Orbitron for identity.
+// startup (app.py _load_fonts). Used EVERYWHERE in the UI — titles,
+// subtitles, buttons, body copy, field labels. Brand identity is
+// non-negotiable: AstromechOS Imager ships an authentic R2-D2 /
+// Sci-Fi look. Reverts audit High #23, which had downgraded body
+// copy to "Segoe UI" for readability; readability is now handled by
+// tuning size / weight / colour contrast rather than the typeface.
+// fontMono stays Consolas because monospaced character-cell predict-
+// ability is functional (hash digests, drive paths), not stylistic.
 var fontTitle    = "Orbitron"
 var fontSubtitle = "Orbitron"
-var fontBody     = "Segoe UI"
+var fontBody     = "Orbitron"
 var fontMono     = "Consolas"
 
 // ── Geometry ─────────────────────────────────────────────────────────

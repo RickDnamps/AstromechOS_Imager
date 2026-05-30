@@ -30,7 +30,7 @@ def test_parallel_pair_flash(tmp_path, fake_platform_io, monkeypatch):
     cfg = FirstbootConfig(
         authorized_keys=[VALID_KEY], imager_version="0.1.0",
         flashed_at_iso="2026-05-29T02:15:00Z",
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
     drives = {d.physical_drive_id: d for d in fake_platform_io.enumerate_removable_drives()}
     job = PairFlashJob(
@@ -57,7 +57,7 @@ def test_sequential_pair_flash(tmp_path, fake_platform_io, monkeypatch):
     cfg = FirstbootConfig(
         authorized_keys=[VALID_KEY], imager_version="0.1.0",
         flashed_at_iso="2026-05-29T02:15:00Z",
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
     drives = {d.physical_drive_id: d for d in fake_platform_io.enumerate_removable_drives()}
     job = PairFlashJob(

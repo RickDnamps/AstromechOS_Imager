@@ -28,7 +28,7 @@ def test_with_all_fields():
         repo_branch="develop",
         hostname_master="r2-dome",
         hostname_slave="r2-body",
-        hotspot_bootstrap=HotspotBootstrap(ssid="Astromech_Boot_3F2A", password="a" * 16),
+        hotspot_bootstrap=HotspotBootstrap(ssid="Astromech-3742", password="a" * 16),
     )
     assert cfg.repo_branch == "develop"
 

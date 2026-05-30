@@ -32,6 +32,7 @@ def test_cli_flash_pair(tmp_path, fake_platform_io, monkeypatch):
         "flash", "--master-image", str(m), "--master-drive", "2",
         "--slave-image", str(s), "--slave-drive", "3",
         "--keys-file", str(keys), "--no-verify",
+        "--hotspot-psk", "test-hotspot-psk",
     ])
     rc = _cmd_flash(args)
     assert rc == 0

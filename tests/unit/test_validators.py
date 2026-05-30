@@ -101,13 +101,34 @@ def test_branch_name_invalid(b):
 
 
 # ── SSID 802.11 ───────────────────────────────────────────────────────────
-@pytest.mark.parametrize("s", ["Astromech_Boot_3F2A", "Astromech_Boot_AABBCC", "Astromech_Boot_ABCD"])
+# Bootstrap SSID is ``Astromech-<4 decimal digits>`` per the dual-WLAN
+# amendment — random per burn so simultaneous unboxed pairs don't
+# collide on the bootstrap AP. The FINAL runtime SSID
+# ``Astromech_Control_XXXX`` is derived Pi-side from the CPU serial
+# and never reaches this validator.
+@pytest.mark.parametrize("s", [
+    "Astromech-0000",
+    "Astromech-1234",
+    "Astromech-8392",
+    "Astromech-9999",
+])
 def test_ssid_valid(s):
     validate_ssid(s)
 
 
-@pytest.mark.parametrize("s", ["Astromech_Boot_xx", "Astromech_Boot_", "Other_3F2A",
-                                "Astromech_Boot_3F2A" + "X" * 20, "Astromech_Boot_GHIJ"])
+@pytest.mark.parametrize("s", [
+    "",
+    "Astromech-",               # missing digits
+    "Astromech-12",             # too short
+    "Astromech-12345",          # too long
+    "Astromech-ABCD",           # not digits
+    "astromech-1234",           # wrong case
+    "AstromechOS-1234",         # wrong prefix (legacy)
+    "Astromech_Boot_3F2A",      # wrong prefix (legacy)
+    "Astromech_Control_3F2A",   # runtime-final value (Pi-only, never written by Imager)
+    "Astromech-1234 ",          # trailing space
+    "Other-1234",
+])
 def test_ssid_invalid(s):
     with pytest.raises(InvalidHotspotSsidError):
         validate_ssid(s)

@@ -33,12 +33,20 @@ def render_init_cfg(cfg: FirstbootConfig) -> bytes:
             f"branch = {cfg.repo_branch}",
         ]
     if cfg.hotspot_bootstrap is not None:
-        # Contract: keys are EXACTLY 'ssid' and 'password' — firstboot_setup.sh:325-326
+        # Contract: keys are EXACTLY 'ssid' and 'password' — firstboot_setup.sh:377-378
+        # (and the same cfg_get + awk parser in lib_config.sh:66-71).
+        # ``key_mgmt = wpa-psk`` is declared explicitly to pin the
+        # WPA2 contract: live ``setup_master_network.sh:356,412`` and
+        # ``setup_slave_network.sh:228`` hard-code
+        # ``wifi-sec.key-mgmt wpa-psk`` already, so this field is
+        # documentary (the awk parsers only fetch ``ssid``+``password``)
+        # but completes the configuration declaration.
         lines += [
             "",
             "[hotspot]",
             f"ssid = {cfg.hotspot_bootstrap.ssid}",
             f"password = {cfg.hotspot_bootstrap.password}",
+            "key_mgmt = wpa-psk",
         ]
     if cfg.hostname_slave != "astromech-slave":
         # firstboot_setup.sh:355 falls back to astromech-slave.local; only emit on diverge
@@ -98,25 +106,52 @@ def _shell_escape_single_quoted(s: str) -> str:
 
 
 def render_wlan_conf(ssid: str, psk: str) -> bytes:
-    """Generate /astromech_wlan.conf for the wlan1 home network dongle.
+    """Generate /boot/astromech_wlan.conf for the wlan1 home Wi-Fi dongle.
 
-    Format (shell-sourceable, awk-parseable):
-        SSID='<ssid>'
-        PSK='<psk>'
+    Format: INI with a single ``[home_wifi]`` section, mirroring the
+    exact awk parser in the live ``astromech_wlan_setup.sh:81-92``::
 
-    Audit Info #51: both values are single-quoted with POSIX-correct
-    escaping, so an SSID containing ``$``, backticks, ``;``, ``"``, or
-    even an embedded ``'`` is safely passed to ``source`` /
-    ``awk -F=``. Embedded newlines / NULs are rejected outright via
-    :func:`_shell_escape_single_quoted` to make a "second-line injection"
-    impossible.
+        SSID=$(awk -F= -v s="[home_wifi]" -v k="ssid" ...)
+        PSK=$(awk  -F= -v s="[home_wifi]" -v k="password" ...)
 
-    No header comments — keeps it trivially parseable on the Pi side.
+    so the live script picks up our values verbatim and creates the
+    ``astromech-internet`` NetworkManager profile with
+    ``wifi-sec.key-mgmt wpa-psk`` (line 136 of the same script —
+    WPA2-PSK is enforced by the Pi side, no key_mgmt field is needed
+    in this file). Same format is used by ``local.cfg [home_wifi]``
+    so the live ``cfg_get home_wifi <key>`` fallback waterfall stays
+    coherent across both sources.
+
+    Defence in depth: ``ssid`` / ``psk`` are validated separately at
+    ``FirstbootConfig.__post_init__`` via
+    ``validate_wifi_ssid`` / ``validate_wifi_psk`` (IEEE 802.11i:
+    8-63 ASCII printable for the PSK = WPA2-PSK contract). Here we
+    only reject embedded ``\n`` / ``\r`` / ``\x00`` which would let
+    a malicious value smuggle in a second INI line.
+
+    Audit Info #51 (carried over from the shell-format version):
+    line-injection chars are still rejected ; the value side of each
+    ``key = value`` pair stays verbatim because the live awk
+    ``gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)`` only strips
+    surrounding whitespace and accepts any character in between.
     UTF-8 encoded to support Unicode SSIDs.
     """
+    for v in (ssid, psk):
+        if "\n" in v or "\r" in v or "\x00" in v:
+            raise ValueError(
+                "wlan_conf value contains a newline or NUL — refusing to write"
+            )
     return (
-        f"SSID={_shell_escape_single_quoted(ssid)}\n"
-        f"PSK={_shell_escape_single_quoted(psk)}\n"
+        "[home_wifi]\n"
+        f"ssid = {ssid}\n"
+        f"password = {psk}\n"
+        # WPA2 / WPA-PSK declared explicitly. The live awk parser does
+        # not read this field (it only fetches ``ssid`` + ``password``)
+        # — the Pi enforces wpa-psk at NM-creation time
+        # (``astromech_wlan_setup.sh:136`` hard-codes
+        # ``wifi-sec.key-mgmt wpa-psk``). Writing it here documents
+        # operator intent and pins the contract for future tooling.
+        "key_mgmt = wpa-psk\n"
     ).encode("utf-8")
 
 

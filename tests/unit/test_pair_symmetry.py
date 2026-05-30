@@ -17,7 +17,7 @@ def _setup_pair(fake_boot_partition_factory):
         authorized_keys=[VALID_KEY],
         imager_version="0.1.0",
         flashed_at_iso="2026-05-29T02:15:00Z",
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
     master_bp = fake_boot_partition_factory()
     slave_bp = fake_boot_partition_factory()
@@ -45,7 +45,7 @@ def test_asymmetric_hotspot_raises(fake_boot_partition_factory):
     # Tamper with slave's init.cfg [hotspot]
     text = s.read_bytes("/astromech_init.cfg").decode().replace(
         f"ssid = {cfg.hotspot_bootstrap.ssid}",
-        "ssid = Astromech_Boot_DEAD"
+        "ssid = Astromech-9999"
     )
     s.write_bytes("/astromech_init.cfg", text.encode())
     with pytest.raises(PairAsymmetryError):

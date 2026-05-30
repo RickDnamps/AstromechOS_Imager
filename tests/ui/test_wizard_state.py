@@ -44,22 +44,22 @@ def test_next_clamps_at_max(qtbot):
     s = WizardState()
     for _ in range(10):
         s.next()
-    # Zero-Touch wizard has 5 steps (Mode/Images/Storage/Flash/Done).
-    assert s.currentStep == 5
+    # 6-step wizard: Mode / Images / Storage / Customize / Flash / Done.
+    assert s.currentStep == 6
 
 
 def test_goto_valid_range(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    s.goto(5)
-    assert s.currentStep == 5
+    s.goto(6)
+    assert s.currentStep == 6
 
 
 def test_goto_out_of_range_noop(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.goto(0)
-    s.goto(6)   # one past MAX_STEP=5
+    s.goto(7)   # one past MAX_STEP=6
     s.goto(-1)
     assert s.currentStep == 1
 
@@ -376,3 +376,100 @@ def test_set_wifi_psk_change_emits_new_value(qtbot):
     s.setWifiPsk("pass1234")
     s.setWifiPsk("pass5678")
     assert received == ["pass1234", "pass5678"]
+
+
+# ---------------------------------------------------------------------------
+# Step 4 Customize — UID-1000 account + wlan0 bootstrap PSK
+# ---------------------------------------------------------------------------
+
+def test_install_user_default_empty(qtbot):
+    """CLAUDE.md mandates a unique username per droid — no hardcoded 'pi'."""
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.installUser == ""
+
+
+def test_install_password_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.installPassword == ""
+
+
+def test_hotspot_password_default_empty(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.hotspotPassword == ""
+
+
+def test_set_install_user_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.installUserChanged.connect(lambda v: received.append(v))
+    s.setInstallUser("artoo")
+    assert s.installUser == "artoo"
+    assert received == ["artoo"]
+
+
+def test_set_install_password_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.installPasswordChanged.connect(lambda v: received.append(v))
+    s.setInstallPassword("changeme1!")
+    assert s.installPassword == "changeme1!"
+    assert received == ["changeme1!"]
+
+
+def test_set_hotspot_password_emits_signal(qtbot):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    received = []
+    s.hotspotPasswordChanged.connect(lambda v: received.append(v))
+    s.setHotspotPassword("hotspotpsk123")
+    assert s.hotspotPassword == "hotspotpsk123"
+    assert received == ["hotspotpsk123"]
+
+
+@pytest.mark.parametrize("u", ["artoo", "deetoo", "r2_d2", "x", "user-1", "_under"])
+def test_is_valid_install_user_accepts(qtbot, u):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.isValidInstallUser(u)
+
+
+@pytest.mark.parametrize("u", ["", "Artoo", "1startsdigit", "name with space",
+                                "with$sign", "x" * 33])
+def test_is_valid_install_user_rejects(qtbot, u):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert not s.isValidInstallUser(u)
+
+
+@pytest.mark.parametrize("p", ["password", "Astr0!mech", "12345678", " " * 8])
+def test_is_valid_install_password_accepts(qtbot, p):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.isValidInstallPassword(p)
+
+
+@pytest.mark.parametrize("p", ["", "short", "x" * 7, "ascii\nNL", "ascii\x00NUL",
+                                "café-utf8"])
+def test_is_valid_install_password_rejects(qtbot, p):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert not s.isValidInstallPassword(p)
+
+
+@pytest.mark.parametrize("p", ["password", "12345678", "a" * 63])
+def test_is_valid_hotspot_password_accepts(qtbot, p):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.isValidHotspotPassword(p)
+
+
+@pytest.mark.parametrize("p", ["", "short", "x" * 64, "café", "with\n"])
+def test_is_valid_hotspot_password_rejects(qtbot, p):
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert not s.isValidHotspotPassword(p)

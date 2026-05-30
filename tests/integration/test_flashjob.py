@@ -29,7 +29,7 @@ def test_flash_job_master_end_to_end(tmp_path, fake_platform_io, monkeypatch):
     cfg = FirstbootConfig(
         authorized_keys=[VALID_KEY],
         imager_version="0.1.0", flashed_at_iso="2026-05-29T02:15:00Z",
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
     pair = generate_ed25519()
     # Stub the boot-partition open so we don't need a real FAT32 layout in fake SD

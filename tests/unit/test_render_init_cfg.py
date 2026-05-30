@@ -37,14 +37,17 @@ def test_with_repo_url_adds_github_section():
 
 
 def test_with_hotspot_uses_ssid_and_password_keys():
-    """Critical contract: keys are EXACTLY 'ssid' and 'password' (not '_bootstrap').
-    Refs firstboot_setup.sh:325-326."""
+    """Critical contract: keys are EXACTLY 'ssid' and 'password' (not
+    '_bootstrap') and the section declares WPA2 explicitly via
+    ``key_mgmt = wpa-psk``. Refs firstboot_setup.sh:377-378 +
+    setup_master_network.sh:356,412 (live wpa-psk enforcement)."""
     out = render_init_cfg(_cfg(
-        hotspot_bootstrap=HotspotBootstrap(ssid="Astromech_Boot_3F2A", password="a" * 32)
+        hotspot_bootstrap=HotspotBootstrap(ssid="Astromech-3742", password="a" * 32)
     )).decode("utf-8")
     assert "[hotspot]" in out
-    assert "ssid = Astromech_Boot_3F2A" in out
+    assert "ssid = Astromech-3742" in out
     assert "password = " + "a" * 32 in out
+    assert "key_mgmt = wpa-psk" in out
     assert "ssid_bootstrap" not in out
     assert "password_bootstrap" not in out
 

@@ -5,20 +5,30 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
 class WizardState(QObject):
-    """Tracks the current wizard step (1–5) and exposes navigation slots.
+    """Tracks the current wizard step (1–6) and exposes navigation slots.
 
-    Steps (Zero-Touch):
+    Steps:
         1 — Mode (flash both / master only / slave only)
         2 — Images (browse source .img/.xz/.gz/.zip per role)
         3 — Storage (pick target SD card per role)
-        4 — Confirm & Flash (summary, big red WRITE button, progress)
-        5 — Done (recap + next steps)
+        4 — Customize (UID-1000 user + Wi-Fi credentials)  ← REQUIRED
+        5 — Confirm & Flash (summary, big red WRITE button, progress)
+        6 — Done (recap + next steps)
 
     SSH key handling is fully automatic (no user input required): the
     Imager generates a Master↔Slave keypair on each flash session, drops
     the private half on the Master's boot partition and the matching
     public half into the Slave's authorized_keys. PC↔Master access is
     handled at first login by the operator (password or own ssh-copy-id).
+
+    Step 4 — Customize — collects the deployment-mandatory fields per
+    CLAUDE.md "Provisioning architecture":
+      * ``installUser`` / ``installPassword`` → UID-1000 Linux account
+        (cold rootfs surgery via core/rootfs_personalizer.py).
+      * ``wifiSsid`` / ``wifiPsk``            → wlan1 domestic Wi-Fi
+        (live firstboot brings up NetworkManager with these creds).
+    The wlan0 bootstrap AP is auto-generated (AstromechOS-XXXX, never
+    prompted) and renamed at runtime by firstboot_setup.sh.
     """
     currentStepChanged = Signal(int)
     modeChanged = Signal(str)
@@ -32,6 +42,12 @@ class WizardState(QObject):
     reuseHotspotChanged = Signal(bool)
     wifiSsidChanged = Signal(str)
     wifiPskChanged = Signal(str)
+    # Step 4 Customize — UID-1000 Linux account credentials
+    installUserChanged = Signal(str)
+    installPasswordChanged = Signal(str)
+    # Step 4 Customize — wlan0 private interconnect bootstrap PSK
+    # (operator-supplied; SSID is auto-generated per burn by the Imager).
+    hotspotPasswordChanged = Signal(str)
 
     # Image role validation (async — driven by image_validator)
     # status values: "none" | "checking" | "ok" | "mismatch"
@@ -51,7 +67,7 @@ class WizardState(QObject):
     verifyIntegrityChanged = Signal(bool)
 
     MIN_STEP = 1
-    MAX_STEP = 5
+    MAX_STEP = 6
 
     MODE_BOTH = "both"
     MODE_MASTER_ONLY = "master_only"
@@ -74,6 +90,16 @@ class WizardState(QObject):
         self._reuse_hotspot = False
         self._wifi_ssid = ""
         self._wifi_psk = ""
+        # Step 4 Customize — UID-1000 deployment account.
+        # No defaults: CLAUDE.md mandates a unique username per droid,
+        # so the WRITE button must be hard-gated on operator input
+        # rather than silently accepting a hardcoded "pi" / "artoo".
+        self._install_user = ""
+        self._install_password = ""
+        # wlan0 bootstrap PSK — operator picks it so the FINAL per-robot
+        # PSK (which carries through the firstboot handover) stays out
+        # of git history.
+        self._hotspot_password = ""
         # Image validation
         self._master_image_role_status = "none"
         self._slave_image_role_status = "none"
@@ -458,3 +484,96 @@ class WizardState(QObject):
         if v != self._wifi_psk:
             self._wifi_psk = v
             self.wifiPskChanged.emit(v)
+
+    # ------------------------------------------------------------------
+    # Step 4 Customize — UID-1000 deployment account.
+    # Both fields are REQUIRED for the wizard to advance to Confirm &
+    # Flash: CLAUDE.md mandates a unique username per droid (no hardcoded
+    # 'pi' / 'artoo' fallback). Validators are exposed as @Slot so QML
+    # can drive on-keystroke validation without round-tripping through
+    # the Python event loop.
+    # ------------------------------------------------------------------
+
+    @Property(str, notify=installUserChanged)
+    def installUser(self) -> str:
+        return self._install_user
+
+    @Slot(str)
+    def setInstallUser(self, v: str) -> None:
+        if v != self._install_user:
+            self._install_user = v
+            self.installUserChanged.emit(v)
+
+    @Property(str, notify=installPasswordChanged)
+    def installPassword(self) -> str:
+        return self._install_password
+
+    @Slot(str)
+    def setInstallPassword(self, v: str) -> None:
+        if v != self._install_password:
+            self._install_password = v
+            self.installPasswordChanged.emit(v)
+
+    @Slot(str, result=bool)
+    def isValidInstallUser(self, v: str) -> bool:
+        """True iff ``v`` matches the POSIX login regex enforced by
+        ``core/validators.validate_install_user`` (lowercase + digits +
+        ``_-``, must start with letter or underscore, ≤32 chars)."""
+        from astromechos_imager.core.validators import (
+            _USER_RE, InvalidInstallUserError, validate_install_user,
+        )
+        try:
+            validate_install_user(v)
+            return True
+        except InvalidInstallUserError:
+            return False
+
+    @Slot(str, result=bool)
+    def isValidInstallPassword(self, v: str) -> bool:
+        """Minimum 8 ASCII-printable characters — the Pi's PAM defaults
+        accept shorter, but 8 keeps SSH brute-force out of trivial range
+        and matches the WPA2-PSK minimum. No newlines, no NULs."""
+        if len(v) < 8:
+            return False
+        if not v.isascii() or not v.isprintable():
+            return False
+        return True
+
+    @Slot(str, result=bool)
+    def isValidWifiSsid(self, v: str) -> bool:
+        """Domestic Wi-Fi SSID: 1-32 UTF-8 bytes, no control chars."""
+        if not v:
+            return False
+        if len(v.encode("utf-8")) > 32:
+            return False
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
+            return False
+        return True
+
+    @Slot(str, result=bool)
+    def isValidWifiPsk(self, v: str) -> bool:
+        """WPA2-PSK: 8-63 ASCII printable characters per IEEE 802.11."""
+        if not (8 <= len(v) <= 63):
+            return False
+        if not v.isascii() or not v.isprintable():
+            return False
+        return True
+
+    @Property(str, notify=hotspotPasswordChanged)
+    def hotspotPassword(self) -> str:
+        return self._hotspot_password
+
+    @Slot(str)
+    def setHotspotPassword(self, v: str) -> None:
+        if v != self._hotspot_password:
+            self._hotspot_password = v
+            self.hotspotPasswordChanged.emit(v)
+
+    @Slot(str, result=bool)
+    def isValidHotspotPassword(self, v: str) -> bool:
+        """Bootstrap PSK shares WPA2-PSK constraints (8-63 ASCII
+        printable). Required: the auto-generated SSID is not enough on
+        its own — without a PSK the AP would be open and a workshop
+        neighbour could trivially camp the FINAL per-robot SSID once
+        the runtime handover rotates to it (PSK carries through)."""
+        return self.isValidWifiPsk(v)

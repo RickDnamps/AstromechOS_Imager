@@ -106,7 +106,7 @@ def test_full_personalize_via_wsl_and_pyfatfs(tmp_path, fixed_iso_time, pi_os_fi
         authorized_keys=[VALID_KEY],
         imager_version="0.1.0",
         flashed_at_iso=fixed_iso_time,
-        hotspot_bootstrap=generate_hotspot_bootstrap(),
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
     )
     pair = generate_ed25519()
 

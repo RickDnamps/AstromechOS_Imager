@@ -159,30 +159,18 @@ ApplicationWindow {
             }
 
             // ── Window controls ──────────────────────────────────────
-            Row {
-                spacing: 0
+            // Only Close — Minimize and Maximize intentionally omitted
+            // (single-purpose imaging session; no need to background it
+            // or reflow the layout). The X glyph is sized up to fill the
+            // visual slot the two missing buttons used to occupy.
+            WindowCtrlButton {
                 Layout.alignment: Qt.AlignVCenter
-                WindowCtrlButton {
-                    glyph: "—"
-                    tooltipText: "Minimize"
-                    accessibleName: "Minimize window"
-                    onActivated: root.showMinimized()
-                }
-                WindowCtrlButton {
-                    glyph: root.visibility === Window.Maximized ? "❐" : "▢"
-                    tooltipText: root.visibility === Window.Maximized
-                        ? "Restore"
-                        : "Maximize"
-                    accessibleName: tooltipText + " window"
-                    onActivated: root.visibility = (root.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
-                }
-                WindowCtrlButton {
-                    glyph: "×"
-                    closeStyle: true
-                    tooltipText: "Close"
-                    accessibleName: "Close window"
-                    onActivated: Qt.quit()
-                }
+                glyph: "×"
+                glyphSize: 24
+                closeStyle: true
+                tooltipText: "Close"
+                accessibleName: "Close window"
+                onActivated: Qt.quit()
             }
         }
     }

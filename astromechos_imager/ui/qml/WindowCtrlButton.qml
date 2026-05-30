@@ -11,6 +11,9 @@ Item {
 
     property string glyph: ""
     property bool   closeStyle: false
+    // Per-button glyph size override (e.g. the close × needs to be bigger
+    // when it's the only window control left in the header).
+    property int    glyphSize: 14
     // Audit High #25: accessible name + tooltip text — both default to the
     // glyph so the wrapper "just works" but callers (main.qml) should
     // override with a human-readable label.
@@ -49,7 +52,7 @@ Item {
             ? theme.colors.colorTextOnChrome
             : theme.colors.colorTextOnChromeDim
         font.family: Theme.fontSubtitle
-        font.pixelSize: 14
+        font.pixelSize: btn.glyphSize
         Behavior on color { ColorAnimation { duration: Theme.durFast } }
     }
 

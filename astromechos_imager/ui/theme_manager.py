@@ -104,7 +104,7 @@ class ThemeManager(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._mode = self.MODE_DARK
+        self._mode = self.MODE_LIGHT
 
     @Property(str, notify=modeChanged)
     def mode(self) -> str:

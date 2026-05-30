@@ -18,11 +18,11 @@ The **AstromechOS Imager** is the dedicated, opinionated flashing utility used t
 
 The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cobalt-blue accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart — the screenshots below show the **Light** variant.
 
-### Splash
+### Step 0 — Splash
 
 The startup splash auto-advances to Step 1 after ~1.5 s. The dark navy chrome stays constant across both themes for visual continuity with the rest of the AstromechOS toolchain.
 
-![Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png)
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png)
 
 ### Step 1 — Selection
 

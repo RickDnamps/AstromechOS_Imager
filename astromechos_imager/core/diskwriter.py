@@ -57,11 +57,35 @@ class DiskWriter:
                         break
                     hasher.update(chunk)
                     producer_total[0] += len(chunk)
-                    q.put(chunk)
+                    # Audit Medium #31: use a timeout-based put so the
+                    # producer wakes up periodically to re-check the
+                    # cancel flag, even if the consumer died and stopped
+                    # draining the queue. Without this, q.put(chunk) on
+                    # a full queue would block forever and t_p.join()
+                    # would hang the run() call.
+                    while not self.cancel.is_set():
+                        try:
+                            q.put(chunk, timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
             except BaseException as e:
                 self._exc = e
             finally:
-                q.put(None)  # sentinel
+                # Always drop the sentinel even on cancel so the
+                # consumer's q.get() unblocks.
+                try:
+                    q.put_nowait(None)
+                except queue.Full:
+                    # Consumer is alive but queue is full; drain one and
+                    # retry once. If still full the consumer crashed and
+                    # we leak the sentinel — acceptable, the queue dies
+                    # with this thread.
+                    try:
+                        q.get_nowait()
+                        q.put_nowait(None)
+                    except (queue.Empty, queue.Full):
+                        pass
 
         def consumer():
             offset = 0
@@ -85,6 +109,10 @@ class DiskWriter:
                     ))
             except BaseException as e:
                 self._exc = e
+                # Audit Medium #31: if the consumer dies, set cancel so
+                # the producer unblocks at its next iteration instead of
+                # filling the queue forever.
+                self.cancel.set()
 
         t_p = threading.Thread(target=producer, name="dw-producer", daemon=True)
         t_c = threading.Thread(target=consumer, name="dw-consumer", daemon=True)

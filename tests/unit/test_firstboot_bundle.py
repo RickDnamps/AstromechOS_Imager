@@ -96,7 +96,8 @@ def test_wlan_conf_content_correct(fake_boot_partition):
     cfg = _cfg(wifi_ssid="MySSID", wifi_psk="mypassword")
     FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
     content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
-    assert content == b"SSID=MySSID\nPSK=mypassword\n"
+    # Audit Info #51: values are now single-quoted (POSIX shell escape).
+    assert content == b"SSID='MySSID'\nPSK='mypassword'\n"
 
 
 def test_wlan_conf_not_written_when_both_none(fake_boot_partition):
@@ -139,4 +140,4 @@ def test_wlan_conf_written_for_slave_role(fake_boot_partition):
     FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
     assert fake_boot_partition.exists("/astromech_wlan.conf")
     content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
-    assert content == b"SSID=HomeNet\nPSK=secret12\n"
+    assert content == b"SSID='HomeNet'\nPSK='secret12'\n"

@@ -478,6 +478,7 @@ def _build_flash_job(wizard_state, platform_io=None):
         from astromechos_imager.core.keygen import (
             generate_ed25519, generate_hotspot_bootstrap,
             load_persisted_pair, save_persisted_pair,
+            load_persisted_hotspot, save_persisted_hotspot,
         )
 
         # Zero-Touch: no user-pasted keys, ever. The Master↔Slave pair is
@@ -491,7 +492,17 @@ def _build_flash_job(wizard_state, platform_io=None):
             # (master_only, slave_only) reuse the same keys and keep the pair
             # symmetric across cards.
             save_persisted_pair(ed25519)
-        hotspot = generate_hotspot_bootstrap()
+
+        # Audit High #7: honour wizard_state.reuseHotspot. Same symmetry
+        # argument as the keypair — a re-flashed master needs the SAME
+        # hotspot bootstrap as the existing slave, otherwise they can't
+        # pair on boot.
+        hotspot = None
+        if getattr(wizard_state, "reuseHotspot", False):
+            hotspot = load_persisted_hotspot()
+        if hotspot is None:
+            hotspot = generate_hotspot_bootstrap()
+            save_persisted_hotspot(hotspot)
 
         # Zero-Touch FirstbootConfig:
         #   * authorized_keys=[] — validator now permits empty (the Master is

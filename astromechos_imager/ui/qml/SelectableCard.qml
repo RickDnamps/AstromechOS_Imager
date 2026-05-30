@@ -31,11 +31,24 @@ Rectangle {
     property Component iconComponent: null
     signal clicked()
 
+    // Audit High #24: keyboard navigation. Cards are focusable via Tab
+    // and activate on Space / Enter — keyboard-only operators can pick
+    // a flash mode without ever touching the mouse.
+    activeFocusOnTab: enabledLook
+    focus: false
+    Accessible.role: Accessible.Button
+    Accessible.name: title + (subtitle.length > 0 ? " — " + subtitle : "")
+    Accessible.onPressAction: if (enabledLook) clicked()
+    Keys.onSpacePressed: if (enabledLook) { event.accepted = true; clicked() }
+    Keys.onReturnPressed: if (enabledLook) { event.accepted = true; clicked() }
+    Keys.onEnterPressed: if (enabledLook) { event.accepted = true; clicked() }
+
     // ── Geometry ──────────────────────────────────────────────────────
     implicitHeight: 76
     Layout.fillWidth: true
     radius: Theme.radiusCard
-    border.width: 1
+    // border.width is set further down (focus-aware) — don't initialise
+    // twice or QML raises "Property value set multiple times".
 
     // ── State-derived styling ─────────────────────────────────────────
     readonly property bool _hover:   hoverArea.containsMouse && card.enabledLook
@@ -46,9 +59,11 @@ Rectangle {
          : card._hover   ? theme.colors.colorSurface2
          :                  theme.colors.colorSurface
 
-    border.color: card.selected ? theme.colors.colorBorderAccent
-                : card._hover   ? theme.colors.colorBorderHover
-                :                  theme.colors.colorBorderIdle
+    border.color: card.activeFocus  ? theme.colors.colorAccentBright
+                : card.selected     ? theme.colors.colorBorderAccent
+                : card._hover       ? theme.colors.colorBorderHover
+                :                      theme.colors.colorBorderIdle
+    border.width: card.activeFocus ? 2 : 1
 
     // Subtle scale lift on hover — micro-interaction
     scale: card._pressed ? 0.985

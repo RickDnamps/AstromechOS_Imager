@@ -74,15 +74,39 @@ def save_persisted_pair(pair: Ed25519Pair) -> None:
 
 
 def load_persisted_pair() -> Ed25519Pair | None:
+    """Reload the previously-persisted Master↔Slave keypair.
+
+    Audit Medium #29: previously a partial / truncated / hand-edited
+    keypair was wrapped into ``Ed25519Pair`` and flashed onto a card
+    whose first-boot SSH would then irreversibly fail. Now both files
+    are minimally validated before we trust them. On any inconsistency
+    we return ``None`` so the caller regenerates + re-persists a fresh
+    pair (and the existing Slave's authorized_keys will need updating
+    on its next flash, but that's the operator's signal that something
+    is wrong rather than a silent broken handshake).
+    """
     d = persisted_pair_dir()
     priv_p = d / "id_ed25519"
     pub_p = d / "id_ed25519.pub"
     if not (priv_p.is_file() and pub_p.is_file()):
         return None
-    return Ed25519Pair(
-        private_openssh=priv_p.read_bytes(),
-        public_openssh=pub_p.read_bytes(),
-    )
+    try:
+        priv = priv_p.read_bytes()
+        pub = pub_p.read_bytes()
+    except OSError:
+        return None
+    # PEM header check — generate_ed25519 always writes
+    # "-----BEGIN OPENSSH PRIVATE KEY-----" as the first line.
+    if not priv.startswith(b"-----BEGIN OPENSSH PRIVATE KEY-----"):
+        return None
+    # OpenSSH pub key format: "ssh-ed25519 <base64> [comment]\n".
+    pub_text = pub.decode("ascii", errors="replace").strip()
+    if not pub_text.startswith("ssh-ed25519 "):
+        return None
+    parts = pub_text.split(maxsplit=2)
+    if len(parts) < 2:
+        return None
+    return Ed25519Pair(private_openssh=priv, public_openssh=pub)
 
 
 def save_persisted_hotspot(b: HotspotBootstrap) -> None:

@@ -41,8 +41,9 @@ class InvalidWifiPskError(ConfigValidationError): ...
 # image's /astromech_role.json on the boot FAT32 partition is missing,
 # malformed, from a foreign project, or carries a role that does not match
 # the user-selected slot. SD card is never touched on these — sd_state stays
-# "SAFE" (inherited from PreflightError). The recovery_hint is in French
-# (operator-facing) and ends up under the file picker / inside the ErrorDialog.
+# "SAFE" (inherited from PreflightError). The recovery_hint is in English
+# (operator-facing) and ends up under the file picker / inside the
+# ErrorDialog. See CLAUDE.md "Localization & language — STRICT RULE".
 
 class ImageRoleValidationError(PreflightError):
     """Image's /astromech_role.json is missing, malformed, foreign, or mismatched."""

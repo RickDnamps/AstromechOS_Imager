@@ -10,12 +10,14 @@ Rectangle {
     property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
     property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
 
-    // Block "NEXT" only on a HARD mismatch — the role marker (or filename
-    // pattern, in legacy-image mode) actively says we'd flash the wrong card.
-    // Soft states like "checking" or "unknown_marker_absent" let the operator
-    // proceed: the FlashJob self-validates before writing the trigger marker.
-    readonly property bool masterRoleBlocks: wizardState.masterImageRoleStatus === "mismatch"
-    readonly property bool slaveRoleBlocks:  wizardState.slaveImageRoleStatus  === "mismatch"
+    // Block "NEXT" on any HARD failure — the role marker (or filename
+    // pattern, in legacy-image mode) actively says we'd flash the wrong
+    // card OR the validator hit an unrecoverable internal error. Soft
+    // states like "checking" or "unknown_marker_absent" let the operator
+    // proceed: the FlashJob self-validates before writing the trigger.
+    readonly property var hardBlockStates: ["mismatch", "check_failed"]
+    readonly property bool masterRoleBlocks: hardBlockStates.indexOf(wizardState.masterImageRoleStatus) >= 0
+    readonly property bool slaveRoleBlocks:  hardBlockStates.indexOf(wizardState.slaveImageRoleStatus)  >= 0
 
     FileDialog {
         id: masterDialog
@@ -40,38 +42,49 @@ Rectangle {
             property string roleLabel: "MASTER"
             property string filenameHint: ""
 
-            // Status dot (animated when checking)
+            // Audit High #26 + Low #43: status dot uses theme tokens
+            // (WCAG-compliant on both dark and light cards) and the
+            // pulse animation restores opacity=1 on stop, so the badge
+            // can never freeze mid-fade after status leaves "checking".
             Rectangle {
+                id: statusDot
                 width: 8; height: 8; radius: 4
-                color: badgeRow.status === "ok"          ? "#5ec07a"
-                     : badgeRow.status === "mismatch"    ? theme.colors.colorBorderError
-                     : badgeRow.status === "checking"    ? theme.colors.colorAccent
+                color: badgeRow.status === "ok"           ? theme.colors.colorTextSuccess
+                     : badgeRow.status === "mismatch"     ? theme.colors.colorBorderError
+                     : badgeRow.status === "check_failed" ? theme.colors.colorBorderError
+                     : badgeRow.status === "checking"     ? theme.colors.colorAccent
                      : badgeRow.status === "unknown_marker_absent" ? theme.colors.colorBorderWarn
-                     :                                     "transparent"
+                     :                                      "transparent"
                 Behavior on color { ColorAnimation { duration: Theme.durBase } }
                 SequentialAnimation on opacity {
+                    id: pulseAnim
                     running: badgeRow.status === "checking"
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.4; duration: 600; easing.type: Easing.InOutSine }
                     NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutSine }
+                    // Pin opacity back to 1 when the animation stops so the
+                    // dot doesn't freeze half-faded.
+                    onRunningChanged: if (!running) statusDot.opacity = 1.0
                 }
             }
             Text {
                 Layout.fillWidth: true
-                color: badgeRow.status === "ok"          ? "#5ec07a"
-                     : badgeRow.status === "mismatch"    ? theme.colors.colorBorderError
-                     : badgeRow.status === "checking"    ? theme.colors.colorTextSecondary
+                color: badgeRow.status === "ok"           ? theme.colors.colorTextSuccess
+                     : badgeRow.status === "mismatch"     ? theme.colors.colorBorderError
+                     : badgeRow.status === "check_failed" ? theme.colors.colorBorderError
+                     : badgeRow.status === "checking"     ? theme.colors.colorTextSecondary
                      : badgeRow.status === "unknown_marker_absent" ? theme.colors.colorBorderWarn
-                     :                                     theme.colors.colorTextTertiary
+                     :                                      theme.colors.colorTextTertiary
                 font.family: Theme.fontTitle
                 font.pixelSize: 10
                 font.bold: true
                 font.letterSpacing: 1.4
                 wrapMode: Text.WordWrap
                 text:
-                    badgeRow.status === "ok"          ? "✓ ASTROMECHOS " + badgeRow.roleLabel + " VERIFIED (marker present)"
-                  : badgeRow.status === "mismatch"    ? "✗ MISMATCH — THIS IMAGE IS NOT A " + badgeRow.roleLabel
-                  : badgeRow.status === "checking"    ? "VERIFYING ROLE…"
+                    badgeRow.status === "ok"           ? "✓ ASTROMECHOS " + badgeRow.roleLabel + " VERIFIED (marker present)"
+                  : badgeRow.status === "mismatch"     ? "✗ MISMATCH — THIS IMAGE IS NOT A " + badgeRow.roleLabel
+                  : badgeRow.status === "check_failed" ? "✗ INTERNAL ERROR DURING VALIDATION — see startup.log"
+                  : badgeRow.status === "checking"     ? "VERIFYING ROLE…"
                   : badgeRow.status === "unknown_marker_absent" ?
                         (badgeRow.filenameHint === ""
                             ? "⚠ NO MARKER, NO FILENAME HINT — proceed only if you trust the source"

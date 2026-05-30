@@ -13,7 +13,9 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    property color strokeColor: "#5e9bd6"
+    // Audit Medium #37: bind to the live theme accent so the body stays
+    // in the R2 family in both dark and light modes.
+    property color strokeColor: theme.colors.colorAccent
     property real  strokeWidth: 2.0
 
     // Body box.

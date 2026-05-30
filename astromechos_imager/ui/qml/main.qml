@@ -143,9 +143,16 @@ ApplicationWindow {
             Item { Layout.preferredWidth: 16 }   // separator
 
             // ── Theme toggle (sun/moon) ──────────────────────────────
+            // Audit High #25: every icon-only header button now carries
+            // a tooltipText + accessibleName so screen readers, sighted
+            // keyboard users, and hover-discovery all work.
             WindowCtrlButton {
                 Layout.alignment: Qt.AlignVCenter
                 glyph: theme.mode === "light" ? "☾" : "☀"
+                tooltipText: theme.mode === "light"
+                    ? "Switch to dark theme"
+                    : "Switch to light theme"
+                accessibleName: tooltipText
                 onActivated: theme.toggle()
             }
 
@@ -155,15 +162,23 @@ ApplicationWindow {
                 Layout.alignment: Qt.AlignVCenter
                 WindowCtrlButton {
                     glyph: "—"
+                    tooltipText: "Minimize"
+                    accessibleName: "Minimize window"
                     onActivated: root.showMinimized()
                 }
                 WindowCtrlButton {
                     glyph: root.visibility === Window.Maximized ? "❐" : "▢"
+                    tooltipText: root.visibility === Window.Maximized
+                        ? "Restore"
+                        : "Maximize"
+                    accessibleName: tooltipText + " window"
                     onActivated: root.visibility = (root.visibility === Window.Maximized ? Window.Windowed : Window.Maximized)
                 }
                 WindowCtrlButton {
                     glyph: "×"
                     closeStyle: true
+                    tooltipText: "Close"
+                    accessibleName: "Close window"
                     onActivated: Qt.quit()
                 }
             }
@@ -266,27 +281,62 @@ ApplicationWindow {
         }
     }
 
-    // Bottom-right corner resize grip — single-handle resize affordance
-    // since FramelessWindowHint kills native edge detection.
-    Rectangle {
-        width: 14; height: 14
-        anchors.bottom: parent.bottom; anchors.right: parent.right
-        color: "transparent"
+    // Audit Low #49: bigger corner grip (Win11 recommends ≥ 24 px hit
+    // targets) PLUS invisible 4-pixel resize strips on every edge, so
+    // users get the native expected resize behaviour even though
+    // FramelessWindowHint killed native edge detection.
+    Item {
+        id: resizeEdges
+        anchors.fill: parent
         z: 99
-        // Visual: two diagonal dashes
-        Repeater {
-            model: 2
-            delegate: Rectangle {
-                width: 1.5; height: 1.5; radius: 0.75
-                color: theme.colors.colorTextTertiary
-                x: 6 + index * 4
-                y: 6 + index * 4
-            }
-        }
+
+        // Top edge
         MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.SizeFDiagCursor
-            onPressed: root.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
+            anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+            height: 4
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.TopEdge)
+        }
+        // Bottom edge
+        MouseArea {
+            anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+            height: 4
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.BottomEdge)
+        }
+        // Left edge
+        MouseArea {
+            anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.left: parent.left
+            width: 4
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.LeftEdge)
+        }
+        // Right edge
+        MouseArea {
+            anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
+            width: 4
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.RightEdge)
+        }
+        // Corner grip — visible, 24×24 hit target.
+        Rectangle {
+            width: 24; height: 24
+            anchors.bottom: parent.bottom; anchors.right: parent.right
+            color: "transparent"
+            Repeater {
+                model: 3
+                delegate: Rectangle {
+                    width: 2; height: 2; radius: 1
+                    color: theme.colors.colorTextTertiary
+                    x: 10 + index * 4
+                    y: 10 + index * 4
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.SizeFDiagCursor
+                onPressed: root.startSystemResize(Qt.BottomEdge | Qt.RightEdge)
+            }
         }
     }
 }

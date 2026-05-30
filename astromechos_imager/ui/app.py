@@ -132,6 +132,30 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     app.setApplicationName(M["app_title"])
     sys.excepthook = _excepthook
 
+    # Audit High #21: claim the named mutex the Inno Setup installer
+    # checks via `AppMutex=Global\AstromechOS_Imager_AppMutex`. While the
+    # mutex handle is held, attempting to run the installer pops a
+    # "AstromechOS Imager is currently running" warning instead of
+    # silently overwriting bundle files mid-flash. Windows-only; the
+    # handle stays open for the lifetime of the process and is released
+    # automatically on exit. Best-effort: if mutex creation fails we
+    # still launch the app — the installer just loses its safety net.
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.windll.kernel32
+            # CreateMutexW(lpMutexAttributes, bInitialOwner, lpName)
+            # Global\ prefix makes it visible across sessions.
+            _APP_MUTEX = kernel32.CreateMutexW(
+                None, False, "Global\\AstromechOS_Imager_AppMutex"
+            )
+            engine_attr = "_app_mutex_handle"
+            # Stash the handle on app so it isn't GC'd before process exit.
+            setattr(app, engine_attr, _APP_MUTEX)
+        except Exception:
+            pass
+
     # Register bundled fonts (Orbitron) so QML can use them by family.
     # Must happen after QGuiApplication exists, before engine.load().
     _load_fonts()
@@ -168,7 +192,13 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     engine.flashViewModel = flash_vm   # keepalive
     engine.themeManager = theme         # keepalive
 
-    # Drive list model — Windows-only; tests inject their own
+    # Drive list model — Windows-only; tests inject their own.
+    # Audit Medium #36: previously every exception was silenced with a
+    # bare `pass`, so a wizard with no Step 3 entries could not be
+    # distinguished from "no card inserted", "WMI broken", or "pywin32
+    # missing". Now any failure is logged to startup.log (frozen builds)
+    # and the model is exposed as None so QML can render an actionable
+    # empty-state instead of just sitting silent.
     if sys.platform == "win32":
         try:
             from astromechos_imager.platform.windows import WindowsPlatformIO
@@ -178,9 +208,19 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             ctx.setContextProperty("driveListModel", drive_model)
             # Hold a reference so it doesn't get GC'd
             engine.driveListModel = drive_model
-        except Exception:
-            # WMI may fail in CI offscreen environments — just don't expose the model
-            pass
+        except Exception as exc:
+            # WMI / pywin32 / WindowsPlatformIO failure. Log to
+            # startup.log via the already-redirected stderr so frozen
+            # builds capture the traceback the operator's bug report
+            # needs. Still don't crash: the wizard's empty-state badge
+            # ("AWAITING SD CARD") covers the no-model path.
+            import traceback as _tb
+            sink = sys.stderr if sys.stderr is not None else sys.__stderr__
+            if sink is not None:
+                sink.write(
+                    "[app] DriveListModel bring-up failed — Step 3 will be empty:\n"
+                )
+                _tb.print_exc(file=sink)
 
     qml_main = _qml_main_path()
     engine.load(QUrl.fromLocalFile(str(qml_main)))

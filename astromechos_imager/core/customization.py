@@ -82,17 +82,42 @@ def render_authorized_keys(
     return ("\n".join(keys) + "\n").encode("utf-8")
 
 
+def _shell_escape_single_quoted(s: str) -> str:
+    r"""Wrap ``s`` in single quotes for POSIX shell, escaping embedded ``'``.
+
+    POSIX trick: ``'`` cannot be escaped inside single quotes, so we close
+    the string, emit a literal ``\'``, and reopen — ``'foo'\''bar'`` is
+    parsed by sh as ``foo'bar``. Also rejects embedded newlines and NULs
+    so a malicious SSID/PSK cannot smuggle in a second VAR= line.
+    """
+    if "\n" in s or "\r" in s or "\x00" in s:
+        raise ValueError(
+            "wlan_conf value contains a newline or NUL — refusing to write"
+        )
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 def render_wlan_conf(ssid: str, psk: str) -> bytes:
     """Generate /astromech_wlan.conf for the wlan1 home network dongle.
 
     Format (shell-sourceable, awk-parseable):
-        SSID=<ssid>
-        PSK=<psk>
+        SSID='<ssid>'
+        PSK='<psk>'
+
+    Audit Info #51: both values are single-quoted with POSIX-correct
+    escaping, so an SSID containing ``$``, backticks, ``;``, ``"``, or
+    even an embedded ``'`` is safely passed to ``source`` /
+    ``awk -F=``. Embedded newlines / NULs are rejected outright via
+    :func:`_shell_escape_single_quoted` to make a "second-line injection"
+    impossible.
 
     No header comments — keeps it trivially parseable on the Pi side.
     UTF-8 encoded to support Unicode SSIDs.
     """
-    return f"SSID={ssid}\nPSK={psk}\n".encode("utf-8")
+    return (
+        f"SSID={_shell_escape_single_quoted(ssid)}\n"
+        f"PSK={_shell_escape_single_quoted(psk)}\n"
+    ).encode("utf-8")
 
 
 from astromechos_imager.core.errors import (  # noqa: E402

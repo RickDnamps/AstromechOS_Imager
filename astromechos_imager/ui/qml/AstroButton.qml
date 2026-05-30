@@ -73,6 +73,11 @@ Button {
       : selected                ? theme.colors.colorAccent
       :                            theme.colors.colorAccent
 
+    // Audit Medium #38: keyboard-focusable + visible focus ring. Tab
+    // walks here, Space / Enter activate via the inherited Button
+    // behaviour (Qt Quick Controls 2 handles the key press).
+    activeFocusOnTab: true
+
     background: Rectangle {
         radius: Theme.radiusButton
         border.width: 1
@@ -82,6 +87,20 @@ Button {
                                    : Qt.rgba(0.30, 0.34, 0.38, 0.5)
         Behavior on color        { ColorAnimation { duration: Theme.durFast } }
         Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
+
+        // Audit Medium #38: focus-visible ring. Sits OUTSIDE the
+        // button via a negative-inset Rectangle so it never overlaps
+        // the glyph and is unmissable on Tab navigation.
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: -3
+            radius: parent.radius + 3
+            color: "transparent"
+            border.color: theme.colors.colorAccentBright
+            border.width: 2
+            visible: btn.activeFocus && btn.enabled
+            z: 1
+        }
 
         // Glow halo on hover — only visible for filled variants.
         Rectangle {

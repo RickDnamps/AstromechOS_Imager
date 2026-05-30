@@ -63,6 +63,15 @@ ROLE_MARKER_PATH = "/astromech_role.json"
 DEFAULT_MAX_DECOMPRESS_MB = 128
 EXPECTED_PROJECT = "AstromechOS"
 
+# Audit Medium #33 / #34: hard caps on inputs that could otherwise OOM
+# or recurse the JSON parser. The role marker is a ~100-byte file and
+# sidecar checksums are 64-char hex + filename — these limits are
+# orders of magnitude above the realistic max while still bounding any
+# adversarial or accidentally-misnamed input.
+MAX_MARKER_BYTES = 64 * 1024              # 64 KB plenty for a 3-key JSON
+MAX_SIDECAR_BYTES = 8 * 1024              # 8 KB plenty for "<hex>  <file>"
+MAX_JSON_DEPTH = 8                        # marker is flat — 8 is generous
+
 
 # ── Filename hint ─────────────────────────────────────────────────────────
 
@@ -125,15 +134,34 @@ def _validate_marker_from_bp(
         raise MissingRoleMarkerError(image_name)
 
     raw = bp.read_bytes(ROLE_MARKER_PATH)
+
+    # Audit Medium #34: cap the raw blob before JSON parsing. A
+    # multi-megabyte "marker" is either a misnamed file or a deliberate
+    # OOM attempt; in both cases reject early without feeding the parser.
+    if len(raw) > MAX_MARKER_BYTES:
+        raise MalformedRoleMarkerError(
+            image_name,
+            f"marker exceeds {MAX_MARKER_BYTES} bytes (got {len(raw)}) — "
+            f"AstromechOS markers are <1 KB",
+        )
+
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise MalformedRoleMarkerError(image_name, "marker is not valid UTF-8")
 
+    # Audit Medium #34: deeply nested JSON raises RecursionError, NOT
+    # JSONDecodeError. Catch both so the strict "everything raises
+    # MalformedRoleMarkerError" contract holds and the wizard's
+    # missing-marker amber soft-pass does not swallow a parser bomb.
     try:
         obj = json.loads(text)
     except json.JSONDecodeError as exc:
         raise MalformedRoleMarkerError(image_name, f"invalid JSON: {exc.msg}")
+    except (RecursionError, ValueError) as exc:
+        raise MalformedRoleMarkerError(
+            image_name, f"JSON parser failure ({type(exc).__name__}): {exc}"
+        )
 
     if not isinstance(obj, dict):
         raise MalformedRoleMarkerError(
@@ -185,7 +213,13 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
     typically ~10 MB into the partition, comfortably inside the default
     128 MB window. The temp file is unlinked on exit.
     """
+    # Audit High #5 / #6: track both the outer ZipFile and the inner
+    # opener so the zip handle is always closed (was leaked when an inner
+    # .img was found), AND reject zips without any .img member instead
+    # of silently re-reading the zip as raw bytes (which would mislead
+    # the operator with "cannot parse MBR").
     name_lower = path.name.lower()
+    zf: zipfile.ZipFile | None = None
     if name_lower.endswith(".xz"):
         opener: Callable = lambda: lzma.open(path, "rb")
     elif name_lower.endswith(".gz"):
@@ -198,9 +232,10 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
         )
         if inner is None:
             zf.close()
-            opener = lambda: path.open("rb")
-        else:
-            opener = lambda: zf.open(inner)
+            raise MalformedRoleMarkerError(
+                path.name, "zip archive contains no .img member"
+            )
+        opener = lambda: zf.open(inner)
     else:
         opener = lambda: path.open("rb")
 
@@ -224,6 +259,12 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
                 src.close()
             except Exception:
                 pass
+            # Audit High #5: close the outer ZipFile handle too.
+            if zf is not None:
+                try:
+                    zf.close()
+                except Exception:
+                    pass
         yield tmp_path
     finally:
         try:
@@ -258,26 +299,40 @@ def validate_image_role(
     preflight) or as soft fallbacks (Wizard preview, per operator
     policy: missing marker → amber warning, others → red block).
     """
-    from astromechos_imager.core.bootpartition import _import_pyfatfs
+    from astromechos_imager.core.bootpartition import (
+        _import_pyfatfs, BootPartitionMountError,
+    )
 
     max_bytes = max_decompress_mb * 1024 * 1024
     with _decompressed_head_as_tempfile(path, max_bytes) as tmp_path:
         if tmp_path.stat().st_size < 512:
-            raise MissingRoleMarkerError(path.name)
+            # Audit Medium #28: a sub-512-byte image is corrupted /
+            # truncated, not "marker absent". Use Malformed so the
+            # wizard hard-blocks instead of soft-passing amber.
+            raise MalformedRoleMarkerError(
+                path.name,
+                f"image is too small for an MBR "
+                f"({tmp_path.stat().st_size} bytes, expected ≥ 512)",
+            )
 
         with open(tmp_path, "rb") as f:
             mbr = f.read(512)
+        # Audit Medium #35: narrow the catch to the specific MBR-parse
+        # error so library bugs (e.g. unexpected struct alignment) don't
+        # masquerade as "re-extract the image" advice in the recovery
+        # hint. BootPartitionMountError is the only thing
+        # find_first_fat32_partition is contracted to raise.
         try:
             layout: BootPartitionLayout = find_first_fat32_partition(mbr)
-        except Exception as exc:
+        except BootPartitionMountError as exc:
             raise MalformedRoleMarkerError(
-                path.name, f"cannot parse MBR / locate FAT32 partition: {exc}"
+                path.name, f"cannot locate FAT32 partition in MBR: {exc}"
             )
 
         PyFatFS = _import_pyfatfs()
         try:
             fs = PyFatFS(filename=str(tmp_path), offset=layout.offset)
-        except Exception as exc:
+        except Exception as exc:  # pyfatfs has no single exported error class
             raise MalformedRoleMarkerError(
                 path.name, f"cannot mount FAT32 partition: {exc}"
             )
@@ -316,9 +371,20 @@ def find_sidecar_checksum(image_path: Path) -> tuple[str, str] | None:
     for path, algo in candidates:
         if not path.is_file():
             continue
+        # Audit Medium #33: read at most MAX_SIDECAR_BYTES so a multi-GB
+        # misnamed sidecar can't OOM the process. Decode with utf-8-sig
+        # to swallow a PowerShell-emitted BOM (otherwise a legitimate
+        # sidecar would silently fail the regex).
         try:
-            text = path.read_text(encoding="utf-8", errors="replace").strip()
+            with path.open("rb") as f:
+                blob = f.read(MAX_SIDECAR_BYTES + 1)
         except OSError:
+            continue
+        if len(blob) > MAX_SIDECAR_BYTES:
+            continue   # too large to be a real coreutils sidecar
+        try:
+            text = blob.decode("utf-8-sig", errors="replace").strip()
+        except (UnicodeDecodeError, LookupError):
             continue
         if not text:
             continue

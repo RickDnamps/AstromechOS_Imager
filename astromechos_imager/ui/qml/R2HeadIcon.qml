@@ -15,7 +15,10 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    property color strokeColor: "#5e9bd6"
+    // Audit Medium #37: bind to the live theme accent so the dome stays
+    // in the R2 family in both dark (#5e9bd6) and light (#1e5db8) modes.
+    // Callers can still override by setting strokeColor explicitly.
+    property color strokeColor: theme.colors.colorAccent
     property real  strokeWidth: 2.0
 
     // Half-circle dome with flat baseline (closed silhouette).

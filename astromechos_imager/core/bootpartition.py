@@ -180,10 +180,24 @@ class PyFatFsBootPartition:
         return self._fs.exists(path)  # type: ignore[no-any-return]
 
     def close(self) -> None:
+        """Flush + close the FAT32 filesystem handle.
+
+        Audit Low #45: previously swallowed every exception silently, which
+        meant a card with unflushed FAT metadata could be reported as a
+        successful flash. We now log the exception (so it surfaces in
+        startup.log under frozen builds) but stay non-fatal — the trigger
+        marker has already been written and the operator's SD will boot.
+        """
         try:
             self._fs.close()
-        except Exception:
-            pass  # best-effort
+        except Exception as exc:  # noqa: BLE001
+            import sys as _sys
+            sink = _sys.stderr if _sys.stderr is not None else _sys.__stderr__
+            if sink is not None:
+                sink.write(
+                    f"[bootpartition] pyfatfs close() raised after trigger "
+                    f"write — non-fatal: {type(exc).__name__}: {exc}\n"
+                )
 
 
 # ── α path: drive letter after Windows remount ─────────────────────────────────

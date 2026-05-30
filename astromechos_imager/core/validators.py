@@ -20,11 +20,23 @@ from astromechos_imager.core.errors import (
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9](?:-?[a-zA-Z0-9])*$")
 
 OPENSSH_PUBKEY_RE = re.compile(
+    # Audit High #17: tightened from the original ``\s+.+`` comment slot
+    # (which accepted ``\n``, ``\r``, and NULs and enabled embedded
+    # ``authorized_keys`` injection) to a single-line, tab-or-space
+    # delimited comment. The wrapping ``[ \t]+\S.*`` rejects any newline
+    # in the key OR the comment portion; callers should still pre-strip
+    # individual lines and reject inputs containing ``\n`` or ``\x00``.
     r"^(?:ssh-(?:rsa|ed25519|dss)"
     r"|ecdsa-sha2-nistp(?:256|384|521)"
     r"|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)"
-    r"\s+[A-Za-z0-9+/=.]+(?:\s+.+)?$"
+    r"[ \t]+[A-Za-z0-9+/=.]+"
+    r"(?:[ \t]+\S[^\r\n\x00]*)?$"
 )
+
+
+def _safe_for_authorized_keys(line: str) -> bool:
+    """Reject any pubkey line that would write more than one entry."""
+    return "\n" not in line and "\r" not in line and "\x00" not in line
 
 _USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
@@ -59,7 +71,14 @@ def validate_authorized_keys(keys: list[str]) -> None:
     Every non-empty entry must still match ``OPENSSH_PUBKEY_RE``.
     """
     for k in keys:
-        if not OPENSSH_PUBKEY_RE.match(k.strip()):
+        # Hard-reject embedded newlines BEFORE strip — strip() would
+        # mask the injection by removing the trailer.
+        if not _safe_for_authorized_keys(k):
+            raise InvalidAuthorizedKeysError(
+                "key contains a newline, carriage return, or NUL — "
+                "single-line pubkeys only"
+            )
+        if not OPENSSH_PUBKEY_RE.fullmatch(k.strip()):
             raise InvalidAuthorizedKeysError(f"not an OpenSSH pubkey: {k!r}")
 
 

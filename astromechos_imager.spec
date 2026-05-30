@@ -35,9 +35,39 @@ if RES_FONT_DIR.exists():
         if p.is_file() and p.suffix.lower() in {".ttf", ".otf"}:
             datas.append((str(p), "astromechos_imager/ui/resources/fonts"))
 if VENDOR_DIR.exists():
+    # Audit Medium #41: ALLOWLIST not denylist. The vendor/ folder is a
+    # known set of three Win32 binaries + supporting DLLs. A denylist
+    # (skip README / .gitkeep / MISSING_BINARIES) would happily ship a
+    # PDB, .bak, license text, or stray dev file the operator dropped in
+    # there. Be explicit about what's allowed and warn loudly on anything
+    # else so build-time noise catches it before distribution.
+    _VENDOR_ALLOWLIST = {
+        "debugfs.exe",
+        "e2fsck.exe",
+        "msys-2.0.dll",
+        # Transitive MSYS2 runtime dependencies needed by debugfs/e2fsck
+        "msys-com_err-1.dll",
+        "msys-e2p-2.dll",
+        "msys-ext2fs-2.dll",
+        "msys-ss-2.dll",
+        "msys-uuid-1.dll",
+        "msys-iconv-2.dll",
+        "msys-intl-8.dll",
+    }
+    _VENDOR_KNOWN_DOCS = {"README.md", ".gitkeep", "MISSING_BINARIES.md"}
     for p in VENDOR_DIR.iterdir():
-        if p.is_file() and p.name not in {"README.md", ".gitkeep", "MISSING_BINARIES.md"}:
+        if not p.is_file():
+            continue
+        if p.name in _VENDOR_ALLOWLIST:
             datas.append((str(p), "vendor"))
+        elif p.name in _VENDOR_KNOWN_DOCS:
+            continue   # explicitly skipped
+        else:
+            print(
+                f"[spec] WARNING: vendor/{p.name} is not in the allowlist "
+                f"— refusing to ship. Add it to _VENDOR_ALLOWLIST if "
+                f"intentional, otherwise remove the file."
+            )
 
 FIRSTBOOT_SNAPSHOT = PROJECT_ROOT / "tests" / "contract" / "fixtures" / "firstboot_setup.sh.snapshot"
 if FIRSTBOOT_SNAPSHOT.is_file():

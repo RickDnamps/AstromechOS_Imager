@@ -50,6 +50,12 @@ _DARK = {
     "colorAccentBright":  "#7eb8e8",
     "colorAccentDim":     "#3d6e9e",
     "colorAccentGlow":    "#5e9bd6",
+    # Audit High #26: success / warn / error semantic colours, themed.
+    # Light tones are still WCAG AA on dark surfaces; light-theme values
+    # are darkened for AA on white cards. Replaces the hardcoded
+    # #5ec07a green that failed contrast on light cards.
+    "colorTextSuccess":   "#6cc987",
+    "colorTextWarn":      "#e8a93d",
     **_ON_CHROME,
 }
 
@@ -79,6 +85,10 @@ _LIGHT = {
     "colorAccentBright":  "#2c70d4",
     "colorAccentDim":     "#7099c6",
     "colorAccentGlow":    "#1e5db8",
+    # Darker green satisfies WCAG AA on white (~4.7:1 vs the failing
+    # 2.3:1 of #5ec07a). Amber kept slightly darker than dark theme.
+    "colorTextSuccess":   "#2f8a4a",
+    "colorTextWarn":      "#b27310",
     **_ON_CHROME,
 }
 

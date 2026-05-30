@@ -46,10 +46,22 @@ def is_admin() -> bool:
 
 
 def relaunch_as_admin() -> None:
+    """Re-launch the CLI with UAC elevation.
+
+    Audit Low #42: arguments must go through ``subprocess.list2cmdline``
+    so paths containing spaces, quotes, or backslashes survive the trip
+    through Windows' ``CommandLineToArgvW``. A naive
+    ``" ".join(sys.argv)`` fragments such paths and is an argv-injection
+    vector if any positional argument is operator-controlled.
+    """
     if sys.platform != "win32":
         return
+    import subprocess  # noqa: PLC0415 — only needed on Windows
+    # Skip argv[0] — ShellExecuteW takes the executable as a separate
+    # parameter; argv[1:] are the actual command-line arguments.
+    quoted_args = subprocess.list2cmdline(sys.argv[1:])
     ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, " ".join(sys.argv), None, 1,
+        None, "runas", sys.executable, quoted_args, None, 1,
     )
     sys.exit(0)
 

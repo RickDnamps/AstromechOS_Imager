@@ -13,9 +13,14 @@
 // ── Fonts ────────────────────────────────────────────────────────────
 // Orbitron is bundled in resources/fonts as OTF and registered at
 // startup (app.py _load_fonts). Segoe UI is the safe Windows fallback.
+//
+// Audit High #23: Orbitron is a *display* face, not a body face — at
+// 11–12 px it slows reading and breaks the title/body hierarchy. Body
+// copy now falls back to the system humanist sans (Segoe UI on Win10+).
+// Titles, subtitles, button captions, badges keep Orbitron for identity.
 var fontTitle    = "Orbitron"
 var fontSubtitle = "Orbitron"
-var fontBody     = "Orbitron"
+var fontBody     = "Segoe UI"
 var fontMono     = "Consolas"
 
 // ── Geometry ─────────────────────────────────────────────────────────

@@ -275,12 +275,44 @@ class PairFlashJob:
         m_job = self._make_job(Role.MASTER, self.master_image, self.master_target)
         s_job = self._make_job(Role.SLAVE, self.slave_image, self.slave_target)
         if self.parallel:
-            m_result: list[FlashJobResult] = []
-            s_result: list[FlashJobResult] = []
-            t1 = threading.Thread(target=lambda: m_result.append(m_job.run()))
-            t2 = threading.Thread(target=lambda: s_result.append(s_job.run()))
+            # Audit Medium #32: capture both `result` and exception per
+            # thread, so an unexpected exception from either job (e.g.
+            # an OSError that slipped through FlashJob.run()'s broad
+            # wrapper — should be impossible now but defence in depth)
+            # is surfaced via FlashJobResult.error rather than turning
+            # into an IndexError on the post-join lookup.
+            from astromechos_imager.core.errors import FlashError
+
+            m_box: dict[str, object] = {}
+            s_box: dict[str, object] = {}
+
+            def _run_into(box, job):
+                try:
+                    box["result"] = job.run()
+                except BaseException as exc:  # noqa: BLE001
+                    box["exc"] = exc
+
+            t1 = threading.Thread(target=_run_into, args=(m_box, m_job),
+                                  name="pair-master", daemon=False)
+            t2 = threading.Thread(target=_run_into, args=(s_box, s_job),
+                                  name="pair-slave", daemon=False)
             t1.start(); t2.start(); t1.join(); t2.join()
-            m, s = m_result[0], s_result[0]
+
+            def _unbox(box: dict, role_name: str) -> FlashJobResult:
+                if "result" in box:
+                    return box["result"]  # type: ignore[return-value]
+                exc = box.get("exc")
+                wrapped = FlashError(
+                    f"unexpected error in {role_name} flash thread: {exc!r}"
+                )
+                if isinstance(exc, BaseException):
+                    wrapped.__cause__ = exc
+                return FlashJobResult(
+                    ok=False, bytes_written=0, source_sha256="", error=wrapped,
+                )
+
+            m = _unbox(m_box, "master")
+            s = _unbox(s_box, "slave")
         else:
             m = m_job.run()
             s = s_job.run()

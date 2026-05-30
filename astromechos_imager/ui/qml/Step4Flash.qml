@@ -119,38 +119,66 @@ Rectangle {
                 anchors.margins: 18
                 spacing: 12
 
-                Repeater {
-                    model: [
-                        { vis: needMaster, role: "MASTER", img: wizardState.masterImagePath, drv: wizardState.masterDriveId },
-                        { vis: needSlave,  role: "SLAVE",  img: wizardState.slaveImagePath,  drv: wizardState.slaveDriveId  },
-                    ]
-                    delegate: RowLayout {
-                        visible: modelData.vis
+                // Audit High #16: static needMaster / needSlave rows that
+                // bind directly to view-model properties. Previously a JS
+                // array literal as Repeater.model rebuilt both delegates
+                // on every property change — fine for a static summary,
+                // but wasted CPU once the panel was repurposed for
+                // progress updates.
+                RowLayout {
+                    visible: needMaster
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Text {
+                        text: "MASTER"
+                        color: theme.colors.colorTextAccent
+                        font.family: Theme.fontTitle
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.letterSpacing: 1.6
+                        Layout.preferredWidth: 70
+                    }
+                    Text {
+                        text: wizardState.masterImagePath
+                        color: theme.colors.colorTextPrimary
+                        font.family: Theme.fontMono
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
                         Layout.fillWidth: true
-                        spacing: 12
-                        Text {
-                            text: modelData.role
-                            color: theme.colors.colorTextAccent
-                            font.family: Theme.fontTitle
-                            font.pixelSize: 10
-                            font.bold: true
-                            font.letterSpacing: 1.6
-                            Layout.preferredWidth: 70
-                        }
-                        Text {
-                            text: modelData.img
-                            color: theme.colors.colorTextPrimary
-                            font.family: Theme.fontMono
-                            font.pixelSize: 12
-                            elide: Text.ElideMiddle
-                            Layout.fillWidth: true
-                        }
-                        Text {
-                            text: "→ drive " + modelData.drv
-                            color: theme.colors.colorTextSecondary
-                            font.family: Theme.fontMono
-                            font.pixelSize: 12
-                        }
+                    }
+                    Text {
+                        text: "→ drive " + wizardState.masterDriveId
+                        color: theme.colors.colorTextSecondary
+                        font.family: Theme.fontMono
+                        font.pixelSize: 12
+                    }
+                }
+                RowLayout {
+                    visible: needSlave
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Text {
+                        text: "SLAVE"
+                        color: theme.colors.colorTextAccent
+                        font.family: Theme.fontTitle
+                        font.pixelSize: 10
+                        font.bold: true
+                        font.letterSpacing: 1.6
+                        Layout.preferredWidth: 70
+                    }
+                    Text {
+                        text: wizardState.slaveImagePath
+                        color: theme.colors.colorTextPrimary
+                        font.family: Theme.fontMono
+                        font.pixelSize: 12
+                        elide: Text.ElideMiddle
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: "→ drive " + wizardState.slaveDriveId
+                        color: theme.colors.colorTextSecondary
+                        font.family: Theme.fontMono
+                        font.pixelSize: 12
                     }
                 }
 
@@ -203,29 +231,25 @@ Rectangle {
                 anchors.margins: 18
                 spacing: 14
 
-                Repeater {
-                    model: [
-                        {
-                            vis: needMaster, role: "MASTER",
-                            frac: flashViewModel.masterHashProgress,
-                            hex:  flashViewModel.masterHash,
-                            match: flashViewModel.masterHashSidecarMatch,
-                        },
-                        {
-                            vis: needSlave, role: "SLAVE",
-                            frac: flashViewModel.slaveHashProgress,
-                            hex:  flashViewModel.slaveHash,
-                            match: flashViewModel.slaveHashSidecarMatch,
-                        },
-                    ]
-                    delegate: ColumnLayout {
-                        visible: modelData.vis
+                // Audit High #16 + #26: static per-role hash blocks that
+                // bind directly to view-model properties. Avoids the JS
+                // array model that forced full delegate rebuilds on every
+                // tick — Behavior on width now interpolates smoothly.
+                // Inline reusable hash-row component via Component { ... }
+                // so we keep DRY without a Repeater rebuild penalty.
+                Component {
+                    id: hashRow
+                    ColumnLayout {
+                        property string roleLabel: ""
+                        property real fracVal: 0
+                        property string hexVal: ""
+                        property var matchVal: null
                         Layout.fillWidth: true
                         spacing: 6
                         RowLayout {
                             Layout.fillWidth: true
                             Text {
-                                text: modelData.role
+                                text: roleLabel
                                 color: theme.colors.colorTextAccent
                                 font.family: Theme.fontTitle
                                 font.pixelSize: 10
@@ -234,21 +258,21 @@ Rectangle {
                             }
                             Item { Layout.fillWidth: true }
                             Text {
-                                text: modelData.hex === "" ? Math.round(modelData.frac * 100) + " %"
-                                    : modelData.match === true  ? "✓ MATCHES SIDECAR"
-                                    : modelData.match === false ? "✗ MISMATCH"
-                                    :                              "NO SIDECAR — VERIFY VISUALLY"
-                                color: modelData.match === true  ? "#5ec07a"
-                                     : modelData.match === false ? theme.colors.colorBorderError
-                                     : modelData.hex !== ""      ? theme.colors.colorBorderWarn
-                                     :                              theme.colors.colorTextSecondary
+                                text: hexVal === ""
+                                        ? Math.round(fracVal * 100) + " %"
+                                    : matchVal === true  ? "✓ MATCHES SIDECAR"
+                                    : matchVal === false ? "✗ MISMATCH"
+                                    :                       "NO SIDECAR — VERIFY VISUALLY"
+                                color: matchVal === true  ? theme.colors.colorTextSuccess
+                                     : matchVal === false ? theme.colors.colorBorderError
+                                     : hexVal !== ""      ? theme.colors.colorBorderWarn
+                                     :                       theme.colors.colorTextSecondary
                                 font.family: Theme.fontTitle
                                 font.pixelSize: 10
                                 font.bold: true
                                 font.letterSpacing: 1.4
                             }
                         }
-                        // Hash progress bar
                         Rectangle {
                             Layout.fillWidth: true
                             height: 6
@@ -261,17 +285,16 @@ Rectangle {
                                 anchors.top: parent.top
                                 anchors.bottom: parent.bottom
                                 anchors.margins: 1
-                                width: Math.max(0, (parent.width - 2) * Math.min(1.0, modelData.frac))
+                                width: Math.max(0, (parent.width - 2) * Math.min(1.0, fracVal))
                                 radius: 2
-                                color: modelData.match === false ? theme.colors.colorBorderError
+                                color: matchVal === false ? theme.colors.colorBorderError
                                      : theme.colors.colorAccent
                                 Behavior on width { NumberAnimation { duration: 120 } }
                             }
                         }
-                        // Hex digest line
                         Text {
-                            visible: modelData.hex !== ""
-                            text: modelData.hex
+                            visible: hexVal !== ""
+                            text: hexVal
                             color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
@@ -279,6 +302,30 @@ Rectangle {
                             Layout.fillWidth: true
                         }
                     }
+                }
+                Loader {
+                    active: needMaster
+                    visible: active
+                    Layout.fillWidth: true
+                    sourceComponent: hashRow
+                    onLoaded: {
+                        item.roleLabel = "MASTER"
+                    }
+                    Binding { target: parent.item; property: "fracVal"; value: flashViewModel.masterHashProgress; when: parent.item }
+                    Binding { target: parent.item; property: "hexVal";  value: flashViewModel.masterHash;        when: parent.item }
+                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel.masterHashSidecarMatch; when: parent.item }
+                }
+                Loader {
+                    active: needSlave
+                    visible: active
+                    Layout.fillWidth: true
+                    sourceComponent: hashRow
+                    onLoaded: {
+                        item.roleLabel = "SLAVE"
+                    }
+                    Binding { target: parent.item; property: "fracVal"; value: flashViewModel.slaveHashProgress; when: parent.item }
+                    Binding { target: parent.item; property: "hexVal";  value: flashViewModel.slaveHash;        when: parent.item }
+                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel.slaveHashSidecarMatch; when: parent.item }
                 }
                 Item { Layout.fillHeight: true }
             }

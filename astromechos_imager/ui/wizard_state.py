@@ -41,8 +41,11 @@ class WizardState(QObject):
     masterFilenameHintChanged = Signal(str)
     slaveFilenameHintChanged = Signal(str)
     # Internal queue-back signal — fired from the role-check daemon thread,
-    # auto-marshalled by Qt onto the main thread.
-    _roleStatusUpdated = Signal(str, str)   # role, status
+    # auto-marshalled by Qt onto the main thread. The third argument is a
+    # generation token (audit High #12 / Medium #27): if the operator
+    # re-picks an image while the previous check is still hashing, the
+    # stale verdict carries an older token and is dropped on arrival.
+    _roleStatusUpdated = Signal(str, str, int)   # role, status, generation
 
     # Integrity (SHA-256) toggle for Step 4
     verifyIntegrityChanged = Signal(bool)
@@ -77,6 +80,23 @@ class WizardState(QObject):
         self._master_filename_hint = ""
         self._slave_filename_hint = ""
         self._verify_integrity = True   # zero-touch security default
+        # Audit High #12 / Medium #27: generation token per role so the
+        # last-write-wins race between rapidly-changed image selections
+        # can't deliver a stale verdict.
+        self._role_check_gens: dict[str, int] = {"master": 0, "slave": 0}
+        # Audit High #13: shutdown flag set on aboutToQuit so daemon
+        # threads stop emitting signals to a soon-to-be-destroyed
+        # QObject. Best-effort: a thread already past the check will
+        # still attempt one emit, but Qt drops queued signals to dead
+        # receivers safely.
+        self._shutting_down = False
+        try:
+            from PySide6.QtCore import QCoreApplication
+            inst = QCoreApplication.instance()
+            if inst is not None:
+                inst.aboutToQuit.connect(self._on_about_to_quit)
+        except Exception:
+            pass  # never let setup wiring crash the constructor
         # Marshal worker-thread results back to the main loop. Qt picks
         # Qt.AutoConnection, which becomes QueuedConnection for inter-
         # thread signals — exactly what we want.
@@ -156,16 +176,30 @@ class WizardState(QObject):
     # decompress 128 MB of .img.xz — ~1-2 s on a modern CPU, too slow for
     # the FileDialog onAccepted callback.
 
+    @Slot()
+    def _on_about_to_quit(self) -> None:
+        """Stop accepting role-check results so daemon threads can't emit
+        on a QObject that the C++ side is about to destroy."""
+        self._shutting_down = True
+
     def _kick_role_check(self, role_str: str, path: str) -> None:
         """Schedule asynchronous role verification on a daemon thread.
 
         Operator-facing policy (see CLAUDE.md / Step 2 UI):
-          * marker says the right role           → "ok"
+          * marker says the right role            → "ok"
           * marker says the wrong role / wrong project / malformed
-                                                 → "mismatch" (hard block)
-          * no marker at all + filename agrees   → "unknown_marker_absent" (amber)
-          * no marker + filename disagrees       → "mismatch" (hard block)
-          * no marker + no filename hint         → "unknown_marker_absent" (amber)
+                                                  → "mismatch" (hard block)
+          * no marker at all + filename agrees    → "unknown_marker_absent" (amber)
+          * no marker + filename disagrees        → "mismatch" (hard block)
+          * no marker + no filename hint          → "unknown_marker_absent" (amber)
+          * decompression / pyfatfs / I/O failure → "check_failed" (hard block,
+                                                    audit Low #46 — internal
+                                                    errors must not be
+                                                    silently soft-passed)
+
+        Each invocation bumps the per-role generation counter; the daemon
+        thread captures the token and the queued-back ``_apply_role_status``
+        drops verdicts whose token is no longer current.
         """
         from pathlib import Path as _Path
         import threading as _threading
@@ -182,13 +216,18 @@ class WizardState(QObject):
         )
         from astromechos_imager.core.models import Role
 
+        # Bump the generation token FIRST so any in-flight worker that
+        # completes after this call gets dropped on arrival.
+        self._role_check_gens[role_str] += 1
+        gen = self._role_check_gens[role_str]
+
         if not path:
-            self._apply_role_status(role_str, "none")
+            self._apply_role_status(role_str, "none", gen)
             self._apply_filename_hint(role_str, "")
             return
         p_obj = _Path(path)
         if not p_obj.is_file():
-            self._apply_role_status(role_str, "none")
+            self._apply_role_status(role_str, "none", gen)
             self._apply_filename_hint(role_str, "")
             return
 
@@ -198,16 +237,17 @@ class WizardState(QObject):
         self._apply_filename_hint(role_str, hint_str)
 
         # Async: FAT32 marker read.
-        self._apply_role_status(role_str, "checking")
+        self._apply_role_status(role_str, "checking", gen)
         expected = Role.MASTER if role_str == "master" else Role.SLAVE
 
         def _work() -> None:
+            # Audit High #13: shortcut if shutdown is in progress.
+            if self._shutting_down:
+                return
             try:
                 validate_image_role(p_obj, expected)
                 status = "ok"
             except MissingRoleMarkerError:
-                # Soft pass when the filename hint agrees with the slot, hard
-                # block when it disagrees (legacy backup of the OTHER role).
                 if hint_role is not None and hint_role != expected:
                     status = "mismatch"
                 else:
@@ -215,10 +255,23 @@ class WizardState(QObject):
             except (RoleMismatchError, WrongProjectMarkerError,
                     MalformedRoleMarkerError):
                 status = "mismatch"
-            except Exception:
-                # Defensive: any unexpected failure → amber, never false-block.
-                status = "unknown_marker_absent"
-            self._roleStatusUpdated.emit(role_str, status)
+            except Exception as exc:  # noqa: BLE001
+                # Audit Low #46: pyfatfs ImportError, transient I/O, etc.
+                # used to surface as the amber "unknown_marker_absent"
+                # soft-pass which operators are documented to override.
+                # That weakens the only role-safety gate before a
+                # destructive write. Promote to "check_failed", a hard
+                # block the UI flags red with a "see startup.log" hint.
+                import sys as _sys
+                sink = _sys.stderr if _sys.stderr is not None else _sys.__stderr__
+                if sink is not None:
+                    sink.write(
+                        f"[wizard_state] role check failed for {p_obj.name}: "
+                        f"{type(exc).__name__}: {exc}\n"
+                    )
+                status = "check_failed"
+            if not self._shutting_down:
+                self._roleStatusUpdated.emit(role_str, status, gen)
 
         _threading.Thread(
             target=_work, daemon=True, name=f"role-check-{role_str}"
@@ -234,9 +287,16 @@ class WizardState(QObject):
                 self._slave_filename_hint = hint
                 self.slaveFilenameHintChanged.emit(hint)
 
-    @Slot(str, str)
-    def _apply_role_status(self, role: str, status: str) -> None:
-        """Slot invoked on the main loop with the async verdict."""
+    @Slot(str, str, int)
+    def _apply_role_status(self, role: str, status: str, gen: int = 0) -> None:
+        """Slot invoked on the main loop with the async verdict.
+
+        ``gen`` is the generation token captured by the daemon when it
+        started. If it no longer matches the current generation for this
+        role, the operator has changed image since — drop the verdict.
+        """
+        if gen and gen != self._role_check_gens.get(role, 0):
+            return   # stale verdict — newer check is in flight
         if role == "master":
             if status != self._master_image_role_status:
                 self._master_image_role_status = status

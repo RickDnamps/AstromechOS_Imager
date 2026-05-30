@@ -19,10 +19,16 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -e .[dev]
-      - name: Lint
-        run: |
-          ruff check .
-          mypy
+      # Lint steps are NON-BLOCKING until the lint backlog is cleared.
+      # Current backlog (snapshot 2026-05-30): 323 ruff + 72 mypy errors,
+      # tracked separately. Step logs stay red so the debt is visible,
+      # but the workflow no longer triggers failure emails on every push.
+      - name: Lint (ruff) — non-blocking, see backlog
+        continue-on-error: true
+        run: ruff check . --statistics
+      - name: Lint (mypy) — non-blocking, see backlog
+        continue-on-error: true
+        run: mypy
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen

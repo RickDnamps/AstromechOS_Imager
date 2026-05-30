@@ -31,8 +31,8 @@ def main() -> int:
 
     # Seed realistic wizard state — Zero-Touch dropped Step 4 / authorizedKeys.
     state.setMode("both")
-    state.setMasterImagePath(r"C:\images\astromechos-master-2026-05-29.img.xz")
-    state.setSlaveImagePath(r"C:\images\astromechos-slave-2026-05-29.img.xz")
+    state.setMasterImagePath(r"C:\images\AstromechOS-master-2026-05-29.img.xz")
+    state.setSlaveImagePath(r"C:\images\AstromechOS-slave-2026-05-29.img.xz")
     state.setMasterDriveId(2)
     state.setSlaveDriveId(3)
     state.setHostnameMaster("astromech-master")

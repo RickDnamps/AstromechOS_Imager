@@ -129,8 +129,8 @@ Each exception carries a `recovery_hint` written in plain English — for exampl
 
 Before the (slower) FAT32 mount completes, the Imager runs a synchronous regex on the basename and shows a **provisional badge** in the UI:
 
-- `astromech-master-2026-05-29.img.xz` → MASTER family (also: `dome`, `head`)
-- `astromech-slave-2026-05-29.img.xz` → SLAVE family (also: `body`, `base`)
+- `AstromechOS-master-2026-05-29.img.xz` → MASTER family (also: `dome`, `head`)
+- `AstromechOS-slave-2026-05-29.img.xz` → SLAVE family (also: `body`, `base`)
 - `master_slave_combo.img` → ambiguous → no hint
 - `raspios-bookworm.img.xz` → no hint
 
@@ -193,10 +193,10 @@ End users simply double-click the installer, accept UAC, and get a fully integra
 Pre-configured, optimized, and shrunken **AstromechOS base images** for both roles are hosted **directly within the Releases of this project** — same place as the installer, so a fresh build operator downloads two files and never has to clone the AstromechOS repo or build images themselves:
 
 ```
-astromechos-master-<version>.img.xz           ~1.2 GB compressed
-astromechos-master-<version>.img.xz.sha256    (sidecar, 64-char hex)
-astromechos-slave-<version>.img.xz            ~1.0 GB compressed
-astromechos-slave-<version>.img.xz.sha256
+AstromechOS-master-<version>.img.xz           ~1.2 GB compressed
+AstromechOS-master-<version>.img.xz.sha256    (sidecar, 64-char hex)
+AstromechOS-slave-<version>.img.xz            ~1.0 GB compressed
+AstromechOS-slave-<version>.img.xz.sha256
 ```
 
 These images ship with the strict `/astromech_role.json` marker pre-installed — the hard-block validator passes them immediately. They are **shrunken** (rootfs trimmed and `init_resize.sh` re-injected) so downloads stay reasonable while still expanding to fill any ≥ 8 GB SD card on first boot.

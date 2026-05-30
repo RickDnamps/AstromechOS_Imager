@@ -24,14 +24,26 @@ Item {
 
     property string warningText: ""
     property string warningTitle: "SECURITY NOTE"
-    // Popup horizontal offset relative to this Item's origin. Negative
-    // pulls the popup left so its right edge stays near the icon when
-    // the icon sits near the right side of a wider parent.
-    property int popupOffsetX: -260
+    // Popup horizontal offset relative to this Item's origin. The
+    // default (0) anchors the popup's LEFT edge at the icon, so the
+    // popup extends to the right where there's usually room inside
+    // the parent card. Caller can override with a negative value to
+    // pull the popup leftward when space is tighter on the right.
+    property int popupOffsetX: 0
+    // Internal: lets a preview/test script open the popup at load
+    // time for screenshot capture (not used in production).
+    property bool _autoOpen: false
 
     visible: warningText !== ""
     implicitWidth:  row.implicitWidth
     implicitHeight: row.implicitHeight
+
+    Component.onCompleted: if (_autoOpen) popup.open()
+
+    // Invokable from Python tests/preview scripts.
+    function openPopup()  { popup.open() }
+    function closePopup() { popup.close() }
+    function isPopupOpen(): bool { return popup.opened }
 
     // ── Theme-aware amber palette (WCAG AA against respective surfaces) ──
     // Light surface ≈ #ffffff → needs a darker burnt-orange.

@@ -191,6 +191,7 @@ Rectangle {
                     // The component is self-contained and only renders
                     // when warningText is non-empty.
                     SecurityNote {
+                        objectName: card.title.replace(/[^A-Za-z]/g, "") + "SecNote"
                         Layout.alignment: Qt.AlignVCenter
                         warningText: card.warningText
                     }

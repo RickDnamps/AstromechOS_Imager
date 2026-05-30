@@ -12,9 +12,9 @@ echo "=== Inode of /home/pi BEFORE ==="
 debugfs -R 'stat /home/pi' "$F" 2>&1 | grep -E "^Inode|^Generation|^Links|^Size" | head -4
 
 echo ""
-echo "=== ATTEMPT 1: link /home/pi /home/artoo, then unlink /home/pi ==="
+echo "=== ATTEMPT 1: link /home/pi /home/testuser, then unlink /home/pi ==="
 cat > /tmp/rename.txt <<'EOF'
-link /home/pi /home/artoo
+link /home/pi /home/testuser
 unlink /home/pi
 quit
 EOF
@@ -25,12 +25,12 @@ echo "=== AFTER rename: ls /home ==="
 debugfs -R 'ls -l /home' "$F" 2>&1 | tail -5
 
 echo ""
-echo "=== Inode of /home/artoo AFTER (should match BEFORE inode of /home/pi) ==="
-debugfs -R 'stat /home/artoo' "$F" 2>&1 | grep -E "^Inode|^Generation|^Links|^Size" | head -4
+echo "=== Inode of /home/testuser AFTER (should match BEFORE inode of /home/pi) ==="
+debugfs -R 'stat /home/testuser' "$F" 2>&1 | grep -E "^Inode|^Generation|^Links|^Size" | head -4
 
 echo ""
-echo "=== Files inside /home/artoo (should contain welcome.txt) ==="
-debugfs -R 'ls -l /home/artoo' "$F" 2>&1 | tail -5
+echo "=== Files inside /home/testuser (should contain welcome.txt) ==="
+debugfs -R 'ls -l /home/testuser' "$F" 2>&1 | tail -5
 
 echo ""
 echo "=== e2fsck after rename ==="

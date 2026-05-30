@@ -13,8 +13,8 @@ debugfs -R "cat /etc/passwd" "${F}?offset=${OFF}" 2>&1 | grep -v "^debugfs"
 echo ""
 echo "=== rename via offset ==="
 cat > /tmp/r2.txt <<EOF
-link /home/artoo /home/pi
-unlink /home/artoo
+link /home/testuser /home/pi
+unlink /home/testuser
 quit
 EOF
 debugfs -w -f /tmp/r2.txt "${F}?offset=${OFF}" 2>&1 | tail -3

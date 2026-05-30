@@ -188,7 +188,7 @@ def test_double_application_idempotent(text: str) -> None:
 
 def _make_account() -> LinuxAccount:
     return LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="x",
         crypt_sha512="$6$salt$hash",
     )
@@ -245,16 +245,16 @@ def test_apply_also_renames_user_with_boot() -> None:
     boot = FakeBootPartition(STOCK_CMDLINE)
     RootfsPersonalizer(acc, fs, boot).apply()
 
-    assert b"artoo:x:1000:1000:,,,:/home/artoo:/bin/bash" in fs.files["/etc/passwd"]
-    assert b"artoo:$6$salt$hash:" in fs.files["/etc/shadow"]
-    assert "/home/artoo" in fs.dirs
+    assert b"testuser:x:1000:1000:,,,:/home/testuser:/bin/bash" in fs.files["/etc/passwd"]
+    assert b"testuser:$6$salt$hash:" in fs.files["/etc/shadow"]
+    assert "/home/testuser" in fs.dirs
     assert RESIZE_INIT_ARG.encode("ascii") in boot.files["/cmdline.txt"]
 
 
 def test_personalizer_renames_and_validates() -> None:
     """Legacy test: RootfsPersonalizer still works with 2-arg form (boot=None)."""
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="x",
         crypt_sha512="$6$salt$hash",
     )
@@ -262,27 +262,27 @@ def test_personalizer_renames_and_validates() -> None:
     RootfsPersonalizer(acc, fs).apply()
 
     # /etc/passwd: UID-1000 row fully renamed
-    assert b"artoo:x:1000:1000:,,,:/home/artoo:/bin/bash" in fs.files["/etc/passwd"]
+    assert b"testuser:x:1000:1000:,,,:/home/testuser:/bin/bash" in fs.files["/etc/passwd"]
     assert b"pi:x:1000" not in fs.files["/etc/passwd"]
 
     # /etc/shadow: name and hash replaced
-    assert b"artoo:$6$salt$hash:" in fs.files["/etc/shadow"]
+    assert b"testuser:$6$salt$hash:" in fs.files["/etc/shadow"]
     assert b"pi:" not in fs.files["/etc/shadow"]
 
     # /etc/group: primary group renamed + memberships updated
-    assert b"artoo:x:1000:" in fs.files["/etc/group"]
+    assert b"testuser:x:1000:" in fs.files["/etc/group"]
     assert b"pi:x:1000:" not in fs.files["/etc/group"]
-    assert b"sudo:x:27:artoo" in fs.files["/etc/group"]
+    assert b"sudo:x:27:testuser" in fs.files["/etc/group"]
 
     # /home rename
-    assert "/home/artoo" in fs.dirs
+    assert "/home/testuser" in fs.dirs
     assert "/home/pi" not in fs.dirs
 
 
 def test_personalizer_idempotent_if_already_renamed() -> None:
     """If UID-1000 already has the target name, apply() should short-circuit."""
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="x",
         crypt_sha512="$6$salt$hash",
     )
@@ -290,17 +290,17 @@ def test_personalizer_idempotent_if_already_renamed() -> None:
     # Pre-rename the passwd file so old_user == target
     fs.files["/etc/passwd"] = (
         b"root:x:0:0:root:/root:/bin/bash\n"
-        b"artoo:x:1000:1000:,,,:/home/artoo:/bin/bash\n"
+        b"testuser:x:1000:1000:,,,:/home/testuser:/bin/bash\n"
     )
     # Shadow, group, dirs untouched — apply should not raise
     RootfsPersonalizer(acc, fs).apply()
     # Passwd still correct
-    assert b"artoo:x:1000" in fs.files["/etc/passwd"]
+    assert b"testuser:x:1000" in fs.files["/etc/passwd"]
 
 
 def test_personalizer_raises_uid_not_found() -> None:
     """Should raise UidNotFoundError when no UID-1000 row exists."""
-    acc = LinuxAccount(username="artoo", cleartext_password="x", crypt_sha512="$6$s$h")
+    acc = LinuxAccount(username="testuser", cleartext_password="x", crypt_sha512="$6$s$h")
     fs = FakeRootfs()
     fs.files["/etc/passwd"] = b"root:x:0:0:root:/root:/bin/bash\n"
     with pytest.raises(UidNotFoundError):
@@ -309,11 +309,11 @@ def test_personalizer_raises_uid_not_found() -> None:
 
 def test_personalizer_raises_fsck_error_on_idempotent_path() -> None:
     """Idempotent path still runs fsck and raises on failure."""
-    acc = LinuxAccount(username="artoo", cleartext_password="x", crypt_sha512="$6$s$h")
+    acc = LinuxAccount(username="testuser", cleartext_password="x", crypt_sha512="$6$s$h")
     fs = FakeRootfs()
     fs.files["/etc/passwd"] = (
         b"root:x:0:0:root:/root:/bin/bash\n"
-        b"artoo:x:1000:1000:,,,:/home/artoo:/bin/bash\n"
+        b"testuser:x:1000:1000:,,,:/home/testuser:/bin/bash\n"
     )
     fs.fsck_result = False
     with pytest.raises(RootfsFsckError):
@@ -322,7 +322,7 @@ def test_personalizer_raises_fsck_error_on_idempotent_path() -> None:
 
 def test_personalizer_raises_fsck_error_after_rename() -> None:
     """RootfsFsckError raised when fsck fails after a successful rename."""
-    acc = LinuxAccount(username="artoo", cleartext_password="x", crypt_sha512="$6$s$h")
+    acc = LinuxAccount(username="testuser", cleartext_password="x", crypt_sha512="$6$s$h")
     fs = FakeRootfs()
     fs.fsck_result = False
     with pytest.raises(RootfsFsckError):

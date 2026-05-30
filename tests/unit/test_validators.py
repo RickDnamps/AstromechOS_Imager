@@ -60,7 +60,7 @@ def test_authorized_keys_empty_list_accepted_zero_touch():
 
 
 # ── Install user (POSIX login) ────────────────────────────────────────────
-@pytest.mark.parametrize("u", ["pi", "astromech", "artoo", "_svc", "user-1"])
+@pytest.mark.parametrize("u", ["pi", "astromech", "testuser", "_svc", "user-1"])
 def test_install_user_valid(u):
     validate_install_user(u)
 

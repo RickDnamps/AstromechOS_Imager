@@ -382,40 +382,27 @@ def test_set_wifi_psk_change_emits_new_value(qtbot):
 # Step 4 Customize — UID-1000 account + wlan0 bootstrap PSK
 # ---------------------------------------------------------------------------
 
-def test_install_user_default(qtbot):
-    """Pre-filled default so non-technical operators can NEXT-through
-    Step 4 without typing. Operator is free to override."""
+def test_install_user_default_empty(qtbot):
+    """Hybrid migration: UI defaults are EMPTY; non-blocking fallback
+    to ``astromech`` lives in ``flash_view_model._build_flash_job``.
+    Keeping the wizard state empty lets the placeholder text in the
+    QML field render the default visibly without forcing a 'changed'
+    notification cascade on first paint."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.installUser == "astromech"
+    assert s.installUser == ""
 
 
-def test_install_password_default(qtbot):
-    """Pre-filled default, 9 chars = passes the ≥8 ASCII validator."""
+def test_install_password_default_empty(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.installPassword == "astropass"
+    assert s.installPassword == ""
 
 
-def test_hotspot_password_default(qtbot):
-    """Pre-filled default, 9 chars = compliant with IEEE 802.11i
-    WPA2-PSK minimum (8) so firstboot_setup.sh never skips the wlan0
-    bootstrap when the operator keeps the default."""
+def test_hotspot_password_default_empty(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.hotspotPassword == "astropass"
-
-
-def test_default_credentials_pass_their_validators(qtbot):
-    """Lock the contract: ALL three pre-filled defaults must satisfy
-    the validators that gate the WRITE button. A regression here would
-    leave the wizard open with the defaults and a disabled NEXT button
-    — confusing for non-technical operators."""
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.isValidInstallUser(s.installUser)
-    assert s.isValidInstallPassword(s.installPassword)
-    assert s.isValidHotspotPassword(s.hotspotPassword)
+    assert s.hotspotPassword == ""
 
 
 def test_set_install_user_emits_signal(qtbot):
@@ -423,9 +410,9 @@ def test_set_install_user_emits_signal(qtbot):
     s = WizardState()
     received = []
     s.installUserChanged.connect(lambda v: received.append(v))
-    s.setInstallUser("artoo")
-    assert s.installUser == "artoo"
-    assert received == ["artoo"]
+    s.setInstallUser("testuser")
+    assert s.installUser == "testuser"
+    assert received == ["testuser"]
 
 
 def test_set_install_password_emits_signal(qtbot):
@@ -448,7 +435,7 @@ def test_set_hotspot_password_emits_signal(qtbot):
     assert received == ["hotspotpsk123"]
 
 
-@pytest.mark.parametrize("u", ["artoo", "deetoo", "r2_d2", "x", "user-1", "_under"])
+@pytest.mark.parametrize("u", ["testuser", "deetoo", "r2_d2", "x", "user-1", "_under"])
 def test_is_valid_install_user_accepts(qtbot, u):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()

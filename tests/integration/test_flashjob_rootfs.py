@@ -179,7 +179,7 @@ def test_flashjob_with_linux_account_touches_rootfs_and_boot(
     cfg = _make_cfg()
     pair = generate_ed25519()
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$salt$fakehash",
     )
@@ -212,7 +212,7 @@ def test_flashjob_with_linux_account_touches_rootfs_and_boot(
     assert result.ok, f"FlashJob failed: {result.error}"
 
     # Rootfs was personalized
-    assert b"artoo:x:1000" in fake_rootfs.files["/etc/passwd"]
+    assert b"testuser:x:1000" in fake_rootfs.files["/etc/passwd"]
     assert b"pi:x:1000" not in fake_rootfs.files["/etc/passwd"]
 
     # /cmdline.txt got the resize init arg — exactly once. SD-fill safety
@@ -249,7 +249,7 @@ def test_flashjob_slave_role_also_injects_resize_arg(
     cfg = _make_cfg()
     pair = generate_ed25519()
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$salt$fakehash",
     )
@@ -280,7 +280,7 @@ def test_flashjob_slave_role_also_injects_resize_arg(
     assert result.ok, f"FlashJob (SLAVE) failed: {result.error}"
 
     # Rootfs personalization ran for slave too
-    assert b"artoo:x:1000" in fake_rootfs.files["/etc/passwd"]
+    assert b"testuser:x:1000" in fake_rootfs.files["/etc/passwd"]
 
     # /cmdline.txt got the resize init arg — the critical lockdown
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
@@ -316,7 +316,7 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
     cfg = _make_cfg()
     pair = generate_ed25519()
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$salt$fakehash",
     )
@@ -365,8 +365,8 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
     )
 
     # ── BOTH rootfs partitions personalized ──────────────────────────
-    assert b"artoo:x:1000" in fake_rootfs_master.files["/etc/passwd"]
-    assert b"artoo:x:1000" in fake_rootfs_slave.files["/etc/passwd"]
+    assert b"testuser:x:1000" in fake_rootfs_master.files["/etc/passwd"]
+    assert b"testuser:x:1000" in fake_rootfs_slave.files["/etc/passwd"]
 
     # ── BOTH cmdline.txt files got the resize arg, exactly once each ─
     for role, fake_boot in (("MASTER", fake_boot_master), ("SLAVE", fake_boot_slave)):
@@ -450,7 +450,7 @@ def test_flashjob_cancellation_before_rootfs_skips_bundle(
     cfg = _make_cfg()
     pair = generate_ed25519()
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$salt$fakehash",
     )

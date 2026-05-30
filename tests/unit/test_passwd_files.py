@@ -135,19 +135,19 @@ PASSWD_CONTENT = (
 
 def test_rename_passwd_uid_1000() -> None:
     rows = parse_passwd(PASSWD_CONTENT)
-    new_rows = rename_user_in_passwd(rows, "pi", "artoo")
+    new_rows = rename_user_in_passwd(rows, "pi", "testuser")
     out = serialize_passwd(new_rows).decode()
     assert "pi:x:1000" not in out
-    assert "artoo:x:1000:1000:,,,:/home/artoo:/bin/bash" in out
+    assert "testuser:x:1000:1000:,,,:/home/testuser:/bin/bash" in out
     assert "root:x:0:0:root:/root:/bin/bash" in out  # untouched
 
 
 def test_rename_passwd_home_rewritten() -> None:
     rows = parse_passwd(PASSWD_CONTENT)
-    new_rows = rename_user_in_passwd(rows, "pi", "artoo")
+    new_rows = rename_user_in_passwd(rows, "pi", "testuser")
     uid_row = next(r for r in new_rows if r.uid == 1000)
-    assert uid_row.home == "/home/artoo"
-    assert uid_row.name == "artoo"
+    assert uid_row.home == "/home/testuser"
+    assert uid_row.name == "testuser"
 
 
 def test_rename_passwd_raises_on_missing() -> None:
@@ -160,7 +160,7 @@ def test_rename_passwd_raises_when_uid1000_name_mismatch() -> None:
     """Old name supplied but uid-1000 row has a different name."""
     rows = parse_passwd(PASSWD_CONTENT)
     with pytest.raises(ValueError):
-        rename_user_in_passwd(rows, "notpi", "artoo")
+        rename_user_in_passwd(rows, "notpi", "testuser")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -175,17 +175,17 @@ SHADOW_CONTENT = (
 
 def test_rename_shadow_golden() -> None:
     rows = parse_shadow(SHADOW_CONTENT)
-    new_rows = rename_user_in_shadow(rows, "pi", "artoo", "$6$salt$hash")
+    new_rows = rename_user_in_shadow(rows, "pi", "testuser", "$6$salt$hash")
     out = serialize_shadow(new_rows).decode()
     assert "pi:" not in out
-    assert "artoo:$6$salt$hash:" in out
+    assert "testuser:$6$salt$hash:" in out
     assert "root:*:" in out  # untouched
 
 
 def test_rename_shadow_raises_on_missing() -> None:
     rows = parse_shadow(SHADOW_CONTENT)
     with pytest.raises(ValueError, match="nope"):
-        rename_user_in_shadow(rows, "nope", "artoo", "$6$salt$hash")
+        rename_user_in_shadow(rows, "nope", "testuser", "$6$salt$hash")
 
 
 # ────────────────────────────────────────────────────────────────
@@ -202,25 +202,25 @@ GROUP_CONTENT = (
 
 def test_rename_group_primary_group() -> None:
     rows = parse_group(GROUP_CONTENT)
-    new_rows = rename_user_in_group(rows, "pi", "artoo")
+    new_rows = rename_user_in_group(rows, "pi", "testuser")
     names = [r.name for r in new_rows]
     assert "pi" not in names
-    assert "artoo" in names
+    assert "testuser" in names
 
 
 def test_rename_group_memberships() -> None:
     rows = parse_group(GROUP_CONTENT)
-    new_rows = rename_user_in_group(rows, "pi", "artoo")
+    new_rows = rename_user_in_group(rows, "pi", "testuser")
     sudo_row = next(r for r in new_rows if r.name == "sudo")
     video_row = next(r for r in new_rows if r.name == "video")
-    assert "artoo" in sudo_row.members
+    assert "testuser" in sudo_row.members
     assert "pi" not in sudo_row.members
-    assert "artoo" in video_row.members
+    assert "testuser" in video_row.members
 
 
 def test_rename_group_root_untouched() -> None:
     rows = parse_group(GROUP_CONTENT)
-    new_rows = rename_user_in_group(rows, "pi", "artoo")
+    new_rows = rename_user_in_group(rows, "pi", "testuser")
     root_row = next(r for r in new_rows if r.name == "root")
     assert root_row == rows[0]  # completely unchanged
 
@@ -228,7 +228,7 @@ def test_rename_group_root_untouched() -> None:
 def test_rename_group_raises_on_missing() -> None:
     rows = parse_group(GROUP_CONTENT)
     with pytest.raises(ValueError, match="nope"):
-        rename_user_in_group(rows, "nope", "artoo")
+        rename_user_in_group(rows, "nope", "testuser")
 
 
 # ────────────────────────────────────────────────────────────────

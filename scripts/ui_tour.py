@@ -40,11 +40,12 @@ def main() -> int:
     state.setHostnameMaster("astromech-master")
     state.setHostnameSlave("astromech-slave")
     state.setRepoUrl("https://github.com/RickDnamps/AstromechOS")
-    # Step 4 Customize — keep the pre-filled defaults from WizardState
-    # (astromech / astropass / astropass) so the screenshot shows what
-    # a fresh operator sees on first launch. Only the optional Wi-Fi
-    # pair is seeded so the screenshot demonstrates a "fully configured"
-    # state with green ✓ glyphs everywhere.
+    # Step 4 Customize — leave Robot Login + Hotspot blank so the
+    # screenshot shows the empty-with-placeholder state a fresh operator
+    # sees on first launch (placeholders read "astromech" / "astropass"
+    # / "astropass" — the backend substitutes them at flash time via
+    # the non-blocking fallback). Seed only the optional Wi-Fi pair so
+    # the third card demonstrates a "filled" state too.
     state.setWifiSsid("HomeNetwork")
     state.setWifiPsk("hunter2024")
 

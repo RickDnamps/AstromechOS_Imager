@@ -32,12 +32,13 @@ def build_parser() -> argparse.ArgumentParser:
     flash.add_argument("--repo-branch", type=str, default="main")
     flash.add_argument("--hostname-master", type=str, default="astromech-master")
     flash.add_argument("--hostname-slave", type=str, default="astromech-slave")
-    # wlan0 bootstrap PSK — operator-supplied so the FINAL per-robot
-    # PSK (carried through firstboot handover by default) stays out of
-    # git history.
-    flash.add_argument("--hotspot-psk", type=str, required=True,
+    # wlan0 bootstrap PSK — optional; defaults to ``astropass`` (9 chars,
+    # WPA2-PSK valid). Mirrors the GUI Step 4 non-blocking fallback so the
+    # CLI and the wizard write the same /boot/astromech_init.cfg.
+    flash.add_argument("--hotspot-psk", type=str, default="astropass",
         help="WPA2-PSK (8-63 ASCII chars) for the wlan0 Master↔Slave "
-             "bootstrap AP — SSID is auto-generated per burn")
+             "bootstrap AP — SSID is auto-generated per burn. "
+             "Default: 'astropass'.")
     flash.add_argument("--debug", action="store_true")
     return p
 

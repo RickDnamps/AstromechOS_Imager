@@ -458,8 +458,33 @@ class FlashViewModel(QObject):
             self._worker = None
 
 
+# ── Non-blocking fallback defaults ────────────────────────────────────
+# Single source of truth for "what the Imager writes to the SD card when
+# the operator leaves Step 4 fields blank". The Pi-side scripts also know
+# about ``astromech`` (live ``firstboot_setup.sh:97`` waterfall +
+# ``lib_config.sh::capture_user`` prefer it over the legacy ``artoo``);
+# the two sides are kept in lockstep so an Imager-flashed card with
+# defaults gives the operator the same SSH login on every robot.
+#
+# ``astropass`` is 9 chars = compliant with IEEE 802.11i WPA2-PSK (≥8)
+# enforced by ``firstboot_setup.sh:382`` and ``astromech_wlan_setup.sh:110``,
+# so the wlan0 bootstrap rendezvous never silently brick-skips when the
+# operator keeps the default.
+DEFAULT_INSTALL_USER     = "astromech"
+DEFAULT_INSTALL_PASSWORD = "astropass"
+DEFAULT_HOTSPOT_PASSWORD = "astropass"
+
+
 def _build_flash_job(wizard_state, platform_io=None):
     """Build a PairFlashJob or FlashJob from wizard_state fields.
+
+    Step 4 fields are NON-BLOCKING: empty strings on ``installUser`` /
+    ``installPassword`` / ``hotspotPassword`` are silently substituted
+    with the module-level ``DEFAULT_*`` constants above. This guarantees
+    ``/boot/astromech_init.cfg`` is always complete on the SD card, no
+    matter how the operator went through the wizard. The QML
+    ``formValid`` predicate still blocks WRITE when a field is
+    *non-empty AND invalid* (operator-typed garbage).
 
     Returns None and logs a warning if construction fails (e.g. no real drives).
     This function is module-level so it can be unit-tested with a fake wizard_state.
@@ -494,21 +519,25 @@ def _build_flash_job(wizard_state, platform_io=None):
             # symmetric across cards.
             save_persisted_pair(ed25519)
 
+        # Non-blocking fallback: empty UI fields trigger the module-level
+        # DEFAULT_* substitution. Operator-supplied values WIN; blank
+        # values get the safe defaults (astromech / astropass). This
+        # guarantees ``[hotspot]`` and ``[system]`` blocks in
+        # ``/boot/astromech_init.cfg`` are always complete and ≥8 chars
+        # (no firstboot brick-skip on the Pi).
+        install_user     = (wizard_state.installUser or "").strip()     or DEFAULT_INSTALL_USER
+        install_password = (wizard_state.installPassword or "")         or DEFAULT_INSTALL_PASSWORD
+        hotspot_psk      = (wizard_state.hotspotPassword or "")         or DEFAULT_HOTSPOT_PASSWORD
+
+        linux_account = generate_linux_account(install_user, install_password)
+
         # wlan0 private interconnect: SSID is auto-generated per burn
-        # (random ``Astromech-<4 digits>``), PSK is operator-supplied
-        # via Step 4. Audit High #7: honour wizard_state.reuseHotspot —
-        # a re-flashed master needs the SAME bootstrap as the existing
-        # slave, otherwise they can't pair on boot. With reuseHotspot,
-        # we re-use the persisted SSID but still apply the operator's
-        # current PSK (so they can rotate it without re-burning both
-        # cards).
+        # (random ``Astromech-<4 digits>``). Audit High #7: honour
+        # ``wizard_state.reuseHotspot`` — a re-flashed master needs
+        # the SAME bootstrap SSID as the existing slave, otherwise
+        # they can't pair on boot. The operator's current PSK still
+        # wins so they can rotate it without re-burning both cards.
         from astromechos_imager.core.models import HotspotBootstrap
-        hotspot_psk = wizard_state.hotspotPassword or ""
-        if not hotspot_psk:
-            raise RuntimeError(
-                "Step 4 (Customize) requires a Private Robot Hotspot "
-                "Password — UI validity gate should have blocked this"
-            )
         hotspot = None
         if getattr(wizard_state, "reuseHotspot", False):
             persisted = load_persisted_hotspot()
@@ -519,22 +548,6 @@ def _build_flash_job(wizard_state, platform_io=None):
         if hotspot is None:
             hotspot = generate_hotspot_bootstrap(hotspot_psk)
         save_persisted_hotspot(hotspot)
-
-        # Customize-step restoration: the operator fills Step 4 with a
-        # UID-1000 username + password (mandatory, CLAUDE.md forbids any
-        # hardcoded fallback) and an optional domestic Wi-Fi SSID/PSK
-        # for the wlan1 dongle. The Wi-Fi pair is fully optional; the
-        # account credentials are not — _build_flash_job is only ever
-        # called from startFromWizard, which is gated behind the QML
-        # WRITE-button validity check on the same fields.
-        install_user = (wizard_state.installUser or "").strip()
-        install_password = wizard_state.installPassword or ""
-        if not install_user or not install_password:
-            raise RuntimeError(
-                "Step 4 (Customize) requires a username AND a password "
-                "before WRITE — UI validity gate should have blocked this"
-            )
-        linux_account = generate_linux_account(install_user, install_password)
 
         wifi_ssid = (wizard_state.wifiSsid or "").strip() or None
         wifi_psk = wizard_state.wifiPsk or None
@@ -595,6 +608,7 @@ def _build_flash_job(wizard_state, platform_io=None):
                 slave_target=slave_drive,
                 firstboot_config=firstboot,
                 master_pair=ed25519,
+                linux_account=linux_account,
             )
         if mode == "master_only":
             return FlashJob(
@@ -604,6 +618,7 @@ def _build_flash_job(wizard_state, platform_io=None):
                 role=Role.MASTER,
                 firstboot_config=firstboot,
                 master_pair=ed25519,
+                linux_account=linux_account,
             )
         # slave_only
         return FlashJob(
@@ -613,6 +628,7 @@ def _build_flash_job(wizard_state, platform_io=None):
             role=Role.SLAVE,
             firstboot_config=firstboot,
             master_pair=ed25519,
+            linux_account=linux_account,
         )
     except Exception:
         # Audit High #18: don't swallow silently. Re-raise so startFromWizard

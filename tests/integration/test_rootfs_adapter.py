@@ -76,10 +76,10 @@ def test_write_bytes_replaces_content(tmp_path: Path) -> None:
         bk.write_bytes(
             "/etc/passwd",
             b"root:x:0:0:root:/root:/bin/bash\n"
-            b"artoo:x:1000:1000:,,,:/home/artoo:/bin/bash\n",
+            b"testuser:x:1000:1000:,,,:/home/testuser:/bin/bash\n",
         )
         out = bk.read_bytes("/etc/passwd")
-        assert b"artoo:x:1000" in out
+        assert b"testuser:x:1000" in out
         assert b"pi:x:1000" not in out
     finally:
         bk.close()
@@ -91,17 +91,17 @@ def test_rename_preserves_inode(tmp_path: Path) -> None:
     shutil.copy(FIXTURE, fix)
     bk = _make_backend(fix)
     try:
-        # Be defensive about starting state — fixture may have /home/pi OR /home/artoo
+        # Be defensive about starting state — fixture may have /home/pi OR /home/testuser
         try:
             bk.read_bytes("/home/pi/welcome.txt")
-            # /home/pi exists → rename to /home/artoo
-            bk.rename("/home/pi", "/home/artoo")
+            # /home/pi exists → rename to /home/testuser
+            bk.rename("/home/pi", "/home/testuser")
         except Exception:
-            # /home/pi missing — assume /home/artoo is current; rename back then forward
-            bk.rename("/home/artoo", "/home/pi")
-            bk.rename("/home/pi", "/home/artoo")
+            # /home/pi missing — assume /home/testuser is current; rename back then forward
+            bk.rename("/home/testuser", "/home/pi")
+            bk.rename("/home/pi", "/home/testuser")
 
-        content = bk.read_bytes("/home/artoo/welcome.txt")
+        content = bk.read_bytes("/home/testuser/welcome.txt")
         assert content.strip() == b"hello from pi"
     finally:
         bk.close()

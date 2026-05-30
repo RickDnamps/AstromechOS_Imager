@@ -40,11 +40,13 @@ def test_no_verify_flag():
     assert args.no_verify is True
 
 
-def test_hotspot_psk_is_required():
-    """The wlan0 bootstrap PSK is operator-supplied (not auto-generated)
-    — omitting it must cause argparse to exit."""
-    with pytest.raises(SystemExit):
-        build_parser().parse_args([
-            "flash", "--master-image", "m", "--master-drive", "2",
-            "--keys-file", "k",
-        ])
+def test_hotspot_psk_defaults_to_astropass():
+    """Hybrid migration: --hotspot-psk is OPTIONAL; the default
+    'astropass' (9 chars) is WPA2-PSK valid and mirrors the GUI
+    Step 4 fallback. Omitting the flag MUST be accepted so the CLI
+    matches the wizard's non-blocking behaviour."""
+    args = build_parser().parse_args([
+        "flash", "--master-image", "m", "--master-drive", "2",
+        "--keys-file", "k",
+    ])
+    assert args.hotspot_psk == "astropass"

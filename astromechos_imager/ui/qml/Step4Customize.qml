@@ -1,28 +1,24 @@
 // AstromechOS Imager — Step 4 "Customize".
 //
-// Captures the operator inputs needed for cold rootfs surgery
-// (UID-1000 account) and dual-WLAN provisioning (domestic Wi-Fi on
-// wlan1 + private hotspot PSK for wlan0). NEXT is hard-gated on the
-// required-field validators.
+// Captures operator inputs for cold rootfs surgery (UID-1000 account)
+// and dual-WLAN provisioning. NON-BLOCKING fallback: empty fields are
+// silently substituted with the module-level DEFAULT_* constants
+// (astromech / astropass / astropass) in
+// ``flash_view_model._build_flash_job`` — the WRITE button is only
+// gated on the "non-empty AND invalid" case (operator-typed garbage),
+// never on the "empty" case (operator wants the default).
 //
-// Field layout (3 grouped cards):
-//   1. Linux account (UID-1000) — username + password (required)
-//   2. Domestic Wi-Fi (wlan1)   — SSID + PSK (optional, must be
-//                                  fully provided or fully empty)
-//   3. Private Robot Hotspot    — PSK only (required); the SSID is
-//      (wlan0 bootstrap)         auto-generated per burn by the
-//                                Imager (Astromech-XXXX) and is
-//                                NOT exposed for editing.
-//
-// Layout discipline: every card uses
-// ``Layout.preferredHeight: innerColumn.implicitHeight + 2*padding``
-// so the outer ColumnLayout can stack the cards without overlap.
-// (A bare ``ColumnLayout { anchors.fill: parent }`` does NOT export
-//  implicitHeight upward — the parent Rectangle would collapse to 0.)
+// Section order (per UX spec):
+//   1. ROBOT LOGIN          — Linux UID-1000 (username + password)
+//      + ⚠️ security warning band
+//   2. INTERNAL ROBOT LINK  — wlan0 hotspot password
+//   3. HOME Wi-Fi           — wlan1 SSID + PSK (optional, also
+//                              configurable later from the robot's
+//                              web UI)
 //
 // Visual: Orbitron everywhere (per feedback-orbitron memory),
-// soft glassmorphic field surfaces, focus-visible accent borders,
-// live ✓/✗ validity glyphs at the row's right edge.
+// soft glassmorphic cards with proper Layout.preferredHeight wiring
+// so sections don't collapse to 0 height.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -32,20 +28,24 @@ Rectangle {
     id: root
     color: theme.colors.colorBg
 
-    // ── Live validity (cached per keystroke so visuals + NEXT gate stay in sync) ──
-    property bool installUserOk:       wizardState.isValidInstallUser(userField.text)
-    property bool installPasswordOk:   wizardState.isValidInstallPassword(passField.text)
-    property bool wifiSsidOk:          wizardState.isValidWifiSsid(wifiSsidField.text)
-    property bool wifiPskOk:           wizardState.isValidWifiPsk(wifiPskField.text)
-    property bool hotspotPasswordOk:   wizardState.isValidHotspotPassword(hotspotField.text)
+    // ── Live validity (cached per keystroke) ─────────────────────────
+    property bool installUserOk:     wizardState.isValidInstallUser(userField.text)
+    property bool installPasswordOk: wizardState.isValidInstallPassword(passField.text)
+    property bool wifiSsidOk:        wizardState.isValidWifiSsid(wifiSsidField.text)
+    property bool wifiPskOk:         wizardState.isValidWifiPsk(wifiPskField.text)
+    property bool hotspotPasswordOk: wizardState.isValidHotspotPassword(hotspotField.text)
 
-    property bool wifiPairAllEmpty:    wifiSsidField.text === "" && wifiPskField.text === ""
-    property bool wifiPairValid:       wifiPairAllEmpty || (wifiSsidOk && wifiPskOk)
+    // Wi-Fi (wlan1) is optional: both empty OR both valid is accepted.
+    property bool wifiPairAllEmpty:  wifiSsidField.text === "" && wifiPskField.text === ""
+    property bool wifiPairValid:     wifiPairAllEmpty || (wifiSsidOk && wifiPskOk)
 
-    property bool formValid:           installUserOk
-                                    && installPasswordOk
-                                    && hotspotPasswordOk
-                                    && wifiPairValid
+    // Non-blocking gate: empty fields use defaults; only typed garbage
+    // blocks WRITE. Per-field formula: empty OR valid.
+    property bool formValid:
+           (userField.text    === "" || installUserOk)
+        && (passField.text    === "" || installPasswordOk)
+        && (hotspotField.text === "" || hotspotPasswordOk)
+        && wifiPairValid
 
     function _flush() {
         wizardState.setInstallUser(userField.text)
@@ -63,7 +63,7 @@ Rectangle {
         hotspotField.text  = wizardState.hotspotPassword
     }
 
-    // ── Reusable themed field (label row + input rectangle + helper) ──
+    // ── Reusable themed field (label row + input + helper) ──────────
     component AstroField: ColumnLayout {
         id: field
         spacing: 5
@@ -75,6 +75,7 @@ Rectangle {
         property string label: ""
         property string helper: ""
         property bool ok: false
+        // Optional fields stay neutral (no red ✗) when empty.
         property bool optional: false
         signal edited()
 
@@ -92,7 +93,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
             Text {
                 readonly property bool showInvalid:
-                    !field.ok && (field.optional ? input.text !== "" : true)
+                    !field.ok && input.text !== ""
                 text: field.ok ? "✓" : showInvalid ? "✗" : "·"
                 color: field.ok ? theme.colors.colorAccent
                      : showInvalid ? theme.colors.colorBorderError
@@ -110,10 +111,9 @@ Rectangle {
             radius: Theme.radiusButton
             color: theme.colors.colorBg
             readonly property color _borderResting:
-                  field.ok                              ? theme.colors.colorBorderAccent
-                : (field.optional && input.text === "") ? theme.colors.colorBorderIdle
-                : input.text === ""                     ? theme.colors.colorBorderIdle
-                :                                          theme.colors.colorBorderError
+                  field.ok                      ? theme.colors.colorBorderAccent
+                : input.text === ""             ? theme.colors.colorBorderIdle
+                :                                  theme.colors.colorBorderError
             border.color: input.activeFocus ? theme.colors.colorAccentBright : _borderResting
             border.width: input.activeFocus ? 2 : 1
             Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
@@ -148,13 +148,11 @@ Rectangle {
         }
     }
 
-    // ── Reusable section card. The Rectangle's Layout.preferredHeight
-    //    is bound to the inner ColumnLayout's implicitHeight so the
-    //    outer form can stack cards without overlap.
+    // ── Reusable section card with auto-sizing ───────────────────────
     component SectionCard: Rectangle {
         id: card
         Layout.fillWidth: true
-        Layout.preferredHeight: cardCol.implicitHeight + 20   // 10 top + 10 bottom
+        Layout.preferredHeight: cardCol.implicitHeight + 20
 
         property string title: ""
         property string subtitle: ""
@@ -171,7 +169,6 @@ Rectangle {
             anchors.margins: 10
             spacing: 8
 
-            // Section header — title + subtitle, no divider for compactness
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
@@ -197,7 +194,7 @@ Rectangle {
         }
     }
 
-    // ── Scrollable content (fits ≥ 560 px window per main.qml minH) ───
+    // ── Scrollable content ───────────────────────────────────────────
     Flickable {
         id: scroll
         anchors.fill: parent
@@ -215,10 +212,7 @@ Rectangle {
             width: scroll.width
             spacing: 8
 
-            // ── Page header ───────────────────────────────────────────
-            // Title only — the page subtitle was redundant with the
-            // per-section subtitles and ate 16 px of vertical real
-            // estate that the 3rd card needs.
+            // ── Page title ────────────────────────────────────────────
             Text {
                 Layout.fillWidth: true
                 text: "CUSTOMIZE DEPLOYMENT"
@@ -229,10 +223,10 @@ Rectangle {
                 font.letterSpacing: 1.4
             }
 
-            // ── Section 1: Linux account ──────────────────────────────
+            // ── Section 1: Robot Login (UID-1000) + ⚠️ Security warning ─
             SectionCard {
                 title: "LINUX ACCOUNT  ·  UID-1000"
-                subtitle: "Account used to log into the robot."
+                subtitle: "Account used to log into the robot. Leave fields blank to use the safe defaults."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -242,6 +236,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "USERNAME"
+                        placeholder: "astromech"
                         ok: installUserOk
                         onEdited: _flush()
                     }
@@ -250,17 +245,88 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "PASSWORD"
+                        placeholder: "astropass"
                         ok: installPasswordOk
                         echoMode: TextInput.Password
                         onEdited: _flush()
                     }
                 }
+
+                // ⚠️ Security warning band — kept inside the Login card
+                // so the warning visually owns the credential context.
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: warnCol.implicitHeight + 16
+                    color: Qt.rgba(theme.colors.colorBorderError.r,
+                                   theme.colors.colorBorderError.g,
+                                   theme.colors.colorBorderError.b, 0.10)
+                    border.color: theme.colors.colorBorderError
+                    border.width: 1
+                    radius: Theme.radiusButton
+
+                    RowLayout {
+                        id: warnCol
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 10
+
+                        // Warning icon — Orbitron-friendly glyph
+                        Text {
+                            Layout.alignment: Qt.AlignTop
+                            text: "⚠"
+                            color: theme.colors.colorBorderError
+                            font.family: Theme.fontTitle
+                            font.pixelSize: 22
+                            font.bold: true
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                text: "SECURITY WARNING"
+                                color: theme.colors.colorBorderError
+                                font.family: Theme.fontTitle
+                                font.pixelSize: 11
+                                font.bold: true
+                                font.letterSpacing: 1.4
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Default credentials are username: astromech, password: astropass, " +
+                                      "and hotspot: astropass. If you customize these, store them safely. " +
+                                      "If lost, you will lose SSH access and require a full OS " +
+                                      "reinstallation. No recovery mechanism exists."
+                                color: theme.colors.colorTextPrimary
+                                font.family: Theme.fontBody
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                                lineHeight: 1.2
+                            }
+                        }
+                    }
+                }
             }
 
-            // ── Section 2: Domestic Wi-Fi (wlan1) ─────────────────────
+            // ── Section 2: Internal Robot Link (wlan0) ────────────────
+            SectionCard {
+                title: "PRIVATE ROBOT HOTSPOT  ·  wlan0"
+                subtitle: "Used by the two halves of the robot to find each other."
+
+                AstroField {
+                    id: hotspotField
+                    label: "PRIVATE ROBOT HOTSPOT PASSWORD"
+                    placeholder: "astropass"
+                    ok: hotspotPasswordOk
+                    echoMode: TextInput.Password
+                    onEdited: _flush()
+                }
+            }
+
+            // ── Section 3: Home Wi-Fi (wlan1, optional) ───────────────
             SectionCard {
                 title: "EXTERNAL / DOMESTIC NETWORK  ·  wlan1"
-                subtitle: "Optional — connects your robot to your home network."
+                subtitle: "Optional — connects your robot to your home network. " +
+                          "Can also be configured later from the robot's web UI."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -270,8 +336,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "DOMESTIC Wi-Fi SSID"
-                        placeholder: "Your home Wi-Fi name (optional)"
-                        helper: "Leave both fields empty to skip."
+                        placeholder: "(leave empty to skip)"
                         ok: wifiSsidOk
                         optional: true
                         onEdited: _flush()
@@ -281,7 +346,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "Wi-Fi PASSWORD"
-                        placeholder: "Your home Wi-Fi password"
+                        placeholder: "(leave empty to skip)"
                         ok: wifiPskOk
                         optional: true
                         echoMode: TextInput.Password
@@ -290,21 +355,6 @@ Rectangle {
                 }
             }
 
-            // ── Section 3: Private Robot Hotspot (wlan0) ──────────────
-            SectionCard {
-                title: "PRIVATE ROBOT HOTSPOT  ·  wlan0"
-                subtitle: "Used by the two halves of the robot to find each other."
-
-                AstroField {
-                    id: hotspotField
-                    label: "PRIVATE ROBOT HOTSPOT PASSWORD"
-                    ok: hotspotPasswordOk
-                    echoMode: TextInput.Password
-                    onEdited: _flush()
-                }
-            }
-
-            // bottom breathing room
             Item { Layout.fillWidth: true; Layout.preferredHeight: 4 }
         }
     }

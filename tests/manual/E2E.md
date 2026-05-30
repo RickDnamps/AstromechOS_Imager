@@ -36,7 +36,7 @@ Source: design spec §8.5 — Layer 4: manual E2E (real hardware).
   - Hostname Master: `astromech-master`
   - Hostname Slave: `astromech-slave`
   - SSH public key: paste a test key or browse to `~/.ssh/id_ed25519.pub`
-  - Linux username: `artoo` (or any valid username)
+  - Linux username: `testuser` (or any valid username)
   - Linux password: any non-empty string (shown once in UI)
   - Hotspot SSID: auto-generated or custom
 - [ ] Click **Flash** — confirm progress bars for Master and Slave appear
@@ -73,7 +73,7 @@ Source: design spec §8.5 — Layer 4: manual E2E (real hardware).
 - [ ] With both Pis on the same LAN (or via the bootstrap hotspot), verify Master can reach Slave:
   - `ping astromech-slave.local` from Master (or known IP)
 - [ ] Verify Master → Slave SSH works (keypair injected at flash time):
-  - `ssh -i ~/.ssh/id_ed25519 artoo@astromech-slave.local`
+  - `ssh -i ~/.ssh/id_ed25519 testuser@astromech-slave.local`
   - Should not prompt for password
 
 ---

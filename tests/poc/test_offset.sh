@@ -48,7 +48,7 @@ echo ""
 echo "=== TEST: write mutation via offset ==="
 cat > /tmp/passwd_new <<'EOF'
 root:x:0:0:root:/root:/bin/bash
-artoo:x:1000:1000:,,,:/home/artoo:/bin/bash
+testuser:x:1000:1000:,,,:/home/testuser:/bin/bash
 EOF
 cat > /tmp/mut.txt <<EOF
 rm /etc/passwd

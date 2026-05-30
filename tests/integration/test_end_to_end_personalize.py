@@ -2,7 +2,7 @@
 
 Exercises the full personalization path (skipping raw write phase) and
 asserts all four cold-mod contract surfaces:
-  - /etc/passwd rename (UID-1000 pi → artoo)
+  - /etc/passwd rename (UID-1000 pi → testuser)
   - /etc/shadow hash replacement
   - /etc/group rename
   - /home rename
@@ -98,7 +98,7 @@ def test_full_personalize_via_wsl_and_pyfatfs(tmp_path, fixed_iso_time, pi_os_fi
     boot = PyFatFsBootPartition(str(fixture_copy), boot_layout)
 
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$testsalt$fakehashfortest",
     )
@@ -118,28 +118,28 @@ def test_full_personalize_via_wsl_and_pyfatfs(tmp_path, fixed_iso_time, pi_os_fi
         FirstbootBundle(cfg, pair).write_to(boot, Role.MASTER)
 
         # ── Step 6a: Assert rootfs mutations ─────────────────────────────────
-        # /etc/passwd: UID-1000 renamed to artoo
+        # /etc/passwd: UID-1000 renamed to testuser
         passwd_bytes = rootfs.read_bytes("/etc/passwd")
         rows = parse_passwd(passwd_bytes)
         uid_row = next((r for r in rows if r.uid == 1000), None)
         assert uid_row is not None, "/etc/passwd has no UID-1000 row after rename"
-        assert uid_row.name == "artoo", f"Expected artoo, got {uid_row.name!r}"
-        assert uid_row.home == "/home/artoo", f"Expected /home/artoo, got {uid_row.home!r}"
+        assert uid_row.name == "testuser", f"Expected testuser, got {uid_row.name!r}"
+        assert uid_row.home == "/home/testuser", f"Expected /home/testuser, got {uid_row.home!r}"
         assert b"pi:x:1000" not in passwd_bytes
 
-        # /etc/shadow: artoo present, hash replaced
+        # /etc/shadow: testuser present, hash replaced
         shadow_bytes = rootfs.read_bytes("/etc/shadow")
-        assert b"artoo:" in shadow_bytes
+        assert b"testuser:" in shadow_bytes
         assert b"pi:" not in shadow_bytes
         assert acc.crypt_sha512.encode() in shadow_bytes
 
-        # /etc/group: artoo present
+        # /etc/group: testuser present
         group_bytes = rootfs.read_bytes("/etc/group")
-        assert b"artoo:x:1000:" in group_bytes
+        assert b"testuser:x:1000:" in group_bytes
         assert b"pi:x:1000:" not in group_bytes
 
-        # /home/artoo accessible (welcome.txt survived the rename)
-        welcome = rootfs.read_bytes("/home/artoo/welcome.txt")
+        # /home/testuser accessible (welcome.txt survived the rename)
+        welcome = rootfs.read_bytes("/home/testuser/welcome.txt")
         assert welcome.strip() == b"hello from pi"
 
         # e2fsck clean
@@ -158,7 +158,7 @@ def test_full_personalize_via_wsl_and_pyfatfs(tmp_path, fixed_iso_time, pi_os_fi
         # /ASTROMECH_FIRSTBOOT_READY: trigger marker (LAST — bundle contract)
         assert boot.exists("/ASTROMECH_FIRSTBOOT_READY"), "Trigger marker missing"
 
-        # /astromech_init.cfg: [system] user = artoo (from firstboot config)
+        # /astromech_init.cfg: [system] user = testuser (from firstboot config)
         init_cfg = boot.read_bytes("/astromech_init.cfg").decode("utf-8")
         assert "user = pi" in init_cfg, (
             "init_cfg should have user=pi (FirstbootConfig.install_user default)"
@@ -203,7 +203,7 @@ def test_full_personalize_idempotent_cmdline(tmp_path, fixed_iso_time, pi_os_fix
     boot = PyFatFsBootPartition(str(fixture_copy), boot_layout)
 
     acc = LinuxAccount(
-        username="artoo",
+        username="testuser",
         cleartext_password="test123",
         crypt_sha512="$6$testsalt$fakehashfortest",
     )

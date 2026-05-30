@@ -90,15 +90,15 @@ class WizardState(QObject):
         self._reuse_hotspot = False
         self._wifi_ssid = ""
         self._wifi_psk = ""
-        # Step 4 Customize — pre-filled defaults so non-technical
-        # operators can NEXT-through without typing anything. The
-        # operator is free to override any of them in the wizard.
-        # ``astropass`` is 9 chars = compliant with the IEEE 802.11i
-        # WPA2-PSK minimum (8) enforced by the Pi-side scripts; no
-        # firstboot brick risk if the operator keeps the default.
-        self._install_user = "astromech"
-        self._install_password = "astropass"
-        self._hotspot_password = "astropass"
+        # Step 4 Customize — fields start EMPTY in the UI; the operator
+        # can type custom values OR leave them blank. The non-blocking
+        # fallback to "astromech" / "astropass" / "astropass" lives in
+        # ``flash_view_model._build_flash_job`` (single source of truth)
+        # so blank fields never reach the Pi side as empty strings. See
+        # ``DEFAULT_INSTALL_USER`` etc. in flash_view_model.py.
+        self._install_user = ""
+        self._install_password = ""
+        self._hotspot_password = ""
         # Image validation
         self._master_image_role_status = "none"
         self._slave_image_role_status = "none"
@@ -485,12 +485,13 @@ class WizardState(QObject):
             self.wifiPskChanged.emit(v)
 
     # ------------------------------------------------------------------
-    # Step 4 Customize — UID-1000 deployment account.
-    # Both fields are REQUIRED for the wizard to advance to Confirm &
-    # Flash: CLAUDE.md mandates a unique username per droid (no hardcoded
-    # 'pi' / 'artoo' fallback). Validators are exposed as @Slot so QML
-    # can drive on-keystroke validation without round-tripping through
-    # the Python event loop.
+    # Step 4 Customize — UID-1000 deployment account + dual-WLAN.
+    # Fields are NON-BLOCKING: empty UI values trigger backend default
+    # substitution in ``flash_view_model._build_flash_job`` (astromech
+    # / astropass / astropass). Validators are still exposed as @Slot
+    # so QML can render live ✓/✗ glyphs and gate the WRITE button on
+    # the "non-empty AND invalid" case (operator-typed garbage), never
+    # on the "empty" case (operator wants the default).
     # ------------------------------------------------------------------
 
     @Property(str, notify=installUserChanged)

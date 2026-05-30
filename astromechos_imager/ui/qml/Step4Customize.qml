@@ -229,10 +229,10 @@ Rectangle {
                 font.letterSpacing: 1.4
             }
 
-            // ── Section 1: Linux account ──────────────────────────────
+            // ── Section 1: Robot login ────────────────────────────────
             SectionCard {
-                title: "LINUX ACCOUNT  ·  UID-1000"
-                subtitle: "Replaces the Golden Image's default user offline (libext2fs)."
+                title: "ROBOT LOGIN"
+                subtitle: "Account used to log into the robot."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -240,10 +240,8 @@ Rectangle {
                     AstroField {
                         id: userField
                         Layout.fillWidth: true
-                        Layout.preferredWidth: 1   // equal split with passField
+                        Layout.preferredWidth: 1
                         label: "USERNAME"
-                        placeholder: "e.g. artoo"
-                        helper: "Lowercase / digits / -_, max 32 chars, starts with a letter or _."
                         ok: installUserOk
                         onEdited: _flush()
                     }
@@ -252,8 +250,6 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "PASSWORD"
-                        placeholder: "≥ 8 ASCII printable"
-                        helper: "Hashed (SHA512-CRYPT, 5000 rounds) directly into /etc/shadow."
                         ok: installPasswordOk
                         echoMode: TextInput.Password
                         onEdited: _flush()
@@ -261,10 +257,10 @@ Rectangle {
                 }
             }
 
-            // ── Section 2: Domestic Wi-Fi (wlan1) ─────────────────────
+            // ── Section 2: Home Wi-Fi (wlan1) ─────────────────────────
             SectionCard {
-                title: "EXTERNAL / DOMESTIC NETWORK  ·  wlan1"
-                subtitle: "Optional WPA2-PSK Wi-Fi for the USB dongle. Fill BOTH or leave BOTH empty."
+                title: "HOME Wi-Fi"
+                subtitle: "Optional — connects your robot to your home network."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -273,9 +269,9 @@ Rectangle {
                         id: wifiSsidField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
-                        label: "DOMESTIC Wi-Fi SSID"
-                        placeholder: "Home / workshop network name"
-                        helper: "1-32 UTF-8 bytes. Empty = skip domestic Wi-Fi."
+                        label: "Wi-Fi NAME"
+                        placeholder: "Your home Wi-Fi name (optional)"
+                        helper: "Leave both fields empty to skip."
                         ok: wifiSsidOk
                         optional: true
                         onEdited: _flush()
@@ -285,8 +281,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "Wi-Fi PASSWORD"
-                        placeholder: "WPA2 passphrase"
-                        helper: "8-63 ASCII printable characters."
+                        placeholder: "Your home Wi-Fi password"
                         ok: wifiPskOk
                         optional: true
                         echoMode: TextInput.Password
@@ -295,18 +290,14 @@ Rectangle {
                 }
             }
 
-            // ── Section 3: Private Robot Hotspot (wlan0) ──────────────
+            // ── Section 3: Internal robot link (wlan0) ────────────────
             SectionCard {
-                title: "PRIVATE ROBOT HOTSPOT  ·  wlan0"
-                subtitle: "Master ↔ Slave rendezvous. SSID is auto-generated per burn " +
-                          "(Astromech-XXXX); only the password is operator-controlled."
+                title: "INTERNAL ROBOT LINK"
+                subtitle: "Used by the two halves of the robot to find each other."
 
                 AstroField {
                     id: hotspotField
-                    label: "PRIVATE ROBOT HOTSPOT PASSWORD"
-                    placeholder: "WPA2 passphrase for the wlan0 bootstrap AP"
-                    helper: "8-63 ASCII printable characters. Carries through the firstboot " +
-                            "handover to the final Astromech_Control_XXXX SSID — keep it secret."
+                    label: "LINK PASSWORD"
                     ok: hotspotPasswordOk
                     echoMode: TextInput.Password
                     onEdited: _flush()

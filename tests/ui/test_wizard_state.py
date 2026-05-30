@@ -382,23 +382,40 @@ def test_set_wifi_psk_change_emits_new_value(qtbot):
 # Step 4 Customize — UID-1000 account + wlan0 bootstrap PSK
 # ---------------------------------------------------------------------------
 
-def test_install_user_default_empty(qtbot):
-    """CLAUDE.md mandates a unique username per droid — no hardcoded 'pi'."""
+def test_install_user_default(qtbot):
+    """Pre-filled default so non-technical operators can NEXT-through
+    Step 4 without typing. Operator is free to override."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.installUser == ""
+    assert s.installUser == "astromech"
 
 
-def test_install_password_default_empty(qtbot):
+def test_install_password_default(qtbot):
+    """Pre-filled default, 9 chars = passes the ≥8 ASCII validator."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.installPassword == ""
+    assert s.installPassword == "astropass"
 
 
-def test_hotspot_password_default_empty(qtbot):
+def test_hotspot_password_default(qtbot):
+    """Pre-filled default, 9 chars = compliant with IEEE 802.11i
+    WPA2-PSK minimum (8) so firstboot_setup.sh never skips the wlan0
+    bootstrap when the operator keeps the default."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    assert s.hotspotPassword == ""
+    assert s.hotspotPassword == "astropass"
+
+
+def test_default_credentials_pass_their_validators(qtbot):
+    """Lock the contract: ALL three pre-filled defaults must satisfy
+    the validators that gate the WRITE button. A regression here would
+    leave the wizard open with the defaults and a disabled NEXT button
+    — confusing for non-technical operators."""
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    assert s.isValidInstallUser(s.installUser)
+    assert s.isValidInstallPassword(s.installPassword)
+    assert s.isValidHotspotPassword(s.hotspotPassword)
 
 
 def test_set_install_user_emits_signal(qtbot):

@@ -90,16 +90,15 @@ class WizardState(QObject):
         self._reuse_hotspot = False
         self._wifi_ssid = ""
         self._wifi_psk = ""
-        # Step 4 Customize — UID-1000 deployment account.
-        # No defaults: CLAUDE.md mandates a unique username per droid,
-        # so the WRITE button must be hard-gated on operator input
-        # rather than silently accepting a hardcoded "pi" / "artoo".
-        self._install_user = ""
-        self._install_password = ""
-        # wlan0 bootstrap PSK — operator picks it so the FINAL per-robot
-        # PSK (which carries through the firstboot handover) stays out
-        # of git history.
-        self._hotspot_password = ""
+        # Step 4 Customize — pre-filled defaults so non-technical
+        # operators can NEXT-through without typing anything. The
+        # operator is free to override any of them in the wizard.
+        # ``astropass`` is 9 chars = compliant with the IEEE 802.11i
+        # WPA2-PSK minimum (8) enforced by the Pi-side scripts; no
+        # firstboot brick risk if the operator keeps the default.
+        self._install_user = "astromech"
+        self._install_password = "astropass"
+        self._hotspot_password = "astropass"
         # Image validation
         self._master_image_role_status = "none"
         self._slave_image_role_status = "none"

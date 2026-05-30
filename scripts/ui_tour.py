@@ -40,13 +40,13 @@ def main() -> int:
     state.setHostnameMaster("astromech-master")
     state.setHostnameSlave("astromech-slave")
     state.setRepoUrl("https://github.com/RickDnamps/AstromechOS")
-    # Step 4 Customize — all 5 fields seeded with valid values so the
-    # ✓ glyphs render green for the screenshot.
-    state.setInstallUser("artoo")
-    state.setInstallPassword("Astr0mech!42")
+    # Step 4 Customize — keep the pre-filled defaults from WizardState
+    # (astromech / astropass / astropass) so the screenshot shows what
+    # a fresh operator sees on first launch. Only the optional Wi-Fi
+    # pair is seeded so the screenshot demonstrates a "fully configured"
+    # state with green ✓ glyphs everywhere.
     state.setWifiSsid("HomeNetwork")
     state.setWifiPsk("hunter2024")
-    state.setHotspotPassword("R2D2-Workshop42")
 
     # Splash auto-advances via a 1500 ms Timer inside main.qml — wait it
     # out for the step-1 capture instead of fighting it. For 2-6 we drive

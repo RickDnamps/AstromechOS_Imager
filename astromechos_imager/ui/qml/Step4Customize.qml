@@ -187,130 +187,14 @@ Rectangle {
                         font.bold: true
                         font.letterSpacing: 1.8
                     }
-                    // Pulsing ⚠ icon — only when warningText set.
-                    // Click opens a popup with the full message,
-                    // keeping the card's vertical footprint unchanged.
-                    Rectangle {
-                        id: warnBtn
-                        visible: card.warningText !== ""
-                        Layout.preferredWidth: 22
-                        Layout.preferredHeight: 22
-                        radius: 11
-                        color: warnArea.containsMouse || warnPopup.opened
-                             ? Qt.rgba(theme.colors.colorBorderError.r,
-                                       theme.colors.colorBorderError.g,
-                                       theme.colors.colorBorderError.b, 0.18)
-                             : Qt.rgba(theme.colors.colorBorderError.r,
-                                       theme.colors.colorBorderError.g,
-                                       theme.colors.colorBorderError.b, 0.08)
-                        border.color: theme.colors.colorBorderError
-                        border.width: 1
-                        Behavior on color { ColorAnimation { duration: Theme.durFast } }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "⚠"
-                            color: theme.colors.colorBorderError
-                            font.family: Theme.fontTitle
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
-                        // Slow pulse so the icon catches the eye without
-                        // being annoying. Pauses while the popup is open.
-                        SequentialAnimation on scale {
-                            running: !warnPopup.opened
-                            loops: Animation.Infinite
-                            NumberAnimation { to: 1.18; duration: 700; easing.type: Easing.InOutSine }
-                            NumberAnimation { to: 1.00; duration: 700; easing.type: Easing.InOutSine }
-                        }
-                        MouseArea {
-                            id: warnArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: warnPopup.opened ? warnPopup.close() : warnPopup.open()
-                        }
-
-                        // Floating popup — anchors below the icon so it
-                        // doesn't push the card height. Closes on outside
-                        // click (CloseOnPressOutside) and Escape.
-                        Popup {
-                            id: warnPopup
-                            x: -260   // align right edge near the icon
-                            y: warnBtn.height + 6
-                            width: 360
-                            padding: 0
-                            modal: false
-                            focus: true
-                            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent | Popup.CloseOnPressOutside
-
-                            background: Rectangle {
-                                color: theme.colors.colorSurface
-                                border.color: theme.colors.colorBorderError
-                                border.width: 1
-                                radius: Theme.radiusButton
-                                // Drop-shadow approximation via outer rect
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.margins: -2
-                                    color: "transparent"
-                                    border.color: Qt.rgba(theme.colors.colorBorderError.r,
-                                                          theme.colors.colorBorderError.g,
-                                                          theme.colors.colorBorderError.b, 0.25)
-                                    border.width: 1
-                                    radius: parent.radius + 2
-                                    z: -1
-                                }
-                            }
-
-                            contentItem: RowLayout {
-                                spacing: 10
-                                Text {
-                                    Layout.alignment: Qt.AlignTop
-                                    Layout.leftMargin: 12
-                                    Layout.topMargin: 12
-                                    text: "⚠"
-                                    color: theme.colors.colorBorderError
-                                    font.family: Theme.fontTitle
-                                    font.pixelSize: 22
-                                    font.bold: true
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.topMargin: 10
-                                    Layout.bottomMargin: 12
-                                    Layout.rightMargin: 12
-                                    spacing: 4
-                                    Text {
-                                        text: "SECURITY WARNING"
-                                        color: theme.colors.colorBorderError
-                                        font.family: Theme.fontTitle
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        font.letterSpacing: 1.4
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: card.warningText
-                                        color: theme.colors.colorTextPrimary
-                                        font.family: Theme.fontBody
-                                        font.pixelSize: 11
-                                        wrapMode: Text.WordWrap
-                                        lineHeight: 1.25
-                                    }
-                                }
-                            }
-
-                            // Fade in/out
-                            enter: Transition {
-                                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.durBase }
-                            }
-                            exit: Transition {
-                                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.durFast }
-                            }
-                        }
+                    // Reusable theme-aware Security note (⚠ + popup).
+                    // The component is self-contained and only renders
+                    // when warningText is non-empty.
+                    SecurityNote {
+                        Layout.alignment: Qt.AlignVCenter
+                        warningText: card.warningText
                     }
-                    Item { Layout.fillWidth: true }   // spacer pushes icon left of any future items
+                    Item { Layout.fillWidth: true }   // spacer
                 }
 
                 Text {
@@ -356,18 +240,19 @@ Rectangle {
                 font.letterSpacing: 1.4
             }
 
-            // ── Section 1: Robot Login (UID-1000) ────────────────────
-            // The ⚠ icon next to the section title pulses subtly and
-            // opens a floating popup with the security warning on click
-            // — kept out of the card body so the card's vertical
-            // footprint stays compact.
+            // ── Section 1: Linux Account ─────────────────────────────
+            // ⚠ Security note focuses on the credential-loss + sudo
+            // implications. Click the inline link to read the full
+            // text in a floating popup; the card's vertical footprint
+            // is unchanged.
             SectionCard {
-                title: "LINUX ACCOUNT  ·  UID-1000"
+                title: "LINUX ACCOUNT"
                 subtitle: "Account used to log into the robot. Leave fields blank to use the safe defaults."
-                warningText: "Default credentials are username: astromech, password: astropass, " +
-                             "and hotspot: astropass. If you customize these, store them safely. " +
-                             "If lost, you will lose SSH access and require a full OS reinstallation. " +
-                             "No recovery mechanism exists."
+                warningText: "Username and password grant SSH plus sudo access on the robot. " +
+                             "If you change them and forget the new values, you will be locked " +
+                             "out of the robot entirely — no remote SSH, no service restart, " +
+                             "no recovery. Re-flashing the SD card with this Imager is the " +
+                             "only way back. Use a password you can store safely."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -394,10 +279,18 @@ Rectangle {
                 }
             }
 
-            // ── Section 2: Internal Robot Link (wlan0) ────────────────
+            // ── Section 2: Private Robot Hotspot ──────────────────────
+            // Separate security note about default-password exposure
+            // to nearby Wi-Fi range when operated in public spaces.
             SectionCard {
-                title: "PRIVATE ROBOT HOTSPOT  ·  wlan0"
+                title: "PRIVATE ROBOT HOTSPOT"
                 subtitle: "Used by the two halves of the robot to find each other."
+                warningText: "The default password 'astropass' is publicly known. " +
+                             "If you keep it, anyone within Wi-Fi range of the robot " +
+                             "(roughly 30 m / 100 ft) can join its private network and " +
+                             "reach its services. Set a strong custom password if the " +
+                             "robot will be operated at a convention, expo, or any " +
+                             "public/shared space."
 
                 AstroField {
                     id: hotspotField
@@ -409,9 +302,9 @@ Rectangle {
                 }
             }
 
-            // ── Section 3: Home Wi-Fi (wlan1, optional) ───────────────
+            // ── Section 3: Home Wi-Fi (optional) ──────────────────────
             SectionCard {
-                title: "EXTERNAL / DOMESTIC NETWORK  ·  wlan1"
+                title: "HOME Wi-Fi"
                 subtitle: "Optional — connects your robot to your home network. " +
                           "Can also be configured later from the robot's web UI."
 
@@ -422,7 +315,7 @@ Rectangle {
                         id: wifiSsidField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
-                        label: "DOMESTIC Wi-Fi SSID"
+                        label: "Wi-Fi NAME"
                         placeholder: "(leave empty to skip)"
                         ok: wifiSsidOk
                         optional: true

@@ -1,4 +1,19 @@
-"""Bridges PairFlashJob / FlashJob to QML. Runs the job in a QThread."""
+"""Bridges PairFlashJob / FlashJob to QML. Runs the job in a QThread.
+
+The exposed state machine is:
+
+    idle → verifying → flashing → done
+                  └→ error
+            ↑
+        startFromWizard()
+
+Verifying is the pre-flash SHA-256 / MD5 check (skipped when
+``wizardState.verifyIntegrity`` is False). Each image is hashed in its
+own dedicated _HashWorker on a fresh QThread; mismatch against a sidecar
+file (``image.sha256`` / ``image.md5``) jumps straight to ``error``.
+When no sidecar exists the digest is exposed via ``masterHash`` /
+``slaveHash`` and the operator confirms visually before flashing.
+"""
 from __future__ import annotations
 
 import threading
@@ -55,6 +70,56 @@ class _FlashWorker(QObject):
         self.progressMaster.emit(frac, p.phase)
 
 
+class _HashWorker(QObject):
+    """Streams hashlib over a compressed image, emits progress + result.
+
+    ``sidecar`` is the (algo, expected_hex_lower) pair found next to the
+    image, or None when no sidecar file exists. ``role`` is the wizard
+    role string ('master' / 'slave') so the orchestrator can route the
+    result to the right progress channel."""
+
+    progress = Signal(str, float)          # role, fraction 0..1
+    finished = Signal(str, str, "QVariant") # role, hex_hash, sidecar_match (bool|None)
+
+    def __init__(
+        self,
+        image_path: Path,
+        role: str,
+        sidecar: tuple[str, str] | None,
+        cancel_event: threading.Event,
+    ):
+        super().__init__()
+        self._path = image_path
+        self._role = role
+        self._sidecar = sidecar
+        self._cancel = cancel_event
+
+    @Slot()
+    def run(self) -> None:
+        from astromechos_imager.core.image_validator import (
+            hash_compressed_file, HashCancelled,
+        )
+        algo = self._sidecar[0] if self._sidecar else "sha256"
+        try:
+            digest = hash_compressed_file(
+                self._path,
+                algo=algo,
+                progress_cb=lambda f: self.progress.emit(self._role, f),
+                cancel_event=self._cancel,
+            )
+        except HashCancelled:
+            self.finished.emit(self._role, "", False)
+            return
+        except Exception as exc:
+            self.finished.emit(self._role, f"ERR:{type(exc).__name__}:{exc}", False)
+            return
+        if self._sidecar is None:
+            match = None
+        else:
+            match = (digest.lower() == self._sidecar[1].lower())
+        self.finished.emit(self._role, digest, match)
+
+
 class FlashViewModel(QObject):
     """Top-level controller for the flash step. Owns the QThread + worker."""
     statusChanged = Signal()
@@ -63,11 +128,18 @@ class FlashViewModel(QObject):
     slaveProgressChanged = Signal()
     slavePhaseChanged = Signal()
     errorMessageChanged = Signal()
+    # Integrity verification (pre-flash hash phase)
+    masterHashProgressChanged = Signal()
+    slaveHashProgressChanged = Signal()
+    masterHashChanged = Signal()
+    slaveHashChanged = Signal()
+    masterHashSidecarMatchChanged = Signal()   # bool|None as JS value
+    slaveHashSidecarMatchChanged = Signal()
 
     def __init__(self, wizard_state, parent=None):
         super().__init__(parent)
         self._wizard_state = wizard_state
-        self._status = "idle"               # idle | flashing | done | error
+        self._status = "idle"               # idle | verifying | flashing | done | error
         self._master_progress = 0.0
         self._master_phase = ""
         self._slave_progress = 0.0
@@ -76,6 +148,17 @@ class FlashViewModel(QObject):
         self._thread: QThread | None = None
         self._worker: _FlashWorker | None = None
         self._cancel_event = threading.Event()
+        # Pre-flash hashing state
+        self._master_hash_progress = 0.0
+        self._slave_hash_progress = 0.0
+        self._master_hash = ""
+        self._slave_hash = ""
+        self._master_hash_sidecar_match = None   # True | False | None
+        self._slave_hash_sidecar_match = None
+        self._hash_thread: QThread | None = None
+        self._hash_worker: _HashWorker | None = None
+        self._pending_verify_job = None        # cached job from startFromWizard
+        self._pending_verify_roles: list[str] = []  # roles still to hash
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -101,6 +184,32 @@ class FlashViewModel(QObject):
     def errorMessage(self) -> str:
         return self._error_message
 
+    # ── Pre-flash hash phase properties ───────────────────────────────
+
+    @Property(float, notify=masterHashProgressChanged)
+    def masterHashProgress(self) -> float:
+        return self._master_hash_progress
+
+    @Property(float, notify=slaveHashProgressChanged)
+    def slaveHashProgress(self) -> float:
+        return self._slave_hash_progress
+
+    @Property(str, notify=masterHashChanged)
+    def masterHash(self) -> str:
+        return self._master_hash
+
+    @Property(str, notify=slaveHashChanged)
+    def slaveHash(self) -> str:
+        return self._slave_hash
+
+    @Property("QVariant", notify=masterHashSidecarMatchChanged)
+    def masterHashSidecarMatch(self):
+        return self._master_hash_sidecar_match
+
+    @Property("QVariant", notify=slaveHashSidecarMatchChanged)
+    def slaveHashSidecarMatch(self):
+        return self._slave_hash_sidecar_match
+
     @Slot(QObject)
     def startWithJob(self, job_obj) -> None:
         """job_obj should be a Python object exposing the PairFlashJob / FlashJob
@@ -124,11 +233,135 @@ class FlashViewModel(QObject):
     @Slot()
     def startFromWizard(self) -> None:
         """Build the PairFlashJob/FlashJob from wizardState + platform IO, then start.
-        On dev hosts without real SD cards this will fail at lock_and_dismount —
-        that's the operator's signal to plug a card in."""
+
+        If ``wizardState.verifyIntegrity`` is True (default), runs SHA-256
+        on each compressed image first, compares to the sidecar when
+        present, and only proceeds to the actual flash on success. On a
+        hash mismatch the wizard short-circuits to ``error`` and the
+        operator never reaches the destructive write phase.
+        """
         job = _build_flash_job(self._wizard_state)
-        if job is not None:
+        if job is None:
+            return
+        if not getattr(self._wizard_state, "verifyIntegrity", True):
             self.startWithJob(job)
+            return
+        self._begin_verify_phase(job)
+
+    def _begin_verify_phase(self, job) -> None:
+        """Stage the queue of images to hash, then start the first worker.
+
+        For a paired flash we serialise master then slave on the same
+        QThread — the alternative (two parallel hashers) would double the
+        I/O queue depth for no real wall-clock gain on a typical NVMe.
+        """
+        if self._status in ("verifying", "flashing"):
+            return
+        self._status = "verifying"
+        self._error_message = ""
+        self._master_hash_progress = 0.0
+        self._slave_hash_progress = 0.0
+        self._master_hash = ""
+        self._slave_hash = ""
+        self._master_hash_sidecar_match = None
+        self._slave_hash_sidecar_match = None
+        self.statusChanged.emit()
+        self.errorMessageChanged.emit()
+        for sig in (
+            self.masterHashProgressChanged, self.slaveHashProgressChanged,
+            self.masterHashChanged, self.slaveHashChanged,
+            self.masterHashSidecarMatchChanged, self.slaveHashSidecarMatchChanged,
+        ):
+            sig.emit()
+
+        # Figure out which images need hashing — derived from the wizard
+        # mode so we don't hash a path that won't be flashed.
+        mode = self._wizard_state.mode
+        queue: list[str] = []
+        if mode in ("both", "master_only"):
+            queue.append("master")
+        if mode in ("both", "slave_only"):
+            queue.append("slave")
+        self._pending_verify_job = job
+        self._pending_verify_roles = queue
+        self._cancel_event.clear()
+        self._spawn_next_hash_worker()
+
+    def _spawn_next_hash_worker(self) -> None:
+        from astromechos_imager.core.image_validator import find_sidecar_checksum
+        if not self._pending_verify_roles:
+            # All queued hashes done — chain to actual flash.
+            job = self._pending_verify_job
+            self._pending_verify_job = None
+            if job is not None:
+                self.startWithJob(job)
+            return
+        role = self._pending_verify_roles[0]
+        path_s = (
+            self._wizard_state.masterImagePath if role == "master"
+            else self._wizard_state.slaveImagePath
+        )
+        path = Path(path_s)
+        sidecar = find_sidecar_checksum(path)
+        self._hash_thread = QThread()
+        self._hash_worker = _HashWorker(path, role, sidecar, self._cancel_event)
+        self._hash_worker.moveToThread(self._hash_thread)
+        self._hash_worker.progress.connect(self._on_hash_progress)
+        self._hash_worker.finished.connect(self._on_hash_finished)
+        self._hash_thread.started.connect(self._hash_worker.run)
+        self._hash_thread.start()
+
+    def _on_hash_progress(self, role: str, frac: float) -> None:
+        if role == "master":
+            self._master_hash_progress = frac
+            self.masterHashProgressChanged.emit()
+        else:
+            self._slave_hash_progress = frac
+            self.slaveHashProgressChanged.emit()
+
+    def _on_hash_finished(self, role: str, digest: str, match) -> None:
+        # Always tear down the worker thread before deciding what's next.
+        if self._hash_thread is not None:
+            self._hash_thread.quit()
+            self._hash_thread.wait(500)
+            self._hash_thread = None
+            self._hash_worker = None
+
+        if digest.startswith("ERR:"):
+            # Worker raised — abort the verify phase entirely.
+            self._fail_verify(f"hash failed for {role} image: {digest[4:]}")
+            return
+
+        if role == "master":
+            self._master_hash = digest
+            self._master_hash_sidecar_match = match
+            self.masterHashChanged.emit()
+            self.masterHashSidecarMatchChanged.emit()
+        else:
+            self._slave_hash = digest
+            self._slave_hash_sidecar_match = match
+            self.slaveHashChanged.emit()
+            self.slaveHashSidecarMatchChanged.emit()
+
+        if match is False:
+            # Sidecar mismatch — refuse to flash.
+            self._fail_verify(
+                f"SHA-256 mismatch on {role} image — file looks corrupted"
+            )
+            return
+
+        # Either match==True (sidecar OK) or match is None (no sidecar,
+        # operator will eyeball the hash). Either way, move on.
+        self._pending_verify_roles.pop(0)
+        self._spawn_next_hash_worker()
+
+    def _fail_verify(self, msg: str) -> None:
+        self._pending_verify_job = None
+        self._pending_verify_roles = []
+        self._status = "error"
+        self._error_message = msg
+        self.statusChanged.emit()
+        self.errorMessageChanged.emit()
 
     @Slot()
     def cancel(self) -> None:

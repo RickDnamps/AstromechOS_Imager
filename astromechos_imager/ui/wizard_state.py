@@ -33,6 +33,20 @@ class WizardState(QObject):
     wifiSsidChanged = Signal(str)
     wifiPskChanged = Signal(str)
 
+    # Image role validation (async — driven by image_validator)
+    # status values: "none" | "checking" | "ok" | "mismatch"
+    #              | "unknown_marker_absent" (soft pass, no marker found)
+    masterImageRoleStatusChanged = Signal(str)
+    slaveImageRoleStatusChanged = Signal(str)
+    masterFilenameHintChanged = Signal(str)
+    slaveFilenameHintChanged = Signal(str)
+    # Internal queue-back signal — fired from the role-check daemon thread,
+    # auto-marshalled by Qt onto the main thread.
+    _roleStatusUpdated = Signal(str, str)   # role, status
+
+    # Integrity (SHA-256) toggle for Step 4
+    verifyIntegrityChanged = Signal(bool)
+
     MIN_STEP = 1
     MAX_STEP = 5
 
@@ -57,6 +71,16 @@ class WizardState(QObject):
         self._reuse_hotspot = False
         self._wifi_ssid = ""
         self._wifi_psk = ""
+        # Image validation
+        self._master_image_role_status = "none"
+        self._slave_image_role_status = "none"
+        self._master_filename_hint = ""
+        self._slave_filename_hint = ""
+        self._verify_integrity = True   # zero-touch security default
+        # Marshal worker-thread results back to the main loop. Qt picks
+        # Qt.AutoConnection, which becomes QueuedConnection for inter-
+        # thread signals — exactly what we want.
+        self._roleStatusUpdated.connect(self._apply_role_status)
 
     @Property(int, notify=currentStepChanged)
     def currentStep(self) -> int:
@@ -115,6 +139,7 @@ class WizardState(QObject):
         if p != self._master_image_path:
             self._master_image_path = p
             self.masterImagePathChanged.emit(p)
+            self._kick_role_check("master", p)
 
     @Slot(str)
     def setSlaveImagePath(self, p: str) -> None:
@@ -122,6 +147,132 @@ class WizardState(QObject):
         if p != self._slave_image_path:
             self._slave_image_path = p
             self.slaveImagePathChanged.emit(p)
+            self._kick_role_check("slave", p)
+
+    # ── Role validation (async) ───────────────────────────────────────
+    #
+    # filename hint is computed synchronously (cheap regex) and the FAT32
+    # marker read is delegated to a daemon thread because it needs to
+    # decompress 128 MB of .img.xz — ~1-2 s on a modern CPU, too slow for
+    # the FileDialog onAccepted callback.
+
+    def _kick_role_check(self, role_str: str, path: str) -> None:
+        """Schedule asynchronous role verification on a daemon thread.
+
+        Operator-facing policy (see CLAUDE.md / Step 2 UI):
+          * marker says the right role           → "ok"
+          * marker says the wrong role / wrong project / malformed
+                                                 → "mismatch" (hard block)
+          * no marker at all + filename agrees   → "unknown_marker_absent" (amber)
+          * no marker + filename disagrees       → "mismatch" (hard block)
+          * no marker + no filename hint         → "unknown_marker_absent" (amber)
+        """
+        from pathlib import Path as _Path
+        import threading as _threading
+
+        from astromechos_imager.core.image_validator import (
+            guess_role_from_filename,
+            validate_image_role,
+        )
+        from astromechos_imager.core.errors import (
+            MalformedRoleMarkerError,
+            MissingRoleMarkerError,
+            RoleMismatchError,
+            WrongProjectMarkerError,
+        )
+        from astromechos_imager.core.models import Role
+
+        if not path:
+            self._apply_role_status(role_str, "none")
+            self._apply_filename_hint(role_str, "")
+            return
+        p_obj = _Path(path)
+        if not p_obj.is_file():
+            self._apply_role_status(role_str, "none")
+            self._apply_filename_hint(role_str, "")
+            return
+
+        # Sync: filename hint (cheap regex).
+        hint_role = guess_role_from_filename(p_obj.name)
+        hint_str = hint_role.value if hint_role is not None else ""
+        self._apply_filename_hint(role_str, hint_str)
+
+        # Async: FAT32 marker read.
+        self._apply_role_status(role_str, "checking")
+        expected = Role.MASTER if role_str == "master" else Role.SLAVE
+
+        def _work() -> None:
+            try:
+                validate_image_role(p_obj, expected)
+                status = "ok"
+            except MissingRoleMarkerError:
+                # Soft pass when the filename hint agrees with the slot, hard
+                # block when it disagrees (legacy backup of the OTHER role).
+                if hint_role is not None and hint_role != expected:
+                    status = "mismatch"
+                else:
+                    status = "unknown_marker_absent"
+            except (RoleMismatchError, WrongProjectMarkerError,
+                    MalformedRoleMarkerError):
+                status = "mismatch"
+            except Exception:
+                # Defensive: any unexpected failure → amber, never false-block.
+                status = "unknown_marker_absent"
+            self._roleStatusUpdated.emit(role_str, status)
+
+        _threading.Thread(
+            target=_work, daemon=True, name=f"role-check-{role_str}"
+        ).start()
+
+    def _apply_filename_hint(self, role: str, hint: str) -> None:
+        if role == "master":
+            if hint != self._master_filename_hint:
+                self._master_filename_hint = hint
+                self.masterFilenameHintChanged.emit(hint)
+        else:
+            if hint != self._slave_filename_hint:
+                self._slave_filename_hint = hint
+                self.slaveFilenameHintChanged.emit(hint)
+
+    @Slot(str, str)
+    def _apply_role_status(self, role: str, status: str) -> None:
+        """Slot invoked on the main loop with the async verdict."""
+        if role == "master":
+            if status != self._master_image_role_status:
+                self._master_image_role_status = status
+                self.masterImageRoleStatusChanged.emit(status)
+        else:
+            if status != self._slave_image_role_status:
+                self._slave_image_role_status = status
+                self.slaveImageRoleStatusChanged.emit(status)
+
+    # ── QML accessors for the validation state ────────────────────────
+
+    @Property(str, notify=masterImageRoleStatusChanged)
+    def masterImageRoleStatus(self) -> str:
+        return self._master_image_role_status
+
+    @Property(str, notify=slaveImageRoleStatusChanged)
+    def slaveImageRoleStatus(self) -> str:
+        return self._slave_image_role_status
+
+    @Property(str, notify=masterFilenameHintChanged)
+    def masterFilenameHint(self) -> str:
+        return self._master_filename_hint
+
+    @Property(str, notify=slaveFilenameHintChanged)
+    def slaveFilenameHint(self) -> str:
+        return self._slave_filename_hint
+
+    @Property(bool, notify=verifyIntegrityChanged)
+    def verifyIntegrity(self) -> bool:
+        return self._verify_integrity
+
+    @Slot(bool)
+    def setVerifyIntegrity(self, v: bool) -> None:
+        if v != self._verify_integrity:
+            self._verify_integrity = v
+            self.verifyIntegrityChanged.emit(v)
 
     @staticmethod
     def _normalize_path(p: str) -> str:

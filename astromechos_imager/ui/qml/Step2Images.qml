@@ -97,7 +97,7 @@ Rectangle {
             Layout.bottomMargin: 4
         }
         Text {
-            text: "Locate the AstromechOS .img / .img.xz / .img.gz files — downloaded from the project releases, or extracted from your existing R2."
+            text: "Locate the AstromechOS .img / .img.xz / .img.gz files downloaded from the project releases."
             color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12

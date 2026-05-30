@@ -156,6 +156,9 @@ Rectangle {
 
         property string title: ""
         property string subtitle: ""
+        // Optional pulsing ⚠ icon next to the title; clicking it opens
+        // a popup with the warning text. Set to "" (default) to omit.
+        property string warningText: ""
         default property alias _children: cardCol.data
 
         color: theme.colors.colorSurface
@@ -172,14 +175,144 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 2
-                Text {
-                    text: card.title
-                    color: theme.colors.colorTextPrimary
-                    font.family: Theme.fontTitle
-                    font.pixelSize: 13
-                    font.bold: true
-                    font.letterSpacing: 1.8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Text {
+                        text: card.title
+                        color: theme.colors.colorTextPrimary
+                        font.family: Theme.fontTitle
+                        font.pixelSize: 13
+                        font.bold: true
+                        font.letterSpacing: 1.8
+                    }
+                    // Pulsing ⚠ icon — only when warningText set.
+                    // Click opens a popup with the full message,
+                    // keeping the card's vertical footprint unchanged.
+                    Rectangle {
+                        id: warnBtn
+                        visible: card.warningText !== ""
+                        Layout.preferredWidth: 22
+                        Layout.preferredHeight: 22
+                        radius: 11
+                        color: warnArea.containsMouse || warnPopup.opened
+                             ? Qt.rgba(theme.colors.colorBorderError.r,
+                                       theme.colors.colorBorderError.g,
+                                       theme.colors.colorBorderError.b, 0.18)
+                             : Qt.rgba(theme.colors.colorBorderError.r,
+                                       theme.colors.colorBorderError.g,
+                                       theme.colors.colorBorderError.b, 0.08)
+                        border.color: theme.colors.colorBorderError
+                        border.width: 1
+                        Behavior on color { ColorAnimation { duration: Theme.durFast } }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "⚠"
+                            color: theme.colors.colorBorderError
+                            font.family: Theme.fontTitle
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+                        // Slow pulse so the icon catches the eye without
+                        // being annoying. Pauses while the popup is open.
+                        SequentialAnimation on scale {
+                            running: !warnPopup.opened
+                            loops: Animation.Infinite
+                            NumberAnimation { to: 1.18; duration: 700; easing.type: Easing.InOutSine }
+                            NumberAnimation { to: 1.00; duration: 700; easing.type: Easing.InOutSine }
+                        }
+                        MouseArea {
+                            id: warnArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: warnPopup.opened ? warnPopup.close() : warnPopup.open()
+                        }
+
+                        // Floating popup — anchors below the icon so it
+                        // doesn't push the card height. Closes on outside
+                        // click (CloseOnPressOutside) and Escape.
+                        Popup {
+                            id: warnPopup
+                            x: -260   // align right edge near the icon
+                            y: warnBtn.height + 6
+                            width: 360
+                            padding: 0
+                            modal: false
+                            focus: true
+                            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent | Popup.CloseOnPressOutside
+
+                            background: Rectangle {
+                                color: theme.colors.colorSurface
+                                border.color: theme.colors.colorBorderError
+                                border.width: 1
+                                radius: Theme.radiusButton
+                                // Drop-shadow approximation via outer rect
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: -2
+                                    color: "transparent"
+                                    border.color: Qt.rgba(theme.colors.colorBorderError.r,
+                                                          theme.colors.colorBorderError.g,
+                                                          theme.colors.colorBorderError.b, 0.25)
+                                    border.width: 1
+                                    radius: parent.radius + 2
+                                    z: -1
+                                }
+                            }
+
+                            contentItem: RowLayout {
+                                spacing: 10
+                                Text {
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.leftMargin: 12
+                                    Layout.topMargin: 12
+                                    text: "⚠"
+                                    color: theme.colors.colorBorderError
+                                    font.family: Theme.fontTitle
+                                    font.pixelSize: 22
+                                    font.bold: true
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.topMargin: 10
+                                    Layout.bottomMargin: 12
+                                    Layout.rightMargin: 12
+                                    spacing: 4
+                                    Text {
+                                        text: "SECURITY WARNING"
+                                        color: theme.colors.colorBorderError
+                                        font.family: Theme.fontTitle
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        font.letterSpacing: 1.4
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: card.warningText
+                                        color: theme.colors.colorTextPrimary
+                                        font.family: Theme.fontBody
+                                        font.pixelSize: 11
+                                        wrapMode: Text.WordWrap
+                                        lineHeight: 1.25
+                                    }
+                                }
+                            }
+
+                            // Fade in/out
+                            enter: Transition {
+                                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.durBase }
+                            }
+                            exit: Transition {
+                                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.durFast }
+                            }
+                        }
+                    }
+                    Item { Layout.fillWidth: true }   // spacer pushes icon left of any future items
                 }
+
                 Text {
                     text: card.subtitle
                     color: theme.colors.colorTextSecondary
@@ -223,10 +356,18 @@ Rectangle {
                 font.letterSpacing: 1.4
             }
 
-            // ── Section 1: Robot Login (UID-1000) + ⚠️ Security warning ─
+            // ── Section 1: Robot Login (UID-1000) ────────────────────
+            // The ⚠ icon next to the section title pulses subtly and
+            // opens a floating popup with the security warning on click
+            // — kept out of the card body so the card's vertical
+            // footprint stays compact.
             SectionCard {
                 title: "LINUX ACCOUNT  ·  UID-1000"
                 subtitle: "Account used to log into the robot. Leave fields blank to use the safe defaults."
+                warningText: "Default credentials are username: astromech, password: astropass, " +
+                             "and hotspot: astropass. If you customize these, store them safely. " +
+                             "If lost, you will lose SSH access and require a full OS reinstallation. " +
+                             "No recovery mechanism exists."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -249,60 +390,6 @@ Rectangle {
                         ok: installPasswordOk
                         echoMode: TextInput.Password
                         onEdited: _flush()
-                    }
-                }
-
-                // ⚠️ Security warning band — kept inside the Login card
-                // so the warning visually owns the credential context.
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: warnCol.implicitHeight + 16
-                    color: Qt.rgba(theme.colors.colorBorderError.r,
-                                   theme.colors.colorBorderError.g,
-                                   theme.colors.colorBorderError.b, 0.10)
-                    border.color: theme.colors.colorBorderError
-                    border.width: 1
-                    radius: Theme.radiusButton
-
-                    RowLayout {
-                        id: warnCol
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 10
-
-                        // Warning icon — Orbitron-friendly glyph
-                        Text {
-                            Layout.alignment: Qt.AlignTop
-                            text: "⚠"
-                            color: theme.colors.colorBorderError
-                            font.family: Theme.fontTitle
-                            font.pixelSize: 22
-                            font.bold: true
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Text {
-                                text: "SECURITY WARNING"
-                                color: theme.colors.colorBorderError
-                                font.family: Theme.fontTitle
-                                font.pixelSize: 11
-                                font.bold: true
-                                font.letterSpacing: 1.4
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Default credentials are username: astromech, password: astropass, " +
-                                      "and hotspot: astropass. If you customize these, store them safely. " +
-                                      "If lost, you will lose SSH access and require a full OS " +
-                                      "reinstallation. No recovery mechanism exists."
-                                color: theme.colors.colorTextPrimary
-                                font.family: Theme.fontBody
-                                font.pixelSize: 11
-                                wrapMode: Text.WordWrap
-                                lineHeight: 1.2
-                            }
-                        }
                     }
                 }
             }

@@ -323,6 +323,13 @@ Rectangle {
                         }
                     }
                 }
+                // Bindings guarded with ``flashViewModel &&`` so the
+                // hash-progress / hex / sidecar-match expressions are
+                // never evaluated against a null view-model. Phase A
+                // E2E audit Finding #3 surfaced harmless but noisy
+                // "Cannot read property 'masterHash' of null" warnings
+                // when the wizard previewed Step 5 without wiring up
+                // an active flash session.
                 Loader {
                     active: needMaster
                     visible: active
@@ -331,9 +338,9 @@ Rectangle {
                     onLoaded: {
                         item.roleLabel = "MASTER"
                     }
-                    Binding { target: parent.item; property: "fracVal"; value: flashViewModel.masterHashProgress; when: parent.item }
-                    Binding { target: parent.item; property: "hexVal";  value: flashViewModel.masterHash;        when: parent.item }
-                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel.masterHashSidecarMatch; when: parent.item }
+                    Binding { target: parent.item; property: "fracVal";  value: flashViewModel ? flashViewModel.masterHashProgress : 0;            when: parent.item && flashViewModel }
+                    Binding { target: parent.item; property: "hexVal";   value: flashViewModel ? flashViewModel.masterHash : "";                  when: parent.item && flashViewModel }
+                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel ? flashViewModel.masterHashSidecarMatch : null;    when: parent.item && flashViewModel }
                 }
                 Loader {
                     active: needSlave
@@ -343,9 +350,9 @@ Rectangle {
                     onLoaded: {
                         item.roleLabel = "SLAVE"
                     }
-                    Binding { target: parent.item; property: "fracVal"; value: flashViewModel.slaveHashProgress; when: parent.item }
-                    Binding { target: parent.item; property: "hexVal";  value: flashViewModel.slaveHash;        when: parent.item }
-                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel.slaveHashSidecarMatch; when: parent.item }
+                    Binding { target: parent.item; property: "fracVal";  value: flashViewModel ? flashViewModel.slaveHashProgress : 0;             when: parent.item && flashViewModel }
+                    Binding { target: parent.item; property: "hexVal";   value: flashViewModel ? flashViewModel.slaveHash : "";                   when: parent.item && flashViewModel }
+                    Binding { target: parent.item; property: "matchVal"; value: flashViewModel ? flashViewModel.slaveHashSidecarMatch : null;     when: parent.item && flashViewModel }
                 }
                 Item { Layout.fillHeight: true }
             }
@@ -389,7 +396,7 @@ Rectangle {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: phaseLabel(flashViewModel.masterPhase)
+                            text: flashViewModel ? phaseLabel(flashViewModel.masterPhase) : ""
                             color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
@@ -411,10 +418,10 @@ Rectangle {
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
                             anchors.margins: 1
-                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.masterProgress))
+                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel ? flashViewModel.masterProgress : 0))
                             radius: 2
                             color: theme.colors.colorAccent
-                            visible: flashViewModel.masterPhase !== "preparing"
+                            visible: flashViewModel ? flashViewModel.masterPhase !== "preparing" : false
                             Behavior on width { NumberAnimation { duration: 120 } }
                         }
 
@@ -424,7 +431,7 @@ Rectangle {
                         // reads as "working but unknown progress".
                         Rectangle {
                             id: masterStripe
-                            visible: flashViewModel.masterPhase === "preparing"
+                            visible: flashViewModel ? flashViewModel.masterPhase === "preparing" : false
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
                             anchors.margins: 1
@@ -459,7 +466,7 @@ Rectangle {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: phaseLabel(flashViewModel.slavePhase)
+                            text: flashViewModel ? phaseLabel(flashViewModel.slavePhase) : ""
                             color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
@@ -480,16 +487,16 @@ Rectangle {
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
                             anchors.margins: 1
-                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.slaveProgress))
+                            width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel ? flashViewModel.slaveProgress : 0))
                             radius: 2
                             color: theme.colors.colorAccent
-                            visible: flashViewModel.slavePhase !== "preparing"
+                            visible: flashViewModel ? flashViewModel.slavePhase !== "preparing" : false
                             Behavior on width { NumberAnimation { duration: 120 } }
                         }
 
                         Rectangle {
                             id: slaveStripe
-                            visible: flashViewModel.slavePhase === "preparing"
+                            visible: flashViewModel ? flashViewModel.slavePhase === "preparing" : false
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
                             anchors.margins: 1

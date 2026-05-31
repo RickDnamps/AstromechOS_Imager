@@ -400,25 +400,26 @@ class WizardState(QObject):
     def slaveDriveId(self) -> int:
         return self._slave_drive_id
 
+    # Note: the previous "cross-role collision check" (silently rejecting
+    # setSlaveDriveId(X) when masterDriveId == X) was a legacy of the
+    # deleted MODE_BOTH flow, which required two distinct drives written
+    # in parallel. The sequential Deployment Assistant now flashes one
+    # card per cycle and ``resetForNextCycle`` clears both ids between
+    # cycles, so reusing the same drive (most common: a single SD
+    # adapter) MUST be supported. Removing the cross-check also kills
+    # the opaque "drive -1 (unplugged?)" UI symptom that bit Phase A
+    # E2E audit Bug #2.
     @Slot(int)
     def setMasterDriveId(self, drive_id: int) -> None:
-        if drive_id != self._master_drive_id and drive_id != self._slave_drive_id:
-            # Accept — no conflict with slave
+        if drive_id != self._master_drive_id:
             self._master_drive_id = drive_id
             self.masterDriveIdChanged.emit(drive_id)
-        elif drive_id == self._slave_drive_id and drive_id != -1:
-            # Same drive selected for master as for slave — silently ignore
-            pass
-        elif drive_id == self._master_drive_id:
-            pass  # idempotent
 
     @Slot(int)
     def setSlaveDriveId(self, drive_id: int) -> None:
-        if drive_id != self._slave_drive_id and drive_id != self._master_drive_id:
+        if drive_id != self._slave_drive_id:
             self._slave_drive_id = drive_id
             self.slaveDriveIdChanged.emit(drive_id)
-        elif drive_id == self._master_drive_id and drive_id != -1:
-            pass  # collision — silently ignore
 
     # ------------------------------------------------------------------
     # Sequential workflow state machine (Screens 4 Role / 6 Cycle).

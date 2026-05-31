@@ -173,21 +173,29 @@ def test_set_master_drive_id_emits(qtbot):
     assert received == [2]
 
 
-def test_set_master_rejects_same_as_slave(qtbot):
+def test_same_drive_for_both_roles_accepted_sequential(qtbot):
+    """Sequential Deployment Assistant: one SD card adapter is the
+    standard hardware setup. The same physical drive id MUST be
+    accepted for both master and slave (they are flashed in separate
+    cycles with resetForNextCycle clearing between them). The legacy
+    cross-role collision rejection was a BOTH-mode artefact and
+    surfaced as the opaque 'drive -1 (unplugged?)' Step 5 symptom
+    in the Phase A E2E audit (Bug #2)."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.setSlaveDriveId(3)
-    s.setMasterDriveId(3)  # collision — ignored
-    assert s.masterDriveId == -1
+    s.setMasterDriveId(3)
+    assert s.masterDriveId == 3
     assert s.slaveDriveId == 3
 
 
-def test_set_slave_rejects_same_as_master(qtbot):
+def test_same_drive_for_both_roles_accepted_reverse_order(qtbot):
+    """Mirror of the above with the calls reversed."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.setMasterDriveId(2)
-    s.setSlaveDriveId(2)  # collision — ignored
-    assert s.slaveDriveId == -1
+    s.setSlaveDriveId(2)
+    assert s.slaveDriveId == 2
     assert s.masterDriveId == 2
 
 

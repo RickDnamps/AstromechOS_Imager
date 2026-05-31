@@ -154,10 +154,12 @@ Rectangle {
                 }
                 Text {
                     visible: wizardState.completedRoles.length === 0
-                    text: "(none — return to Step 4 Role)"
+                    text: "No cards flashed yet — use BACK to return to Step 4 and start the first card."
                     color: theme.colors.colorTextTertiary
                     font.family: Theme.fontBody
                     font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
         }

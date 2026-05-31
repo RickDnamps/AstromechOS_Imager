@@ -12,6 +12,7 @@ Auto-fallback orchestrator ``open_boot_partition`` tries β first, then α.
 """
 from __future__ import annotations
 
+import logging
 import struct
 import sys
 import time
@@ -191,13 +192,15 @@ class PyFatFsBootPartition:
         try:
             self._fs.close()
         except Exception as exc:  # noqa: BLE001
-            import sys as _sys
-            sink = _sys.stderr if _sys.stderr is not None else _sys.__stderr__
-            if sink is not None:
-                sink.write(
-                    f"[bootpartition] pyfatfs close() raised after trigger "
-                    f"write — non-fatal: {type(exc).__name__}: {exc}\n"
-                )
+            # Non-fatal: the trigger marker has already been written and
+            # the operator's SD will boot. Route through standard logging
+            # so the warning lands in the JSONL session log AND in
+            # startup.log (frozen builds).
+            logging.getLogger(__name__).warning(
+                "pyfatfs close() raised after trigger write — non-fatal: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
 
 
 # ── α path: drive letter after Windows remount ─────────────────────────────────

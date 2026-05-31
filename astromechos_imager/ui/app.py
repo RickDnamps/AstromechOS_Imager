@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import faulthandler
+import logging
 import os
 import sys
 import traceback
@@ -34,10 +35,11 @@ from PySide6.QtGui import QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
 
-from astromechos_imager.ui.messages import M
-from astromechos_imager.ui.wizard_state import WizardState
+from astromechos_imager.logging_setup.jsonl_formatter import setup_logging
 from astromechos_imager.ui.flash_view_model import FlashViewModel
+from astromechos_imager.ui.messages import M
 from astromechos_imager.ui.theme_manager import ThemeManager
+from astromechos_imager.ui.wizard_state import WizardState
 
 
 _QT_MSG_LEVEL = {
@@ -208,19 +210,17 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             ctx.setContextProperty("driveListModel", drive_model)
             # Hold a reference so it doesn't get GC'd
             engine.driveListModel = drive_model
-        except Exception as exc:
-            # WMI / pywin32 / WindowsPlatformIO failure. Log to
-            # startup.log via the already-redirected stderr so frozen
-            # builds capture the traceback the operator's bug report
-            # needs. Still don't crash: the wizard's empty-state badge
-            # ("AWAITING SD CARD") covers the no-model path.
-            import traceback as _tb
-            sink = sys.stderr if sys.stderr is not None else sys.__stderr__
-            if sink is not None:
-                sink.write(
-                    "[app] DriveListModel bring-up failed — Step 3 will be empty:\n"
-                )
-                _tb.print_exc(file=sink)
+        except Exception:
+            # WMI / pywin32 / WindowsPlatformIO failure. Route through the
+            # standard logging module so the traceback lands in the JSONL
+            # session log (%APPDATA%\AstromechOS Imager\logs\flash-*.log)
+            # AND — for frozen builds — in startup.log via the stderr
+            # redirect at module top. Still don't crash: the wizard's
+            # empty-state badge ("AWAITING SD CARD") covers the no-model
+            # path.
+            logging.getLogger(__name__).exception(
+                "DriveListModel bring-up failed — Step 3 will be empty"
+            )
 
     qml_main = _qml_main_path()
     engine.load(QUrl.fromLocalFile(str(qml_main)))
@@ -228,6 +228,15 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
 
 
 def main() -> int:
+    # Wire the JSONL session logger BEFORE build_app() so any exception
+    # raised during Qt/QML construction is captured in
+    # %APPDATA%\AstromechOS Imager\logs\flash-*.log. If setup_logging itself
+    # raises (disk full, ACL denied), don't prevent launch — the frozen
+    # stderr redirect at module top is still a safety net.
+    try:
+        setup_logging()
+    except Exception:
+        logging.exception("setup_logging() failed — continuing without JSONL session log")
     app, _engine, _state = build_app()
     return app.exec()
 

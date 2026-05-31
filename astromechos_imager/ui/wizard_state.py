@@ -1,6 +1,8 @@
 """Wizard navigation state — a QObject exposed to QML as `wizardState`."""
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
@@ -280,20 +282,18 @@ class WizardState(QObject):
             except (RoleMismatchError, WrongProjectMarkerError,
                     MalformedRoleMarkerError):
                 status = "mismatch"
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 # Audit Low #46: pyfatfs ImportError, transient I/O, etc.
                 # used to surface as the amber "unknown_marker_absent"
                 # soft-pass which operators are documented to override.
                 # That weakens the only role-safety gate before a
                 # destructive write. Promote to "check_failed", a hard
                 # block the UI flags red with a "see startup.log" hint.
-                import sys as _sys
-                sink = _sys.stderr if _sys.stderr is not None else _sys.__stderr__
-                if sink is not None:
-                    sink.write(
-                        f"[wizard_state] role check failed for {p_obj.name}: "
-                        f"{type(exc).__name__}: {exc}\n"
-                    )
+                # Route through standard logging so the traceback lands in
+                # the JSONL session log AND in startup.log (frozen builds).
+                logging.getLogger(__name__).exception(
+                    "role check failed for %s", p_obj.name
+                )
                 status = "check_failed"
             if not self._shutting_down:
                 self._roleStatusUpdated.emit(role_str, status, gen)

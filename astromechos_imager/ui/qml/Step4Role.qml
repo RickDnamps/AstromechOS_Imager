@@ -6,10 +6,10 @@
 // wizard state. The auto-proposed role (after the first cycle) is
 // pre-highlighted so the operator just hits NEXT.
 //
-//   * driveList.count == 0  → "AWAITING SD CARD" empty-state animation
-//   * driveList.count == 1  → role-pick UI (MASTER / SLAVE)
-//   * driveList.count >= 2  → red banner — only ONE card allowed in
-//                             sequential mode (leave only one connected)
+//   * driveCount == 0  → "AWAITING SD CARD" empty-state animation
+//   * driveCount == 1  → role-pick UI (MASTER / SLAVE)
+//   * driveCount >= 2  → red banner — only ONE card allowed in
+//                        sequential mode (leave only one connected)
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -19,21 +19,27 @@ Rectangle {
     id: root
     color: theme.colors.colorBg
 
-    // Single-card guard: operator must have exactly one removable drive.
-    readonly property bool hasOneCard: driveList.count === 1
-    readonly property bool tooManyCards: driveList.count >= 2
+    // Live count from the C++ model — the hidden ListView pattern was
+    // dropped because Qt 6 does not instantiate a delegate with
+    // width=0/height=0/visible=false, so the delegate's Component.onCompleted
+    // never fired and the firstDrive* properties stayed at their defaults
+    // even when a card was plugged in. DriveListModel now exposes a `count`
+    // Property + dedicated firstDrive* Properties for direct binding.
+    readonly property int driveCount: driveListModel ? driveListModel.count : 0
+    readonly property bool hasOneCard: driveCount === 1
+    readonly property bool tooManyCards: driveCount >= 2
 
     // Pre-highlight the auto-proposed role for cycle 2+ (the operator
     // is free to override). "" before any flash.
     readonly property string proposed: wizardState.proposedNextRole
 
-    // Captured from the (single) delegate when hasOneCard, so the
-    // visible card row can render without poking the model directly
-    // (driveListModel only exposes driveIdAt() as a slot).
-    property int     firstDriveId: -1
-    property string  firstDriveLetters: ""
-    property string  firstDriveModel: ""
-    property string  firstDriveSize: ""
+    // Read-only bindings to the live drive model — these track the model
+    // automatically and stay correct when a card is inserted/removed
+    // mid-step, which the old hidden-ListView capture pattern did not.
+    readonly property int    firstDriveId:      driveListModel ? driveListModel.firstDriveId      : -1
+    readonly property string firstDriveLetters: driveListModel ? driveListModel.firstDriveLetters : ""
+    readonly property string firstDriveModel:   driveListModel ? driveListModel.firstDriveModel   : ""
+    readonly property string firstDriveSize:    driveListModel ? driveListModel.firstDriveSize    : ""
 
     function _assignRole(role) {
         wizardState.setCurrentRole(role)
@@ -85,7 +91,7 @@ Rectangle {
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: 14
-                visible: driveList.count === 0
+                visible: driveCount === 0
                 Text {
                     text: "⌖"   // crosshair / waiting glyph
                     color: theme.colors.colorAccentDim
@@ -95,7 +101,7 @@ Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     SequentialAnimation on opacity {
                         loops: Animation.Infinite
-                        running: !driveList.count
+                        running: driveCount === 0
                         NumberAnimation { to: 0.35; duration: 1100; easing.type: Easing.InOutSine }
                         NumberAnimation { to: 0.95; duration: 1100; easing.type: Easing.InOutSine }
                     }
@@ -371,35 +377,9 @@ Rectangle {
                 Item { Layout.fillHeight: true }
             }
 
-            // Hidden ListView — drives the count-based UI states above.
-            // The delegate captures row 0's roles into root.firstDrive*
-            // so the visible card can render the model fields without
-            // reaching into the QAbstractListModel (only driveIdAt is
-            // exposed as a Slot).
-            ListView {
-                id: driveList
-                width: 0; height: 0
-                visible: false
-                model: typeof driveListModel !== "undefined" ? driveListModel : null
-                delegate: Item {
-                    Component.onCompleted: {
-                        if (index === 0) {
-                            root.firstDriveId      = physicalDriveId
-                            root.firstDriveLetters = driveLetters !== "" ? driveLetters : ""
-                            root.firstDriveModel   = model.model || ""
-                            root.firstDriveSize    = sizeHuman || ""
-                        }
-                    }
-                    Component.onDestruction: {
-                        if (index === 0) {
-                            root.firstDriveId      = -1
-                            root.firstDriveLetters = ""
-                            root.firstDriveModel   = ""
-                            root.firstDriveSize    = ""
-                        }
-                    }
-                }
-            }
+            // (No hidden ListView here — DriveListModel exposes count +
+            // firstDrive* Properties directly. See the readonly bindings
+            // at the top of this file.)
         }
     }
 

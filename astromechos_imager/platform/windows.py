@@ -6,6 +6,7 @@ core/platform_io.py Protocols.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import re
 import time
@@ -13,6 +14,8 @@ from ctypes import wintypes
 from typing import Iterator
 
 from astromechos_imager.core.models import DiskRef
+
+_log = logging.getLogger(__name__)
 
 _MAX_SD_BYTES = 256 * 1024 * 1024 * 1024   # hard cap — no R2 build needs > 256 GB
 _PHYS_DRIVE_RE = re.compile(r"PHYSICALDRIVE(\d+)", re.IGNORECASE)
@@ -70,26 +73,61 @@ def _system_drive_id() -> int:
 
 
 def enumerate_removable_drives() -> Iterator[DiskRef]:
-    """Yield only safe removable candidates. Refs design spec §5.1."""
+    """Yield only safe removable candidates. Refs design spec §5.1.
+
+    Every WMI candidate's accept/reject decision is logged at INFO so a
+    legitimate SD card sitting behind a USB-SATA bridge (JMicron etc.) that
+    misreports as ``InterfaceType=SCSI`` + ``MediaType="Fixed hard disk
+    media"`` becomes visible in the session log instead of silently
+    disappearing into the filter.
+    """
     sys_id = _system_drive_id()
-    for d in _wmi_query():
-        is_usb = (d.InterfaceType or "").upper() == "USB"
-        is_removable = "removable" in (d.MediaType or "").lower()
+    candidates = list(_wmi_query())
+    _log.info(
+        "enumerate_removable_drives: WMI returned %d candidate disk(s)",
+        len(candidates),
+    )
+    for d in candidates:
+        device_id = d.DeviceID or "<no-DeviceID>"
+        interface = (d.InterfaceType or "").upper()
+        media = d.MediaType or ""
+        is_usb = interface == "USB"
+        is_removable = "removable" in media.lower()
         if not (is_usb or is_removable):
+            _log.info(
+                "  reject %s: interface=%s media=%r (not USB and not removable)",
+                device_id, interface, media,
+            )
             continue
-        m = _PHYS_DRIVE_RE.search(d.DeviceID or "")
+        m = _PHYS_DRIVE_RE.search(device_id)
         if not m:
+            _log.info(
+                "  reject %s: DeviceID does not match PHYSICALDRIVE regex",
+                device_id,
+            )
             continue
         phys_id = int(m.group(1))
         if phys_id == sys_id:
+            _log.info(
+                "  reject %s: phys_id=%d is the system drive",
+                device_id, phys_id,
+            )
             continue
         size = int(d.Size or 0)
         if size <= 0 or size > _MAX_SD_BYTES:
+            _log.info(
+                "  reject %s: size=%d outside (0, %d]",
+                device_id, size, _MAX_SD_BYTES,
+            )
             continue
+        _log.info(
+            "  ACCEPT %s: phys_id=%d size=%d interface=%s media=%r",
+            device_id, phys_id, size, interface, media,
+        )
         yield DiskRef(
             physical_drive_id=phys_id,
-            device_path=d.DeviceID,
-            drive_letters=_drive_letters_for(d.DeviceID),
+            device_path=device_id,
+            drive_letters=_drive_letters_for(device_id),
             size_bytes=size,
             model=(d.Model or "Unknown").strip(),
             serial=(d.SerialNumber or "").strip(),

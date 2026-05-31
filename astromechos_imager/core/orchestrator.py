@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -19,11 +20,17 @@ def _bootpartition_open(
     raw_device_path: str,
     mbr_bytes: bytes,
     known_letters_before: set[str],
+    preferred_letter: str | None = None,
 ) -> "object | None":
     """Parse the MBR, find the FAT32 partition, and open it.
 
     Returns None if no FAT32 partition is found (so callers can skip customize).
     This is the single monkeypatching point for tests.
+
+    ``preferred_letter`` (when provided) is forwarded to
+    ``open_boot_partition`` so an already-assigned target letter is used
+    directly instead of going through the brittle "new letter detection"
+    fallback (see Bug #2 in the E2E audit).
     """
     from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
     try:
@@ -34,6 +41,7 @@ def _bootpartition_open(
         raw_device_path=raw_device_path,
         layout=layout,
         known_letters_before=known_letters_before,
+        preferred_letter=preferred_letter,
     )
 
 
@@ -123,12 +131,32 @@ class FlashJob:
         # the freshly-written SD in Explorer.
         locked_handles: list[int] = []
         write_result = None
+        # Snapshot drive letters AFTER locking the target — the target's
+        # own letter is now dismounted, so it falls OUT of the set. After
+        # flash + update_disk_properties, the newly auto-mounted partition
+        # reappears as the first letter NOT in this set. Without this
+        # snapshot, the α fallback (DriveLetterBootPartition) defaulted to
+        # the alphabetically-first present letter — typically C: (system
+        # drive) — and the AstromechOS customize bundle was silently
+        # written to the wrong volume.
+        def _snapshot_letters() -> set[str]:
+            try:
+                import ctypes  # noqa: PLC0415
+                bits = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
+                return {chr(ord("A") + i) for i in range(26) if bits & (1 << i)}
+            except Exception:
+                return set()  # non-Windows or test mock
+        known_letters_before: set[str] = set()
         try:
             try:
                 # 1. Lock + dismount any drive letters for this physical drive.
                 locked_handles = list(
                     self.platform_io.lock_and_dismount(self.target.drive_letters) or []
                 )
+                # Snapshot AFTER dismount — the target's letter is now absent,
+                # so when Windows re-mounts the freshly-written FAT32 partition,
+                # it will be the first letter NOT in this set.
+                known_letters_before = _snapshot_letters()
                 # 2. Open raw device + flash.
                 dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
                 try:
@@ -147,13 +175,40 @@ class FlashJob:
                     if not self.skip_customize and not self.cancel_event.is_set():
                         self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
                         mbr = dev.read(0, 512)
+                        # Read MBR while we still hold the raw device handle;
+                        # then RELEASE the volume locks BEFORE customize so
+                        # Windows can fully re-mount the freshly-written
+                        # FAT32 partition under its original drive letter.
+                        # Without this, the FSCTL_LOCK_VOLUME from
+                        # lock_and_dismount blocks Windows from completing
+                        # the remount, and DriveLetterBootPartition's
+                        # write_bytes hits "Access Denied" because the
+                        # volume is in a half-mounted state. The α path
+                        # uses regular Python file I/O — it does not go
+                        # through our kernel32 handle.
+                        for h in locked_handles:
+                            try:
+                                self.platform_io.close_handle(h)
+                            except Exception:
+                                pass
+                        locked_handles = []  # outer finally must not double-close
+                        # Trigger another properties refresh now that the
+                        # locks are released — Windows actually completes
+                        # the re-mount this time.
+                        self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
+                        # Brief wait for the post-release remount to settle.
+                        time.sleep(2.0)
+                        preferred = (self.target.drive_letters[0]
+                                     if self.target.drive_letters else None)
                         bp = _bootpartition_open(
                             raw_device_path=self.target.device_path,
                             mbr_bytes=mbr,
-                            known_letters_before=set(),
+                            known_letters_before=known_letters_before,
+                            preferred_letter=preferred,
                         )
                         if bp is not None:
                             try:
+                                self._assert_bp_targets_our_drive(bp)
                                 # 4a. Rootfs personalization (if linux_account provided)
                                 if (
                                     self.linux_account is not None
@@ -200,6 +255,64 @@ class FlashJob:
                     self.platform_io.close_handle(h)
                 except Exception:
                     pass  # best-effort; we're already in a finally
+
+    def _assert_bp_targets_our_drive(self, bp: object) -> None:
+        """Hard safety check — refuse to customize unless ``bp`` lives on the target.
+
+        Prevents Bug #1 in the E2E audit (orchestrator silently wrote the
+        AstromechOS bundle to ``C:\\`` because the α fallback picked the
+        alphabetically-first present drive letter).
+
+        Only applies when ``bp`` is a ``DriveLetterBootPartition`` (the α
+        path); the β pyfatfs path writes through the raw device handle
+        opened from ``\\\\.\\PHYSICALDRIVEn``, which by construction
+        targets our drive.
+
+        Re-enumerates removable drives via ``platform_io`` to discover
+        which drive letters currently map to the target's physical drive.
+        If ``bp``'s root letter is not in that set — ABORT with
+        ``CustomizeTargetMismatchError``. The raw image is already on
+        disk, so the SD state is ``BOOTABLE_NO_FIRSTBOOT`` (operator can
+        safely re-flash).
+        """
+        from astromechos_imager.core.bootpartition import DriveLetterBootPartition  # noqa: PLC0415
+        from astromechos_imager.core.errors import CustomizeTargetMismatchError  # noqa: PLC0415
+
+        if not isinstance(bp, DriveLetterBootPartition):
+            return  # β path — writes via raw device handle, no letter to check
+        bp_root = getattr(bp, "_root", None)
+        if bp_root is None:
+            return
+        actual_letter = str(bp_root.drive).rstrip(":\\")
+        if not actual_letter:
+            raise CustomizeTargetMismatchError(
+                "Refusing to customize: boot partition has no resolvable "
+                "drive letter — aborting before any write to prevent "
+                "spilling AstromechOS bundle files onto an unknown volume."
+            )
+        # Discover which letters currently map to OUR physical drive.
+        target_letters: set[str] = set()
+        try:
+            drives = list(self.platform_io.enumerate_removable_drives())
+        except Exception as exc:  # noqa: BLE001
+            raise CustomizeTargetMismatchError(
+                f"Refusing to customize: cannot re-enumerate removable "
+                f"drives to verify {actual_letter}: maps to the target "
+                f"physical drive {self.target.physical_drive_id}: {exc!r}"
+            ) from exc
+        for d in drives:
+            if d.physical_drive_id == self.target.physical_drive_id:
+                target_letters.update(d.drive_letters)
+        if actual_letter not in target_letters:
+            raise CustomizeTargetMismatchError(
+                f"SAFETY BLOCK: boot partition resolved to "
+                f"'{actual_letter}:' but the target physical drive "
+                f"{self.target.physical_drive_id} currently maps to "
+                f"{sorted(target_letters) or '(none — drive disconnected?)'}. "
+                f"ABORT to prevent writing the AstromechOS bundle to a "
+                f"non-target volume (would have leaked to the system drive "
+                f"or another removable medium)."
+            )
 
     def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
         """Open the ext4 rootfs partition and apply RootfsPersonalizer.

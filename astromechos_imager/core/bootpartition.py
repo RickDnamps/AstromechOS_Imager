@@ -285,24 +285,37 @@ def open_boot_partition(
     raw_device_path: str,
     layout: BootPartitionLayout,
     known_letters_before: set[str],
+    preferred_letter: str | None = None,
 ) -> "PyFatFsBootPartition | DriveLetterBootPartition":
     """Open the boot partition, preferring the β (pyfatfs) path.
 
     Algorithm:
-    1. Try ``PyFatFsBootPartition`` (β).  This works without any Windows
-       remount and is the preferred path for raw image/device access.
-    2. On ``BootPartitionMountError``, fall back to ``DriveLetterBootPartition``
-       (α).  This only makes sense on Windows after the OS has auto-mounted
-       the partition.  Non-Windows callers should never reach α because β
-       will either succeed or raise a different error.
+    1. If ``preferred_letter`` is provided and that letter is currently
+       mounted (the SD already had a drive letter assigned — the common
+       case for any card that ever booted), use ``DriveLetterBootPartition``
+       directly. This skips the broken "new letter detection" path
+       (Bug #2 in the audit: ``FSCTL_DISMOUNT_VOLUME`` doesn't drop the
+       letter from ``GetLogicalDrives``, so ``wait_for_new_drive_letter``
+       times out after 30 s on already-mounted SDs).
+    2. Try ``PyFatFsBootPartition`` (β). On Windows raw devices this
+       always fails (Python's ``open()`` can't determine the size of
+       ``\\\\.\\PHYSICALDRIVEn``) — the wrapper raises
+       ``BootPartitionMountError`` and we fall through.
+    3. Fall back to ``DriveLetterBootPartition`` (α) via
+       ``wait_for_new_drive_letter`` for fresh unformatted SDs that
+       arrive without any pre-existing letter.
 
     :param raw_device_path: Path to the raw disk image or Win32 device path.
     :param layout: Result of ``find_first_fat32_partition``.
     :param known_letters_before: Drive letters present before the image was
         written (used by the α fallback to detect the newly mounted letter).
+    :param preferred_letter: The target's existing drive letter, if known.
+        When set and currently mounted, used directly without auto-detect.
     :returns: An object satisfying the ``BootPartition`` protocol.
     :raises BootPartitionMountError: If neither β nor α can mount.
     """
+    if preferred_letter and Path(f"{preferred_letter}:\\").exists():
+        return DriveLetterBootPartition(preferred_letter)
     try:
         return PyFatFsBootPartition(raw_device_path, layout)
     except BootPartitionMountError:

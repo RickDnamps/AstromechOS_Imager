@@ -163,6 +163,25 @@ class BundleSelfValidationFailedError(CustomizationError): ...
 class PairAsymmetryError(CustomizationError): ...
 
 
+class CustomizeTargetMismatchError(CustomizationError):
+    """Safety block — resolved boot partition does NOT map to the target physical drive.
+
+    Raised by ``FlashJob.run`` immediately after ``_bootpartition_open``
+    returns, before any ``FirstbootBundle.write_to`` call. Prevents a
+    repeat of the audit's Bug #1 where the orchestrator silently wrote
+    the AstromechOS bundle to ``C:\\`` (system drive) because the α
+    fallback ``DriveLetterBootPartition`` picked the alphabetically-first
+    present letter.
+
+    The check re-enumerates removable drives and confirms that the boot
+    partition's drive letter currently maps to the target's physical
+    drive id. Any mismatch aborts the customize step immediately —
+    the raw image is on disk (CustomizationError → SD state =
+    BOOTABLE_NO_FIRSTBOOT, so the operator can safely re-flash).
+    """
+    sd_state: SDState = "BOOTABLE_NO_FIRSTBOOT"
+
+
 # ── Rootfs cold-modification: SD written, rootfs partially modified ───────
 class RootfsModError(CustomizationError): ...
 class UidNotFoundError(RootfsModError): ...

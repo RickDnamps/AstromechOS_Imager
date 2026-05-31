@@ -566,33 +566,57 @@ Rectangle {
     }
 
     // ── Themed confirmation dialog ───────────────────────────────────
+    // Layout discipline:
+    //   * header: 60 px, soft red tint, ⚠ glyph styled separately from
+    //     the title (own size/color) — was inline before
+    //   * body: symmetric 22 px vertical padding + 24 px sides
+    //   * footer: own 1 px top divider + 14 px vertical padding so the
+    //     buttons never visually clip the rounded bottom corner
+    //   * border: 2 px in colorBorderError reads as "destructive" instead
+    //     of "informational" 1 px hairline
     Dialog {
         id: confirmDialog
         modal: true
         anchors.centerIn: parent
-        width: 480
+        width: 520
         padding: 0
 
         background: Rectangle {
             radius: Theme.radiusCard
             color: theme.colors.colorSurface
             border.color: theme.colors.colorBorderError
-            border.width: 1
+            border.width: 2
         }
 
         header: Rectangle {
-            color: "transparent"
-            implicitHeight: 52
-            Text {
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 20
-                text: "⚠ ERASE TARGET DRIVE(S)?"
-                color: theme.colors.colorBorderError
-                font.family: Theme.fontTitle
-                font.pixelSize: 13
-                font.bold: true
-                font.letterSpacing: 1.4
+            implicitHeight: 60
+            // Subtle danger tint behind the title — gives the header
+            // visual weight matching the action's severity.
+            color: Qt.rgba(theme.colors.colorBorderError.r,
+                           theme.colors.colorBorderError.g,
+                           theme.colors.colorBorderError.b, 0.07)
+            radius: Theme.radiusCard
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 24
+                anchors.rightMargin: 24
+                spacing: 12
+                Text {
+                    text: "⚠"   // ⚠ — own glyph so we can size/color independently of the title
+                    color: theme.colors.colorBorderError
+                    font.family: Theme.fontTitle
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "ERASE TARGET DRIVE(S)?"
+                    color: theme.colors.colorBorderError
+                    font.family: Theme.fontTitle
+                    font.pixelSize: 14
+                    font.bold: true
+                    font.letterSpacing: 1.6
+                }
             }
             Rectangle {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -602,34 +626,49 @@ Rectangle {
 
         contentItem: Text {
             text: wizardState.verifyIntegrity
-                ? "This will hash the image(s), compare with sidecar checksums, and then ERASE the target SD card(s). There is no undo."
-                : "This will ERASE the target SD card(s) and write the selected image. There is no undo. Proceed only if the drive letters look correct."
+                ? "Image checksums will be verified, then the selected target SD card(s) will be ERASED and rewritten. This action is irreversible — confirm the drive letters above match the cards you intend to flash."
+                : "The selected target SD card(s) will be ERASED and rewritten with the chosen image(s). This action is irreversible — confirm the drive letters above match the cards you intend to flash."
             color: theme.colors.colorTextPrimary
             font.family: Theme.fontBody
             font.pixelSize: 13
             wrapMode: Text.Wrap
-            width: 440
-            leftPadding: 20
-            rightPadding: 20
-            topPadding: 20
-            bottomPadding: 4
+            lineHeight: 1.35
+            leftPadding: 24
+            rightPadding: 24
+            topPadding: 22
+            bottomPadding: 22
         }
 
-        footer: RowLayout {
-            spacing: 10
-            Item { Layout.fillWidth: true }
-            AstroButton {
-                text: "CANCEL"
-                variant: "secondary"
-                onClicked: confirmDialog.reject()
+        footer: Rectangle {
+            implicitHeight: 72
+            color: "transparent"
+            // 1 px top divider mirrors the header divider so the dialog
+            // has a clear header / body / footer rhythm.
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                height: 1; color: theme.colors.colorDivider
             }
-            AstroButton {
-                text: "⚡ ERASE & WRITE"
-                variant: "danger"
-                horizontalPadding: 18
-                onClicked: confirmDialog.accept()
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 20
+                anchors.rightMargin: 20
+                anchors.topMargin: 14
+                anchors.bottomMargin: 14
+                spacing: 12
+                Item { Layout.fillWidth: true }
+                AstroButton {
+                    text: "CANCEL"
+                    variant: "secondary"
+                    onClicked: confirmDialog.reject()
+                }
+                AstroButton {
+                    text: "⚡ ERASE & WRITE"
+                    variant: "danger"
+                    horizontalPadding: 24
+                    Layout.minimumWidth: 180
+                    onClicked: confirmDialog.accept()
+                }
             }
-            Item { width: 18 }
         }
 
         onAccepted: flashViewModel.startFromWizard()

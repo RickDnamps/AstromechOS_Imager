@@ -34,6 +34,21 @@ _WIN_USER_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Audit bug Sec1: free-text log messages can leak SSID / PSK / password
+# values that never travelled through ``record.ctx``. The classic
+# offender is FlashViewModel.startSession which logged
+# ``Sequential session started — hotspot SSID=Astromech-1234`` —
+# bypassing every ctx-keyed scrub above. These patterns are applied to
+# ``record.msg`` (and its formatted result) inside RedactionFilter so
+# the JSONL formatter never sees the raw secret.
+_LEAK_PATTERNS = [
+    (re.compile(r"(SSID\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
+    (re.compile(r"(psk\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
+    (re.compile(r"(password\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
+    # Bare Astromech-NNNN literal anywhere in the message (no key=val context).
+    (re.compile(r"\bAstromech-\d{4}\b"), "<redacted-SSID>"),
+]
+
 
 def _sha256_fingerprint(value: object) -> str:
     """Return a short SHA-256 fingerprint string for *value*.
@@ -153,8 +168,34 @@ class RedactionFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
-        """Redact sensitive fields in *record.ctx*; always allow the record through."""
+        """Redact sensitive fields in *record.ctx*; always allow the record through.
+
+        Audit bug Sec1: also scrub ``record.msg`` for SSID / PSK /
+        password key=value patterns and bare ``Astromech-NNNN``
+        literals. Without this, callers that put secrets in the log
+        message text bypass every ctx-keyed rule above.
+        """
         ctx = getattr(record, "ctx", None)
         if isinstance(ctx, dict):
             record.ctx = _redact_ctx(ctx)  # type: ignore[attr-defined]
+
+        # Free-text message scrub. Use getMessage() to resolve %-args
+        # then reset msg+args so downstream formatters and handlers see
+        # the cleaned string. Skip when msg is not a string (e.g. when
+        # callers pass an exception/dict directly).
+        if isinstance(record.msg, str):
+            try:
+                msg = record.getMessage()
+            except Exception:  # noqa: BLE001
+                # If %-formatting blew up, fall back to the raw template.
+                msg = record.msg
+            changed = False
+            for pat, rep in _LEAK_PATTERNS:
+                new_msg = pat.sub(rep, msg)
+                if new_msg != msg:
+                    changed = True
+                    msg = new_msg
+            if changed:
+                record.msg = msg
+                record.args = ()
         return True

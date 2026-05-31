@@ -200,3 +200,59 @@ def test_resetForNextCycle_emits_signals():
     assert role_received == [""]
     assert master_drive_received == [-1]
     assert slave_drive_received == [-1]
+
+
+# ── endSession — audit bugs C3 + H1 ──────────────────────────────────
+
+
+def test_endSession_resets_all_cycle_state():
+    """A fresh sequential deployment must wipe completedRoles,
+    cycleIndex, currentRole, and both drive ids — resetForNextCycle
+    only handles the per-cycle subset, not the session-level state.
+    """
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setCurrentRole("master")
+    s.setMasterDriveId(2)
+    s.setSlaveDriveId(3)
+    s.markCurrentRoleCompleted()
+    assert s.cycleIndex == 1
+    assert list(s.completedRoles) == ["master"]
+
+    s.endSession()
+    assert s.cycleIndex == 0
+    assert list(s.completedRoles) == []
+    assert s.currentRole == ""
+    assert s.masterDriveId == -1
+    assert s.slaveDriveId == -1
+    # And the proposal returns to its clean-slate behaviour.
+    assert s.proposedNextRole == ""
+
+
+def test_endSession_emits_all_change_signals():
+    """All five state fields' Change signals must fire so QML bindings
+    on Step 4 (✓ DONE badges, proposed pill) update immediately."""
+    from astromechos_imager.ui.wizard_state import WizardState
+    s = WizardState()
+    s.setCurrentRole("master")
+    s.setMasterDriveId(2)
+    s.setSlaveDriveId(3)
+    s.markCurrentRoleCompleted()
+
+    cycle_received: list[int] = []
+    completed_received: list[int] = []
+    role_received: list[str] = []
+    master_received: list[int] = []
+    slave_received: list[int] = []
+    s.cycleIndexChanged.connect(lambda v: cycle_received.append(v))
+    s.completedRolesChanged.connect(lambda: completed_received.append(1))
+    s.currentRoleChanged.connect(lambda v: role_received.append(v))
+    s.masterDriveIdChanged.connect(lambda v: master_received.append(v))
+    s.slaveDriveIdChanged.connect(lambda v: slave_received.append(v))
+
+    s.endSession()
+    assert cycle_received == [0]
+    assert completed_received == [1]
+    assert role_received == [""]
+    assert master_received == [-1]
+    assert slave_received == [-1]

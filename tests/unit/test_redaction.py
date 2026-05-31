@@ -254,6 +254,98 @@ class TestRedactionFilterPassThrough:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Free-text message scrub — audit bug Sec1
+#
+# Before the fix, FlashViewModel.startSession logged
+# ``Sequential session started — hotspot SSID=Astromech-1234`` and the
+# JSONL session log captured the raw SSID. These tests pin the
+# ``record.msg`` scrub that prevents future SSID/PSK/password literals
+# from leaking the same way.
+# ---------------------------------------------------------------------------
+
+
+class TestFreeTextLeakScrub:
+    @staticmethod
+    def _filtered_msg(msg: str, args: tuple = ()) -> str:
+        rec = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg=msg,
+            args=args,
+            exc_info=None,
+        )
+        RedactionFilter().filter(rec)
+        return rec.getMessage()
+
+    def test_ssid_pattern_redacted_in_msg(self) -> None:
+        """``SSID=Astromech-1234`` in a log message becomes
+        ``SSID=<redacted>``. Pins the canonical FlashViewModel leak."""
+        msg = "Sequential session started — hotspot SSID=Astromech-1234 (persists)"
+        out = self._filtered_msg(msg)
+        assert "Astromech-1234" not in out
+        assert "SSID=<redacted>" in out
+
+    def test_astromech_literal_redacted(self) -> None:
+        """A bare ``Astromech-NNNN`` literal anywhere in the message
+        becomes ``<redacted-SSID>`` (catch-all for callers who don't
+        use the SSID= key=value form)."""
+        out = self._filtered_msg("camped on Astromech-9876 rendezvous")
+        assert "Astromech-9876" not in out
+        assert "<redacted-SSID>" in out
+
+    def test_psk_redacted(self) -> None:
+        """``psk=...`` key=value pair is redacted (case-insensitive)."""
+        out = self._filtered_msg("hotspot psk=Secr3tP@ss applied")
+        assert "Secr3tP@ss" not in out
+        assert "psk=<redacted>" in out
+
+    def test_password_kv_redacted(self) -> None:
+        """``password=...`` key=value pair is redacted."""
+        out = self._filtered_msg("login password=hunter2 ok")
+        assert "hunter2" not in out
+        assert "password=<redacted>" in out
+
+    def test_ssid_pattern_in_args_resolved_and_scrubbed(self) -> None:
+        """The real FlashViewModel call uses ``%s`` formatting — the
+        scrub must resolve ``record.args`` first then redact, so the
+        SSID never reaches the JSONL formatter."""
+        out = self._filtered_msg(
+            "Sequential session started — hotspot SSID=%s (persists)",
+            ("Astromech-4242",),
+        )
+        assert "Astromech-4242" not in out
+        # Both patterns happen to match — either flavour of redaction
+        # is acceptable as long as the raw SSID is gone.
+        assert ("SSID=<redacted>" in out) or ("<redacted-SSID>" in out)
+
+    def test_existing_ctx_redaction_still_works(self) -> None:
+        """Regression guard: the ctx scrub keeps working alongside the
+        new msg scrub. A record with BOTH a sensitive ctx key AND a
+        sensitive msg must have both scrubbed."""
+        rec = logging.LogRecord(
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
+            msg="hotspot SSID=Astromech-0001 active",
+            args=(),
+            exc_info=None,
+        )
+        rec.ctx = {"cleartext_password": "hunter2"}  # type: ignore[attr-defined]
+        RedactionFilter().filter(rec)
+        assert rec.ctx["cleartext_password"] == "<redacted: password>"  # type: ignore[attr-defined]
+        assert "Astromech-0001" not in rec.getMessage()
+
+    def test_unrelated_msg_unchanged(self) -> None:
+        """Messages without any leak pattern pass through untouched —
+        the scrub must not corrupt benign log lines."""
+        msg = "Wrote 4 MiB to /dev/sdb at 23.4 MB/s"
+        assert self._filtered_msg(msg) == msg
+
+
 @given(st.text(min_size=1, max_size=500))
 @settings(max_examples=200)
 def test_private_key_never_leaks(secret: str) -> None:

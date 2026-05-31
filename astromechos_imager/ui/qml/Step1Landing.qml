@@ -1,13 +1,12 @@
 // AstromechOS Imager — Step 1 "Landing".
 //
-// Sequential Deployment Assistant entry screen. The operator clicks
-// START DEPLOYMENT to generate the session-scoped hotspot SSID (one
-// SSID baked into BOTH cards so the runtime master/slave handshake
-// works without re-flashing) and then advance to Step 2 Config.
-//
-// FlashViewModel.startSession() is idempotent — going BACK to this
-// screen mid-session and clicking START DEPLOYMENT again is a no-op
-// on the SSID side.
+// Sequential Deployment Assistant entry screen. Pure marketing splash
+// — the START DEPLOYMENT button advances to Step 2 Config and nothing
+// else. Audit bug C1: previously this screen called
+// flashViewModel.startSession(), which baked the SSID before Step 2
+// captured the real PSK → SSID/PSK drift on the cards. The session
+// hotspot is now minted at the end of Step 2 (Config NEXT button)
+// once the PSK is validated.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -108,7 +107,9 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
             onClicked: {
-                flashViewModel.startSession()
+                // Step 1 is a pure splash now — SSID is minted by
+                // Step 2 Config NEXT (after the operator-typed PSK is
+                // validated). Audit bug C1.
                 wizardState.next()
             }
         }

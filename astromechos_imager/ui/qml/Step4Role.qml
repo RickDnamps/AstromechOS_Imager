@@ -205,9 +205,14 @@ Rectangle {
 
                     // MASTER card
                     Rectangle {
+                        // Audit bug H2: a completed role card is
+                        // visually de-emphasised and the MouseArea is
+                        // disabled so the operator can't re-flash it.
+                        property bool masterDone: wizardState.completedRoles.indexOf("master") >= 0
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         Layout.preferredHeight: 110
+                        opacity: masterDone ? 0.5 : 1.0
                         color: wizardState.currentRole === "master"
                                ? theme.colors.colorSurfaceAccent
                                : theme.colors.colorSurface
@@ -218,6 +223,7 @@ Rectangle {
                         radius: Theme.radiusCard
                         Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
                         Behavior on color        { ColorAnimation { duration: Theme.durFast } }
+                        Behavior on opacity      { NumberAnimation { duration: Theme.durFast } }
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -265,16 +271,23 @@ Rectangle {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
+                            // Audit bug H2: disable clicks on a
+                            // completed role to prevent re-flashing
+                            // the same role twice in one session.
+                            enabled: wizardState.completedRoles.indexOf("master") < 0
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: root._assignRole("master")
                         }
                     }
 
                     // SLAVE card
                     Rectangle {
+                        // Audit bug H2: parallel treatment with MASTER.
+                        property bool slaveDone: wizardState.completedRoles.indexOf("slave") >= 0
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         Layout.preferredHeight: 110
+                        opacity: slaveDone ? 0.5 : 1.0
                         color: wizardState.currentRole === "slave"
                                ? theme.colors.colorSurfaceAccent
                                : theme.colors.colorSurface
@@ -285,6 +298,7 @@ Rectangle {
                         radius: Theme.radiusCard
                         Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
                         Behavior on color        { ColorAnimation { duration: Theme.durFast } }
+                        Behavior on opacity      { NumberAnimation { duration: Theme.durFast } }
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -332,7 +346,9 @@ Rectangle {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
+                            // Audit bug H2: see MASTER MouseArea above.
+                            enabled: wizardState.completedRoles.indexOf("slave") < 0
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: root._assignRole("slave")
                         }
                     }

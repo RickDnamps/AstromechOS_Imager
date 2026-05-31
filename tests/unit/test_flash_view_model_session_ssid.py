@@ -97,3 +97,46 @@ def test_startSession_uses_operator_psk_when_long_enough():
     # internal storage to lock the contract.
     assert fvm._session_hotspot is not None
     assert fvm._session_hotspot.password == "mySecretPSK!"
+
+
+# ── endSession() — audit bugs C3 + H1 ────────────────────────────────
+
+
+def test_endSession_clears_session_hotspot():
+    """startSession() then endSession() must zero out the SSID so the
+    next sequential deployment mints a fresh one."""
+    from astromechos_imager.ui.flash_view_model import FlashViewModel
+    fvm = FlashViewModel(_fake_wizard_state(hotspot_password="astropass"))
+    fvm.startSession()
+    assert fvm.sessionSsid.startswith("Astromech-")
+    fvm.endSession()
+    assert fvm.sessionSsid == ""
+    assert fvm._session_hotspot is None
+
+
+def test_endSession_emits_signal():
+    """sessionSsidChanged fires with the empty string on session end so
+    UI bindings drop the SSID preview rectangle."""
+    from astromechos_imager.ui.flash_view_model import FlashViewModel
+    fvm = FlashViewModel(_fake_wizard_state(hotspot_password="astropass"))
+    fvm.startSession()
+    received: list[str] = []
+    fvm.sessionSsidChanged.connect(lambda v: received.append(v))
+    fvm.endSession()
+    assert received == [""]
+
+
+def test_endSession_then_startSession_mints_fresh_ssid():
+    """End-to-end: a 'FLASH ANOTHER' cycle must produce an SSID that
+    is independent of the previous run's SSID."""
+    from astromechos_imager.ui.flash_view_model import FlashViewModel
+    fvm = FlashViewModel(_fake_wizard_state(hotspot_password="astropass"))
+    fvm.startSession()
+    first_ssid = fvm.sessionSsid
+    fvm.endSession()
+    fvm.startSession()
+    second_ssid = fvm.sessionSsid
+    assert second_ssid.startswith("Astromech-")
+    # Cryptographic randomness — collision probability is 1/65536, so
+    # this is effectively a paternity check.
+    assert second_ssid != first_ssid

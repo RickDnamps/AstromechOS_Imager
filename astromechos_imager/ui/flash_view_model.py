@@ -261,6 +261,22 @@ class FlashViewModel(QObject):
             self._session_hotspot.ssid,
         )
 
+    @Slot()
+    def endSession(self) -> None:
+        """Reset the per-session state so the next deployment starts fresh.
+
+        Wired to Step 7 Complete 'FLASH ANOTHER' button (audit bugs C3
+        + H1). Without this, a second sequential session would reuse
+        the previous run's SSID — both pairs would camp on the same
+        wlan0 rendezvous and the second robot would never bind.
+        """
+        self._session_hotspot = None
+        self.sessionSsidChanged.emit("")
+        import logging
+        logging.getLogger(__name__).info(
+            "Sequential session ended — SSID cleared for next deployment"
+        )
+
     @Slot(QObject)
     def startWithJob(self, job_obj) -> None:
         """job_obj should be a Python object exposing the PairFlashJob / FlashJob

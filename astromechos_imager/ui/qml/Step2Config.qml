@@ -355,7 +355,17 @@ Rectangle {
             text: "NEXT →"
             variant: "primary"
             enabled: formValid
-            onClicked: { _flush(); wizardState.next() }
+            onClicked: {
+                // Audit bug C1: mint the session hotspot HERE — after
+                // the operator-typed PSK is validated — so the SSID
+                // baked into both cards matches the PSK actually
+                // written to /boot/astromech_init.cfg. startSession()
+                // is idempotent: going BACK and re-clicking NEXT is a
+                // no-op on the SSID side.
+                _flush()
+                flashViewModel.startSession()
+                wizardState.next()
+            }
         }
     }
 }

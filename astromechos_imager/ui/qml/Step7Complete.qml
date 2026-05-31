@@ -4,12 +4,37 @@ import QtQuick.Layouts
 import "Theme.js" as Theme
 
 Rectangle {
+    id: root
     color: theme.colors.colorBg
 
     // Sequential Deployment Assistant: derived from the role-completion
     // history rather than the deleted mode picker.
     property bool needMaster: wizardState.completedRoles.indexOf("master") >= 0
     property bool needSlave:  wizardState.completedRoles.indexOf("slave")  >= 0
+    property bool bothDone:   needMaster && needSlave
+
+    // Audit bug C2: the next-steps list must reflect what was ACTUALLY
+    // completed. The old fixed list told the operator to "insert each
+    // card" even when only one role had been flashed.
+    property var nextStepsModel: {
+        if (wizardState.completedRoles.length >= 2) {
+            return [
+                "Eject both SDs (auto-eject already attempted)",
+                "Insert each card into its Pi 4B (Master → dome, Slave → body)",
+                "Power on both Pis; the runtime hotspot handshake auto-starts",
+                "First boot takes ~3 min and reboots automatically",
+                "SSH via astromech-master.local / astromech-slave.local",
+            ]
+        }
+        var role = wizardState.completedRoles[0] || "master"
+        var roleName = role === "master" ? "MASTER (dome Pi)" : "SLAVE (body Pi)"
+        var missing  = role === "master" ? "SLAVE (body)"     : "MASTER (dome)"
+        return [
+            "Eject the SD card (auto-eject already attempted)",
+            "Insert the " + roleName + " card into its Pi 4B",
+            "Re-run the Imager to flash the " + missing + " card when ready",
+        ]
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -54,7 +79,10 @@ Rectangle {
                 spacing: 2
                 Layout.alignment: Qt.AlignVCenter
                 Text {
-                    text: "COMPLETE"
+                    // Audit bug C2: distinguish partial vs full
+                    // deployment so the operator isn't told the
+                    // session is fully done after only one role.
+                    text: root.bothDone ? "DEPLOYMENT COMPLETE" : "PARTIAL DEPLOYMENT"
                     color: theme.colors.colorTextPrimary
                     font.family: Theme.fontTitle
                     font.pixelSize: 22
@@ -62,7 +90,7 @@ Rectangle {
                     font.letterSpacing: 2.2
                 }
                 Text {
-                    text: needMaster && needSlave
+                    text: root.bothDone
                         ? "Both AstromechOS SD cards have been flashed."
                         : "Your AstromechOS SD card has been flashed."
                     color: theme.colors.colorTextSecondary
@@ -103,12 +131,7 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: [
-                        "Eject both SDs (auto-eject already attempted)",
-                        "Insert each card into its Pi 4B (Master ↔ dome, Slave ↔ body)",
-                        "First boot takes ~3 min and reboots automatically",
-                        "SSH via astromech-master.local / astromech-slave.local",
-                    ]
+                    model: root.nextStepsModel
                     delegate: RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
@@ -152,7 +175,16 @@ Rectangle {
         AstroButton {
             text: "FLASH ANOTHER"
             variant: "secondary"
-            onClicked: { wizardState.goto(1); }
+            onClicked: {
+                // Audit bugs C3 + H1: a fresh sequential session must
+                // wipe the previous SSID + completedRoles. Without
+                // this, Step 4 would show "✓ DONE" badges on a brand
+                // new card and the runtime hotspot rendezvous would
+                // reuse the previous robot's SSID.
+                flashViewModel.endSession()
+                wizardState.endSession()
+                wizardState.goto(1)
+            }
         }
         AstroButton {
             text: "QUIT"

@@ -469,6 +469,27 @@ class WizardState(QObject):
         self.cycleIndexChanged.emit(self._cycle_index)
 
     @Slot()
+    def endSession(self) -> None:
+        """Companion to FlashViewModel.endSession() — clears wizard
+        cycle state for the next sequential deployment.
+
+        Wired to Step 7 Complete 'FLASH ANOTHER' button (audit bugs C3
+        + H1). resetForNextCycle() only clears per-cycle drive ids; a
+        full session end must ALSO wipe completedRoles + cycleIndex so
+        Step 4 doesn't show the "✓ DONE" badge on a brand-new card.
+        """
+        self._cycle_index = 0
+        self._completed_roles.clear()
+        self._current_role = ""
+        self._master_drive_id = -1
+        self._slave_drive_id = -1
+        self.cycleIndexChanged.emit(0)
+        self.completedRolesChanged.emit()
+        self.currentRoleChanged.emit("")
+        self.masterDriveIdChanged.emit(-1)
+        self.slaveDriveIdChanged.emit(-1)
+
+    @Slot()
     def resetForNextCycle(self) -> None:
         """Called from Screen 6 'Insert next card' before looping to Step 4.
 

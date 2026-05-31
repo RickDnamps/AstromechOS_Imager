@@ -131,3 +131,53 @@ def test_refresh_logs_drive_summary(caplog):
     assert "DriveListModel refreshed: 1 drive(s)" in messages
     assert "phys_id=2" in messages
     assert "SanDisk Ultra" in messages
+
+
+# ── ID → field lookups (Step 5 friendly label rendering) ──────────────
+
+
+def test_lettersForDriveId_returns_letter_for_present_drive():
+    platform = _StubPlatform([_disk(7, letters=("K",))])
+    model = DriveListModel(platform)
+    assert model.lettersForDriveId(7) == "K:"
+
+
+def test_lettersForDriveId_returns_empty_for_missing_drive():
+    platform = _StubPlatform([_disk(7, letters=("K",))])
+    model = DriveListModel(platform)
+    assert model.lettersForDriveId(99) == ""
+
+
+def test_modelForDriveId_returns_model_for_present_drive():
+    platform = _StubPlatform([_disk(7, model="SanDisk Ultra")])
+    model = DriveListModel(platform)
+    assert model.modelForDriveId(7) == "SanDisk Ultra"
+    assert model.modelForDriveId(99) == ""
+
+
+def test_sizeForDriveId_uses_human_format():
+    """62528578560 bytes → '58.2 GB' from _human_size."""
+    platform = _StubPlatform([_disk(7, size=62528578560)])
+    model = DriveListModel(platform)
+    assert model.sizeForDriveId(7) == "58.2 GB"
+    assert model.sizeForDriveId(99) == ""
+
+
+def test_labelForDriveId_present_drive_format():
+    """Combined label: '<letter>: <model> <size>'."""
+    platform = _StubPlatform([
+        _disk(7, letters=("K",), model="SanDisk Ultra", size=62528578560),
+    ])
+    model = DriveListModel(platform)
+    assert model.labelForDriveId(7) == "K: SanDisk Ultra 58.2 GB"
+
+
+def test_labelForDriveId_missing_drive_shows_unplugged_hint():
+    """Drive id no longer in the live model → 'drive N (unplugged?)'."""
+    platform = _StubPlatform([_disk(7, letters=("K",))])
+    model = DriveListModel(platform)
+    # Operator picked drive 7, then unplugged it — only 7 is live; query 99.
+    assert model.labelForDriveId(99) == "drive 99 (unplugged?)"
+    # And empty model
+    empty = DriveListModel(_StubPlatform([]))
+    assert empty.labelForDriveId(42) == "drive 42 (unplugged?)"

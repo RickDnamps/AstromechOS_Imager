@@ -126,6 +126,48 @@ class DriveListModel(QAbstractListModel):
             return self._drives[row].physical_drive_id
         return -1
 
+    # ── ID → field lookups (used by Step5Flash to render friendly labels
+    #    without leaking raw \\.\PHYSICALDRIVEn integers to the operator) ──
+
+    @Slot(int, result=str)
+    def lettersForDriveId(self, phys_id: int) -> str:
+        for d in self._drives:
+            if d.physical_drive_id == phys_id:
+                return _drive_letters_str(d)
+        return ""
+
+    @Slot(int, result=str)
+    def modelForDriveId(self, phys_id: int) -> str:
+        for d in self._drives:
+            if d.physical_drive_id == phys_id:
+                return d.model
+        return ""
+
+    @Slot(int, result=str)
+    def sizeForDriveId(self, phys_id: int) -> str:
+        for d in self._drives:
+            if d.physical_drive_id == phys_id:
+                return _human_size(d.size_bytes)
+        return ""
+
+    @Slot(int, result=str)
+    def labelForDriveId(self, phys_id: int) -> str:
+        """Friendly one-line label: 'K: SanDisk Ultra 58.2 GB' or
+        'drive 7 (unplugged?)' if the id is no longer in the live model.
+
+        Used by Step 5 Flash so the operator sees the same human cues as
+        in Step 4 (letter + model + size) instead of the raw physical
+        drive integer carried in WizardState."""
+        for d in self._drives:
+            if d.physical_drive_id == phys_id:
+                letter = _drive_letters_str(d).strip() or "?"
+                model = d.model.strip() or "Unknown"
+                size = _human_size(d.size_bytes)
+                return f"{letter} {model} {size}"
+        # Drive id stored in wizard_state is no longer in the live model —
+        # could mean the operator unplugged it. Surface the loss visibly.
+        return f"drive {phys_id} (unplugged?)"
+
     # ── QML-facing Properties (direct binding source for Step4Role) ──────
 
     @Property(int, notify=countChanged)

@@ -149,7 +149,9 @@ Rectangle {
                         Layout.fillWidth: true
                     }
                     Text {
-                        text: "→ drive " + wizardState.masterDriveId
+                        text: "→ " + (driveListModel
+                            ? driveListModel.labelForDriveId(wizardState.masterDriveId)
+                            : ("drive " + wizardState.masterDriveId))
                         color: theme.colors.colorTextSecondary
                         font.family: Theme.fontMono
                         font.pixelSize: 12
@@ -177,7 +179,9 @@ Rectangle {
                         Layout.fillWidth: true
                     }
                     Text {
-                        text: "→ drive " + wizardState.slaveDriveId
+                        text: "→ " + (driveListModel
+                            ? driveListModel.labelForDriveId(wizardState.slaveDriveId)
+                            : ("drive " + wizardState.slaveDriveId))
                         color: theme.colors.colorTextSecondary
                         font.family: Theme.fontMono
                         font.pixelSize: 12

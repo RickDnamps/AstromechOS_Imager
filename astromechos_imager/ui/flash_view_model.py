@@ -39,6 +39,19 @@ class _FlashWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        # Fire a "preparing" phase ping immediately when the worker thread
+        # starts, BEFORE job.run() blocks for ~1-3 s on lock_and_dismount /
+        # open_raw_device / open_image. Without this, the UI sits at
+        # status="flashing" + progress 0% + empty phase label for the entire
+        # silent window — indistinguishable from "Not Responding". With this
+        # ping, Step5Flash.qml can render "Preparing target drive…" with an
+        # indeterminate spinner until DiskWriter starts firing real chunks.
+        if self._is_pair:
+            self.progressMaster.emit(0.0, "preparing")
+            self.progressSlave.emit(0.0, "preparing")
+        else:
+            self.progressMaster.emit(0.0, "preparing")
+
         try:
             if self._is_pair:
                 self._job.on_progress = self._on_pair_progress

@@ -16,6 +16,18 @@ Rectangle {
     property bool needMaster: wizardState.currentRole === "master"
     property bool needSlave:  wizardState.currentRole === "slave"
 
+    // Map raw DiskWriterProgress.phase strings to operator-readable
+    // labels. The "preparing" entry covers the silent ~1-3 s window
+    // between the SHA-256 hash finishing and DiskWriter emitting the
+    // first write-byte chunk (lock_and_dismount / open_raw_device /
+    // open_image). Falls back to the raw value for unknown phases.
+    function phaseLabel(p) {
+        if (p === "preparing")        return "Preparing target drive (locking volume, opening device, opening image)…"
+        if (p === "decompress_write") return "Writing image to SD…"
+        if (p === "verify")           return "Verifying data integrity (readback)…"
+        return p || ""
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 28
@@ -43,7 +55,9 @@ Rectangle {
             }
             Text {
                 text: isVerifying ? "Hashing each image and comparing with the sidecar checksum (if any)."
-                    : isFlashing  ? "Bit-for-bit copy in progress. The Pi will boot from this card."
+                    : isFlashing  ? (flashViewModel.masterPhase === "preparing" || flashViewModel.slavePhase === "preparing"
+                                     ? "Preparing target drive — please wait, this can take a few seconds…"
+                                     : "Bit-for-bit copy in progress. The Pi will boot from this card.")
                     : isError     ? "Review the message below, fix the cause, then retry."
                     : isDone      ? "Eject the card(s) and insert into the Pi 4B."
                     :               "Review the plan below. Writing will erase the targets."
@@ -375,19 +389,23 @@ Rectangle {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: flashViewModel.masterPhase
+                            text: phaseLabel(flashViewModel.masterPhase)
                             color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
                         }
                     }
                     Rectangle {
+                        id: masterBarTrack
                         Layout.fillWidth: true
                         height: 6
                         radius: 3
                         color: theme.colors.colorBg
                         border.color: theme.colors.colorBorderIdle
                         border.width: 1
+                        clip: true
+
+                        // Determinate fill: shown for any non-"preparing" phase.
                         Rectangle {
                             anchors.left: parent.left
                             anchors.top: parent.top
@@ -396,7 +414,32 @@ Rectangle {
                             width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.masterProgress))
                             radius: 2
                             color: theme.colors.colorAccent
+                            visible: flashViewModel.masterPhase !== "preparing"
                             Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+
+                        // Indeterminate stripe: thin moving pulse while
+                        // we wait for DiskWriter to start firing real
+                        // chunks. Same accent color, ~60% opacity so it
+                        // reads as "working but unknown progress".
+                        Rectangle {
+                            id: masterStripe
+                            visible: flashViewModel.masterPhase === "preparing"
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 1
+                            width: Math.max(40, masterBarTrack.width * 0.25)
+                            radius: 2
+                            color: theme.colors.colorAccent
+                            opacity: 0.6
+                            x: 1
+                            NumberAnimation on x {
+                                running: masterStripe.visible
+                                loops: Animation.Infinite
+                                from: -masterStripe.width
+                                to: masterBarTrack.width
+                                duration: 1100
+                            }
                         }
                     }
                 }
@@ -416,19 +459,22 @@ Rectangle {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: flashViewModel.slavePhase
+                            text: phaseLabel(flashViewModel.slavePhase)
                             color: theme.colors.colorTextSecondary
                             font.family: Theme.fontMono
                             font.pixelSize: 11
                         }
                     }
                     Rectangle {
+                        id: slaveBarTrack
                         Layout.fillWidth: true
                         height: 6
                         radius: 3
                         color: theme.colors.colorBg
                         border.color: theme.colors.colorBorderIdle
                         border.width: 1
+                        clip: true
+
                         Rectangle {
                             anchors.left: parent.left
                             anchors.top: parent.top
@@ -437,7 +483,28 @@ Rectangle {
                             width: Math.max(0, (parent.width - 2) * Math.min(1.0, flashViewModel.slaveProgress))
                             radius: 2
                             color: theme.colors.colorAccent
+                            visible: flashViewModel.slavePhase !== "preparing"
                             Behavior on width { NumberAnimation { duration: 120 } }
+                        }
+
+                        Rectangle {
+                            id: slaveStripe
+                            visible: flashViewModel.slavePhase === "preparing"
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 1
+                            width: Math.max(40, slaveBarTrack.width * 0.25)
+                            radius: 2
+                            color: theme.colors.colorAccent
+                            opacity: 0.6
+                            x: 1
+                            NumberAnimation on x {
+                                running: slaveStripe.visible
+                                loops: Animation.Infinite
+                                from: -slaveStripe.width
+                                to: slaveBarTrack.width
+                                duration: 1100
+                            }
                         }
                     }
                 }

@@ -60,7 +60,13 @@ from astromechos_imager.core.models import Role
 
 
 ROLE_MARKER_PATH = "/astromech_role.json"
-DEFAULT_MAX_DECOMPRESS_MB = 128
+DEFAULT_MAX_DECOMPRESS_MB = 600  # bumped from 128 (2026-05-31) — Pi OS Trixie
+# boot partition is 512 MB; 128 MB head truncated FAT32 metadata pyfatfs
+# expected to read, causing "Read a different amount of data than was
+# requested" on real Golden images (reproducible on slave but not master,
+# which happened to keep all needed FAT structures in the first 128 MB
+# after our Windows Format-Volume reconstruction). 600 MB safely covers
+# the 512 MB FAT32 partition + the 4 MB pre-partition offset + margin.
 EXPECTED_PROJECT = "AstromechOS"
 
 # Audit Medium #33 / #34: hard caps on inputs that could otherwise OOM

@@ -22,16 +22,18 @@ Rectangle {
             Layout.bottomMargin: 8
         }
         Text {
-            text: "Pick the SD cards you need to (re)write. The recommended path covers both."
+            text: "Pick the SD cards you need to (re)write. FLASH BOTH writes Master + Slave in the same session and needs 2 SD-USB adapters connected at the same time; pick MASTER ONLY or SLAVE ONLY to flash one card at a time with a single adapter."
             color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
             Layout.bottomMargin: 4
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
         }
 
         SelectableCard {
             title: "FLASH BOTH"
-            subtitle: "Master + Slave SD cards in one session — recommended"
+            subtitle: "Master + Slave in one session — needs 2 SD-USB adapters connected"
             selected: wizardState.mode === "both"
             onClicked: wizardState.setMode("both")
             iconComponent: Component { R2BothIcon { } }

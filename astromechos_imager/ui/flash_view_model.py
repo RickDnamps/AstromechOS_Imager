@@ -86,10 +86,10 @@ class _FlashWorker(QObject):
 class _HashWorker(QObject):
     """Streams hashlib over a compressed image, emits progress + result.
 
-    ``sidecar`` is the (algo, expected_hex_lower) pair found next to the
-    image, or None when no sidecar file exists. ``role`` is the wizard
-    role string ('master' / 'slave') so the orchestrator can route the
-    result to the right progress channel."""
+    ``sidecar`` is the ``(algo, expected_hex_lower, sidecar_path)`` tuple
+    found next to the image, or None when no sidecar file exists. ``role``
+    is the wizard role string ('master' / 'slave') so the orchestrator
+    can route the result to the right progress channel."""
 
     progress = Signal(str, float)          # role, fraction 0..1
     finished = Signal(str, str, "QVariant") # role, hex_hash, sidecar_match (bool|None)
@@ -98,7 +98,7 @@ class _HashWorker(QObject):
         self,
         image_path: Path,
         role: str,
-        sidecar: tuple[str, str] | None,
+        sidecar: tuple[str, str, Path] | None,
         cancel_event: threading.Event,
     ):
         super().__init__()
@@ -180,6 +180,13 @@ class FlashViewModel(QObject):
         self._hash_worker: _HashWorker | None = None
         self._pending_verify_job = None        # cached job from startFromWizard
         self._pending_verify_roles: list[str] = []  # roles still to hash
+        # Per-role sidecar tuple (algo, expected_hex, sidecar_path) cached
+        # at spawn time so _on_hash_finished can produce a detailed
+        # operator-facing mismatch error WITHOUT re-scanning the disk.
+        # Stale-sidecar misdiagnosis is the #1 reason a healthy golden
+        # image gets blamed for "corruption" — see _fail_verify_with_detail.
+        self._master_sidecar: tuple[str, str, Path] | None = None
+        self._slave_sidecar: tuple[str, str, Path] | None = None
         # Session-scoped hotspot — generated ONCE by startSession() on
         # Screen 01 Landing and reused for every flash in the session so
         # both master and slave cards carry the SAME SSID + PSK into
@@ -410,6 +417,13 @@ class FlashViewModel(QObject):
         )
         path = Path(path_s)
         sidecar = find_sidecar_checksum(path)
+        # Cache the resolved sidecar tuple so that _on_hash_finished can
+        # produce an actionable mismatch error (sidecar path + expected
+        # hash) WITHOUT having to re-walk the filesystem.
+        if role == "master":
+            self._master_sidecar = sidecar
+        else:
+            self._slave_sidecar = sidecar
         self._hash_thread = QThread()
         self._hash_worker = _HashWorker(path, role, sidecar, self._cancel_event)
         self._hash_worker.moveToThread(self._hash_thread)
@@ -464,10 +478,36 @@ class FlashViewModel(QObject):
             self.slaveHashSidecarMatchChanged.emit()
 
         if match is False:
-            # Sidecar mismatch — refuse to flash.
-            self._fail_verify(
-                f"SHA-256 mismatch on {role} image — file looks corrupted"
+            # Sidecar mismatch — refuse to flash. Produce an actionable
+            # error: operators routinely misdiagnose this as "the
+            # customization step broke the image", but customization
+            # writes ONLY to the SD card, NEVER to the source .img.gz.
+            # The real cause is almost always a stale sidecar that
+            # survived a golden-image regeneration.
+            path_s = (
+                self._wizard_state.masterImagePath if role == "master"
+                else self._wizard_state.slaveImagePath
             )
+            sidecar_tuple = (
+                self._master_sidecar if role == "master"
+                else self._slave_sidecar
+            )
+            if sidecar_tuple is not None:
+                _algo, expected_hex, sidecar_path = sidecar_tuple
+                self._fail_verify_with_detail(
+                    role=role,
+                    image_path=Path(path_s),
+                    sidecar_path=sidecar_path,
+                    expected_hex=expected_hex,
+                    computed_hex=digest,
+                )
+            else:
+                # Defensive: match==False should imply sidecar was found.
+                # If we somehow got here without a cached sidecar tuple,
+                # fall back to the legacy message rather than crash.
+                self._fail_verify(
+                    f"SHA-256 mismatch on {role} image — file looks corrupted"
+                )
             return
 
         # Either match==True (sidecar OK) or match is None (no sidecar,
@@ -476,6 +516,48 @@ class FlashViewModel(QObject):
         self._spawn_next_hash_worker()
 
     def _fail_verify(self, msg: str) -> None:
+        self._pending_verify_job = None
+        self._pending_verify_roles = []
+        self._status = "error"
+        self._error_message = msg
+        self.statusChanged.emit()
+        self.errorMessageChanged.emit()
+
+    def _fail_verify_with_detail(
+        self,
+        role: str,
+        image_path: Path,
+        sidecar_path: Path,
+        expected_hex: str,
+        computed_hex: str,
+    ) -> None:
+        """Surface a SHA-256 mismatch with operator-actionable detail.
+
+        The legacy message ("file looks corrupted") routinely sent
+        operators down the wrong rabbit hole — blaming the
+        customization step, the SD card, or the writer when the actual
+        cause was a stale ``.sha256`` sidecar that no longer matched a
+        regenerated golden image. This helper names the sidecar file,
+        shows both digests (truncated to 16 chars for readability), and
+        gives the operator two concrete remediations:
+
+          1. Regenerate the sidecar via ``sha256sum`` if the image is
+             trusted (the common case after a golden rebuild).
+          2. Uncheck the "VERIFY IMAGE INTEGRITY" toggle on Step 5 to
+             bypass the check entirely (escape hatch).
+        """
+        msg = (
+            f"SHA-256 mismatch on {role} image.\n\n"
+            f"File:     {image_path.name}\n"
+            f"Sidecar:  {sidecar_path.name}\n"
+            f"Expected: {expected_hex[:16]}…\n"
+            f"Computed: {computed_hex[:16]}…\n\n"
+            f"Either the sidecar is stale (regenerate via "
+            f"`sha256sum {image_path.name} > {sidecar_path.name}`) "
+            f"or the image was modified/corrupted in transfer. "
+            f"To bypass this check entirely, uncheck "
+            f"'\U0001f6e1 VERIFY IMAGE INTEGRITY' on Step 5."
+        )
         self._pending_verify_job = None
         self._pending_verify_roles = []
         self._status = "error"

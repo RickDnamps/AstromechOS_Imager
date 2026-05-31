@@ -362,12 +362,18 @@ _HASH_RE = {
 }
 
 
-def find_sidecar_checksum(image_path: Path) -> tuple[str, str] | None:
+def find_sidecar_checksum(image_path: Path) -> tuple[str, str, Path] | None:
     """Look for a checksum file next to ``image_path``.
 
     Tries (in order) ``image.sha256``, ``image.SHA256``, ``image.sha256sum``,
     same for md5. Accepts both bare ``<hex>`` content and coreutils
-    ``<hex>  <filename>``. Returns ``(algo, hex_lower)`` or None.
+    ``<hex>  <filename>``. Returns ``(algo, hex_lower, sidecar_path)`` or
+    None.
+
+    The sidecar path is returned so that operator-facing mismatch errors
+    can name the exact file the expected digest came from — this is the
+    single biggest source of operator misdiagnosis when a stale sidecar
+    survives a golden-image regeneration.
     """
     base = image_path.name
     candidates: list[tuple[Path, str]] = []
@@ -396,7 +402,7 @@ def find_sidecar_checksum(image_path: Path) -> tuple[str, str] | None:
             continue
         first = text.split()[0]
         if _HASH_RE[algo].fullmatch(first):
-            return (algo, first.lower())
+            return (algo, first.lower(), path)
     return None
 
 

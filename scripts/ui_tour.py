@@ -31,8 +31,8 @@ def main() -> int:
     window = engine.rootObjects()[0]
     window.show()
 
-    # Seed realistic wizard state — 6-step wizard with restored Customize.
-    state.setMode("both")
+    # Seed realistic wizard state — 7-step sequential wizard. The legacy
+    # mode picker is gone; Phase B will update the QML capture plan.
     state.setMasterImagePath(r"C:\images\AstromechOS-master-2026-05-30.img.xz")
     state.setSlaveImagePath(r"C:\images\AstromechOS-slave-2026-05-30.img.xz")
     state.setMasterDriveId(2)

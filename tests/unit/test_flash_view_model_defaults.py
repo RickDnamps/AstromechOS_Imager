@@ -35,10 +35,16 @@ def _fake_wizard(
     hotspot_password: str = "",
     wifi_ssid: str = "",
     wifi_psk: str = "",
+    current_role: str = "master",
 ) -> SimpleNamespace:
-    """Minimal WizardState stand-in — _build_flash_job only reads attrs."""
+    """Minimal WizardState stand-in — _build_flash_job only reads attrs.
+
+    Sequential workflow: each cycle flashes one role driven by
+    ``currentRole``. Default to "master" so existing single-role
+    expectations carry through.
+    """
     return SimpleNamespace(
-        mode="master_only",
+        currentRole=current_role,
         masterImagePath=r"C:\nonexistent.img.xz",
         slaveImagePath="",
         masterDriveId=2,

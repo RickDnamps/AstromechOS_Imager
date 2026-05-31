@@ -7,15 +7,23 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
 class WizardState(QObject):
-    """Tracks the current wizard step (1–6) and exposes navigation slots.
+    """Tracks the current wizard step (1–7) and exposes navigation slots.
 
-    Steps:
-        1 — Mode (flash both / master only / slave only)
-        2 — Images (browse source .img/.xz/.gz/.zip per role)
-        3 — Storage (pick target SD card per role)
-        4 — Customize (UID-1000 user + Wi-Fi credentials)  ← REQUIRED
-        5 — Confirm & Flash (summary, big red WRITE button, progress)
-        6 — Done (recap + next steps)
+    Sequential Deployment Assistant workflow:
+        1 — Landing (Start Deployment — generates the session hotspot SSID)
+        2 — Config (UID-1000 user + Wi-Fi + hotspot PSK + hostnames + repo)
+        3 — Images (browse source .img/.xz/.gz/.zip per role)
+        4 — Role (pick the role for this cycle: master or slave)
+        5 — Ops (verify + flash one card)
+        6 — Cycle (insert next card OR finish)
+        7 — Complete (both roles flashed — recap)
+
+    Role state machine: each cycle picks one ``currentRole`` (master or
+    slave), the flash-done handler appends it to ``completedRoles`` and
+    bumps ``cycleIndex``. ``proposedNextRole`` auto-suggests the remaining
+    role for the next cycle. ``resetForNextCycle`` clears per-cycle drive
+    selections + currentRole but preserves the session-scoped completion
+    history so the hotspot SSID and operator-typed config carry through.
 
     SSH key handling is fully automatic (no user input required): the
     Imager generates a Master↔Slave keypair on each flash session, drops
@@ -23,17 +31,17 @@ class WizardState(QObject):
     public half into the Slave's authorized_keys. PC↔Master access is
     handled at first login by the operator (password or own ssh-copy-id).
 
-    Step 4 — Customize — collects the deployment-mandatory fields per
+    Step 2 Config collects the deployment-mandatory fields per
     CLAUDE.md "Provisioning architecture":
       * ``installUser`` / ``installPassword`` → UID-1000 Linux account
         (cold rootfs surgery via core/rootfs_personalizer.py).
       * ``wifiSsid`` / ``wifiPsk``            → wlan1 domestic Wi-Fi
         (live firstboot brings up NetworkManager with these creds).
-    The wlan0 bootstrap AP is auto-generated (AstromechOS-XXXX, never
-    prompted) and renamed at runtime by firstboot_setup.sh.
+    The wlan0 bootstrap AP SSID is auto-generated ONCE per session by
+    ``FlashViewModel.startSession()`` and baked identically into both
+    cards so the runtime master-slave handshake works.
     """
     currentStepChanged = Signal(int)
-    modeChanged = Signal(str)
     masterImagePathChanged = Signal(str)
     slaveImagePathChanged = Signal(str)
     masterDriveIdChanged = Signal(int)
@@ -68,20 +76,24 @@ class WizardState(QObject):
     # Integrity (SHA-256) toggle for Step 4
     verifyIntegrityChanged = Signal(bool)
 
-    MIN_STEP = 1
-    MAX_STEP = 6
+    # Sequential Deployment Assistant state machine (replaces the deleted
+    # MODE picker). cycleIndex bumps once per successful flash, completed
+    # roles accumulate, currentRole names which role this cycle flashes,
+    # and proposedNextRole derives from completedRoles for Screen 4.
+    cycleIndexChanged = Signal(int)
+    completedRolesChanged = Signal()
+    currentRoleChanged = Signal(str)
 
-    MODE_BOTH = "both"
-    MODE_MASTER_ONLY = "master_only"
-    MODE_SLAVE_ONLY = "slave_only"
-    VALID_MODES = (MODE_BOTH, MODE_MASTER_ONLY, MODE_SLAVE_ONLY)
+    MIN_STEP = 1
+    MAX_STEP = 7
 
     SUPPORTED_IMAGE_EXTENSIONS = (".img", ".xz", ".gz", ".zip")  # .img.xz, .img.gz handled by stem-check
+
+    _VALID_ROLES = ("master", "slave")
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._step = self.MIN_STEP
-        self._mode = self.MODE_BOTH  # default = recommended
         self._master_image_path = ""
         self._slave_image_path = ""
         self._master_drive_id = -1
@@ -90,6 +102,14 @@ class WizardState(QObject):
         self._hostname_slave = "astromech-slave"
         self._repo_url = ""
         self._reuse_hotspot = False
+        # Sequential workflow state machine. Empty/zero values mean the
+        # operator hasn't started any cycle yet — Screen 4 will offer a
+        # free role pick. After the first successful flash, markCurrent-
+        # RoleCompleted appends to _completed_roles and proposedNextRole
+        # auto-suggests the remaining one.
+        self._cycle_index: int = 0
+        self._completed_roles: list[str] = []   # "master" and/or "slave" in completion order
+        self._current_role: str = ""            # "master" | "slave" — what this cycle flashes
         self._wifi_ssid = ""
         self._wifi_psk = ""
         # Step 4 Customize — fields start EMPTY in the UI; the operator
@@ -155,21 +175,7 @@ class WizardState(QObject):
             self.currentStepChanged.emit(self._step)
 
     # ------------------------------------------------------------------
-    # Step 1 — Mode
-    # ------------------------------------------------------------------
-
-    @Property(str, notify=modeChanged)
-    def mode(self) -> str:
-        return self._mode
-
-    @Slot(str)
-    def setMode(self, mode: str) -> None:
-        if mode in self.VALID_MODES and mode != self._mode:
-            self._mode = mode
-            self.modeChanged.emit(self._mode)
-
-    # ------------------------------------------------------------------
-    # Step 2 — Image paths
+    # Step 3 — Image paths
     # ------------------------------------------------------------------
 
     @Property(str, notify=masterImagePathChanged)
@@ -413,6 +419,70 @@ class WizardState(QObject):
             self.slaveDriveIdChanged.emit(drive_id)
         elif drive_id == self._master_drive_id and drive_id != -1:
             pass  # collision — silently ignore
+
+    # ------------------------------------------------------------------
+    # Sequential workflow state machine (Screens 4 Role / 6 Cycle).
+    # ------------------------------------------------------------------
+
+    @Property(int, notify=cycleIndexChanged)
+    def cycleIndex(self) -> int:
+        return self._cycle_index
+
+    @Property("QVariantList", notify=completedRolesChanged)
+    def completedRoles(self) -> list[str]:
+        return list(self._completed_roles)
+
+    @Property(str, notify=currentRoleChanged)
+    def currentRole(self) -> str:
+        return self._current_role
+
+    @Property(str, notify=completedRolesChanged)
+    def proposedNextRole(self) -> str:
+        """Auto-propose remaining role for Screen 4 Role pre-selection.
+
+        Returns "" when:
+          * nothing flashed yet — operator picks freely
+          * both roles already flashed — no proposal
+        """
+        if not self._completed_roles:
+            return ""  # nothing done yet — operator picks freely
+        if "master" in self._completed_roles and "slave" not in self._completed_roles:
+            return "slave"
+        if "slave" in self._completed_roles and "master" not in self._completed_roles:
+            return "master"
+        return ""  # both done
+
+    @Slot(str)
+    def setCurrentRole(self, role: str) -> None:
+        if role in self._VALID_ROLES and role != self._current_role:
+            self._current_role = role
+            self.currentRoleChanged.emit(self._current_role)
+
+    @Slot()
+    def markCurrentRoleCompleted(self) -> None:
+        """Idempotent — called from the flash-done success path."""
+        if not self._current_role or self._current_role in self._completed_roles:
+            return
+        self._completed_roles.append(self._current_role)
+        self._cycle_index += 1
+        self.completedRolesChanged.emit()
+        self.cycleIndexChanged.emit(self._cycle_index)
+
+    @Slot()
+    def resetForNextCycle(self) -> None:
+        """Called from Screen 6 'Insert next card' before looping to Step 4.
+
+        Clears the per-cycle drive ids + currentRole, but preserves
+        completedRoles / cycleIndex so proposedNextRole continues to drive
+        Screen 4 pre-selection and the session-scoped hotspot SSID
+        carries through to the next card.
+        """
+        self._current_role = ""
+        self._master_drive_id = -1
+        self._slave_drive_id = -1
+        self.currentRoleChanged.emit(self._current_role)
+        self.masterDriveIdChanged.emit(self._master_drive_id)
+        self.slaveDriveIdChanged.emit(self._slave_drive_id)
 
     # ------------------------------------------------------------------
     # Defaults (hostnames / fork URL / Wi-Fi) — internal, no UI surface.

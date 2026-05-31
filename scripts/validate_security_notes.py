@@ -28,7 +28,7 @@ def main() -> int:
     app, engine, state = build_app()
     window = engine.rootObjects()[0]
     window.show()
-    state.setMode("both")
+    # Sequential workflow: the legacy mode picker is gone.
     theme_mgr = getattr(engine, "themeManager", None)
 
     plan = []

@@ -44,22 +44,23 @@ def test_next_clamps_at_max(qtbot):
     s = WizardState()
     for _ in range(10):
         s.next()
-    # 6-step wizard: Mode / Images / Storage / Customize / Flash / Done.
-    assert s.currentStep == 6
+    # 7-step sequential wizard: Landing / Config / Images / Role / Ops /
+    # Cycle / Complete.
+    assert s.currentStep == 7
 
 
 def test_goto_valid_range(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    s.goto(6)
-    assert s.currentStep == 6
+    s.goto(7)
+    assert s.currentStep == 7
 
 
 def test_goto_out_of_range_noop(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.goto(0)
-    s.goto(7)   # one past MAX_STEP=6
+    s.goto(8)   # one past MAX_STEP=7
     s.goto(-1)
     assert s.currentStep == 1
 
@@ -87,39 +88,11 @@ def test_signal_not_emitted_on_clamp(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# Task 8.3 — mode picker
+# Sequential workflow: the legacy mode picker (both / master_only /
+# slave_only) is DELETED. Its replacement — cycleIndex / completedRoles /
+# currentRole / proposedNextRole — is exercised in
+# tests/unit/test_wizard_state_sequential.py.
 # ---------------------------------------------------------------------------
-
-def test_mode_default_is_both(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.mode == "both"
-
-
-def test_set_mode_emits_signal(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    received = []
-    s.modeChanged.connect(lambda v: received.append(v))
-    s.setMode("master_only")
-    assert s.mode == "master_only"
-    assert received == ["master_only"]
-
-
-def test_set_mode_invalid_noop(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    s.setMode("nonsense")
-    assert s.mode == "both"
-
-
-def test_set_mode_same_value_no_signal(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    received = []
-    s.modeChanged.connect(lambda v: received.append(v))
-    s.setMode("both")  # already default
-    assert received == []
 
 
 # ---------------------------------------------------------------------------

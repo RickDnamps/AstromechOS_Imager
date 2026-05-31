@@ -22,7 +22,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Property, Signal, Slot
 
 from astromechos_imager.core.diskwriter import DiskWriterProgress
-from astromechos_imager.core.models import Role
+from astromechos_imager.core.models import HotspotBootstrap, Role
 
 
 class _FlashWorker(QObject):
@@ -138,6 +138,11 @@ class FlashViewModel(QObject):
     slaveHashChanged = Signal()
     masterHashSidecarMatchChanged = Signal()   # bool|None as JS value
     slaveHashSidecarMatchChanged = Signal()
+    # Sequential Deployment Assistant: the hotspot SSID is generated ONCE
+    # per session by startSession() (Screen 01 Landing) and baked into
+    # BOTH cards so the runtime master-slave handshake works. UI binds to
+    # this for the persistent "Session hotspot: Astromech-XXXX" header.
+    sessionSsidChanged = Signal(str)
 
     def __init__(self, wizard_state, parent=None):
         super().__init__(parent)
@@ -162,6 +167,11 @@ class FlashViewModel(QObject):
         self._hash_worker: _HashWorker | None = None
         self._pending_verify_job = None        # cached job from startFromWizard
         self._pending_verify_roles: list[str] = []  # roles still to hash
+        # Session-scoped hotspot — generated ONCE by startSession() on
+        # Screen 01 Landing and reused for every flash in the session so
+        # both master and slave cards carry the SAME SSID + PSK into
+        # /boot/astromech_init.cfg. None until startSession() runs.
+        self._session_hotspot: HotspotBootstrap | None = None
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -213,6 +223,44 @@ class FlashViewModel(QObject):
     def slaveHashSidecarMatch(self):
         return self._slave_hash_sidecar_match
 
+    # ── Sequential session ────────────────────────────────────────────
+    #
+    # The session hotspot SSID is generated ONCE on Screen 01 Landing
+    # and persists across both flash cycles so the master/slave pair
+    # boots into the same wlan0 rendezvous. The PSK still falls back to
+    # ``astropass`` if Step 2 Config hasn't been visited yet — Step 2's
+    # save handler will refresh _session_hotspot if the operator types
+    # a different one.
+
+    @Property(str, notify=sessionSsidChanged)
+    def sessionSsid(self) -> str:
+        return self._session_hotspot.ssid if self._session_hotspot else ""
+
+    @Slot()
+    def startSession(self) -> None:
+        """Wired to Screen 01 Landing 'Start Deployment' button. Idempotent.
+
+        Generates the session-scoped hotspot bootstrap (random SSID +
+        operator PSK with fallback to ``astropass``). Both flash cycles
+        in this session inherit the SAME ssid so the runtime
+        master/slave handshake works without re-flashing one card.
+        """
+        if self._session_hotspot is not None:
+            return
+        from astromechos_imager.core.keygen import generate_hotspot_bootstrap
+        psk = "astropass"  # safe default; Step 2 Config will validate the real one
+        if hasattr(self._wizard_state, "hotspotPassword"):
+            raw = getattr(self._wizard_state, "hotspotPassword", "") or ""
+            if len(raw) >= 8:
+                psk = raw
+        self._session_hotspot = generate_hotspot_bootstrap(psk)
+        self.sessionSsidChanged.emit(self._session_hotspot.ssid)
+        import logging
+        logging.getLogger(__name__).info(
+            "Sequential session started — hotspot SSID=%s (persists across both cycles)",
+            self._session_hotspot.ssid,
+        )
+
     @Slot(QObject)
     def startWithJob(self, job_obj) -> None:
         """job_obj should be a Python object exposing the PairFlashJob / FlashJob
@@ -258,7 +306,9 @@ class FlashViewModel(QObject):
         silent no-op (Audit High #18).
         """
         try:
-            job = _build_flash_job(self._wizard_state)
+            job = _build_flash_job(
+                self._wizard_state, session_hotspot=self._session_hotspot
+            )
         except Exception as exc:
             self._status = "error"
             self._error_message = f"Could not prepare flash job: {exc}"
@@ -304,14 +354,12 @@ class FlashViewModel(QObject):
         ):
             sig.emit()
 
-        # Figure out which images need hashing — derived from the wizard
-        # mode so we don't hash a path that won't be flashed.
-        mode = self._wizard_state.mode
-        queue: list[str] = []
-        if mode in ("both", "master_only"):
-            queue.append("master")
-        if mode in ("both", "slave_only"):
-            queue.append("slave")
+        # Sequential workflow flashes ONE role per cycle — derive the
+        # queue from wizard_state.currentRole rather than the deleted
+        # mode picker. Empty role is a guard against test entry that
+        # skips Screen 4; defaults to "master" so something hashes.
+        current_role = getattr(self._wizard_state, "currentRole", "") or "master"
+        queue: list[str] = [current_role]
         self._pending_verify_job = job
         self._pending_verify_roles = queue
         self._cancel_event.clear()
@@ -449,6 +497,17 @@ class FlashViewModel(QObject):
         else:
             self._status = "done" if ok else "error"
             self._error_message = err
+            # Sequential Deployment Assistant: advance the role state
+            # machine on success ONLY. Idempotent — re-entry is safe.
+            if ok and hasattr(self._wizard_state, "markCurrentRoleCompleted"):
+                try:
+                    self._wizard_state.markCurrentRoleCompleted()
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        "markCurrentRoleCompleted() raised; flash succeeded "
+                        "but the sequential state machine did not advance"
+                    )
         self.statusChanged.emit()
         self.errorMessageChanged.emit()
         if self._thread is not None:
@@ -475,19 +534,31 @@ DEFAULT_INSTALL_PASSWORD = "astropass"
 DEFAULT_HOTSPOT_PASSWORD = "astropass"
 
 
-def _build_flash_job(wizard_state, platform_io=None):
-    """Build a PairFlashJob or FlashJob from wizard_state fields.
+def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
+    """Build a FlashJob from wizard_state fields for the current cycle.
 
-    Step 4 fields are NON-BLOCKING: empty strings on ``installUser`` /
-    ``installPassword`` / ``hotspotPassword`` are silently substituted
-    with the module-level ``DEFAULT_*`` constants above. This guarantees
-    ``/boot/astromech_init.cfg`` is always complete on the SD card, no
-    matter how the operator went through the wizard. The QML
-    ``formValid`` predicate still blocks WRITE when a field is
-    *non-empty AND invalid* (operator-typed garbage).
+    Sequential Deployment Assistant: each cycle flashes ONE role
+    (master OR slave) — driven by ``wizard_state.currentRole``. The
+    deleted MODE picker would have collapsed to ``master_only`` /
+    ``slave_only`` in the old flow; ``currentRole`` is its successor.
 
-    Returns None and logs a warning if construction fails (e.g. no real drives).
-    This function is module-level so it can be unit-tested with a fake wizard_state.
+    Step 2 Config fields are NON-BLOCKING: empty strings on
+    ``installUser`` / ``installPassword`` / ``hotspotPassword`` are
+    silently substituted with the module-level ``DEFAULT_*`` constants
+    above. This guarantees ``/boot/astromech_init.cfg`` is always
+    complete on the SD card, no matter how the operator went through
+    the wizard.
+
+    ``session_hotspot`` is the session-scoped HotspotBootstrap generated
+    once on Screen 01 Landing and reused for every cycle so master/slave
+    boot into the SAME wlan0 rendezvous. When None (legacy test entry
+    that skips Screen 01), a fresh bootstrap is generated locally.
+
+    Returns None if construction fails because no platform IO is
+    available (non-Windows host without an injected fake). Otherwise
+    re-raises construction errors so the WRITE button never becomes a
+    silent no-op (Audit High #18). This function is module-level so it
+    can be unit-tested with a fake wizard_state.
     """
     try:
         import sys
@@ -499,12 +570,12 @@ def _build_flash_job(wizard_state, platform_io=None):
                 return None
 
         from astromechos_imager.core.models import FirstbootConfig, Role
-        from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
+        from astromechos_imager.core.orchestrator import FlashJob
         from astromechos_imager.core.keygen import (
             generate_ed25519, generate_hotspot_bootstrap,
             generate_linux_account,
             load_persisted_pair, save_persisted_pair,
-            load_persisted_hotspot, save_persisted_hotspot,
+            save_persisted_hotspot,
         )
 
         # Zero-Touch: no user-pasted keys, ever. The Master↔Slave pair is
@@ -531,22 +602,25 @@ def _build_flash_job(wizard_state, platform_io=None):
 
         linux_account = generate_linux_account(install_user, install_password)
 
-        # wlan0 private interconnect: SSID is auto-generated per burn
-        # (random ``Astromech-<4 digits>``). Audit High #7: honour
-        # ``wizard_state.reuseHotspot`` — a re-flashed master needs
-        # the SAME bootstrap SSID as the existing slave, otherwise
-        # they can't pair on boot. The operator's current PSK still
-        # wins so they can rotate it without re-burning both cards.
-        from astromechos_imager.core.models import HotspotBootstrap
-        hotspot = None
-        if getattr(wizard_state, "reuseHotspot", False):
-            persisted = load_persisted_hotspot()
-            if persisted is not None:
-                hotspot = HotspotBootstrap(
-                    ssid=persisted.ssid, password=hotspot_psk
-                )
-        if hotspot is None:
-            hotspot = generate_hotspot_bootstrap(hotspot_psk)
+        # SSID is session-scoped — generated ONCE by startSession() on
+        # Screen 01. The SAME hotspot creds are baked into both master
+        # and slave's /boot/astromech_init.cfg so the runtime master-
+        # slave handshake works.
+        if session_hotspot is None:
+            # Defensive: legacy code paths (or test entry that skips
+            # Screen 01) — still generate. PSK falls back to "astropass"
+            # per generate_hotspot_bootstrap's WPA2 minimum.
+            psk_fallback = hotspot_psk or "astropass"
+            if len(psk_fallback) < 8:
+                psk_fallback = "astropass"
+            session_hotspot = generate_hotspot_bootstrap(psk_fallback)
+        # The session SSID carries through; the PSK still honours any
+        # operator-typed value (so they can rotate without losing the
+        # SSID continuity that lets master/slave pair).
+        hotspot = HotspotBootstrap(
+            ssid=session_hotspot.ssid,
+            password=hotspot_psk,
+        )
         save_persisted_hotspot(hotspot)
 
         wifi_ssid = (wizard_state.wifiSsid or "").strip() or None
@@ -579,52 +653,45 @@ def _build_flash_job(wizard_state, platform_io=None):
             wifi_psk=wifi_psk,
         )
 
-        mode = wizard_state.mode
+        # Sequential workflow: one cycle = one role = one FlashJob. The
+        # role is set on Screen 4 via wizard_state.setCurrentRole().
+        current_role = (getattr(wizard_state, "currentRole", "") or "").strip()
+        if current_role not in ("master", "slave"):
+            raise RuntimeError(
+                "Cannot build flash job: wizard_state.currentRole must be "
+                "'master' or 'slave' (got %r). Screen 4 Role must run first."
+                % current_role
+            )
+
         drives = {d.physical_drive_id: d for d in platform_io.enumerate_removable_drives()}
 
-        master_drive = None
-        slave_drive = None
-        if mode in ("both", "master_only"):
-            master_drive = drives.get(wizard_state.masterDriveId)
-            if master_drive is None:
+        if current_role == "master":
+            drive = drives.get(wizard_state.masterDriveId)
+            if drive is None:
                 raise RuntimeError(
                     f"master drive id={wizard_state.masterDriveId} not found "
                     f"(was it removed since Step 3?)"
                 )
-        if mode in ("both", "slave_only"):
-            slave_drive = drives.get(wizard_state.slaveDriveId)
-            if slave_drive is None:
-                raise RuntimeError(
-                    f"slave drive id={wizard_state.slaveDriveId} not found "
-                    f"(was it removed since Step 3?)"
-                )
-
-        if mode == "both":
-            return PairFlashJob(
-                platform_io=platform_io,
-                master_image=Path(wizard_state.masterImagePath),
-                master_target=master_drive,
-                slave_image=Path(wizard_state.slaveImagePath),
-                slave_target=slave_drive,
-                firstboot_config=firstboot,
-                master_pair=ed25519,
-                linux_account=linux_account,
-            )
-        if mode == "master_only":
             return FlashJob(
                 platform_io=platform_io,
                 image_path=Path(wizard_state.masterImagePath),
-                target=master_drive,
+                target=drive,
                 role=Role.MASTER,
                 firstboot_config=firstboot,
                 master_pair=ed25519,
                 linux_account=linux_account,
             )
-        # slave_only
+        # current_role == "slave"
+        drive = drives.get(wizard_state.slaveDriveId)
+        if drive is None:
+            raise RuntimeError(
+                f"slave drive id={wizard_state.slaveDriveId} not found "
+                f"(was it removed since Step 3?)"
+            )
         return FlashJob(
             platform_io=platform_io,
             image_path=Path(wizard_state.slaveImagePath),
-            target=slave_drive,
+            target=drive,
             role=Role.SLAVE,
             firstboot_config=firstboot,
             master_pair=ed25519,

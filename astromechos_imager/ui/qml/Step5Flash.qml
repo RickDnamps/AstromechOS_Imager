@@ -11,8 +11,10 @@ Rectangle {
     property bool isDone:      flashViewModel.status === "done"
     property bool isError:     flashViewModel.status === "error"
 
-    property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
-    property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
+    // Sequential Deployment Assistant: one cycle = one role. The
+    // visible per-role progress / summary panels follow currentRole.
+    property bool needMaster: wizardState.currentRole === "master"
+    property bool needSlave:  wizardState.currentRole === "slave"
 
     ColumnLayout {
         anchors.fill: parent

@@ -6,8 +6,10 @@ import "Theme.js" as Theme
 Rectangle {
     color: theme.colors.colorBg
 
-    property bool needMaster: wizardState.mode === "both" || wizardState.mode === "master_only"
-    property bool needSlave:  wizardState.mode === "both" || wizardState.mode === "slave_only"
+    // Sequential Deployment Assistant: derived from the role-completion
+    // history rather than the deleted mode picker.
+    property bool needMaster: wizardState.completedRoles.indexOf("master") >= 0
+    property bool needSlave:  wizardState.completedRoles.indexOf("slave")  >= 0
 
     ColumnLayout {
         anchors.fill: parent

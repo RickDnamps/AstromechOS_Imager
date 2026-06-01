@@ -164,47 +164,62 @@ class FlashJob:
                         dw = DiskWriter(src, dev, on_progress=self.on_progress,
                                         cancel_event=self.cancel_event)
                         write_result = dw.run()
-                    # 3. Verify
+                    # 3. Verify — hash-injects the deferred first block so
+                    #    the comparison matches the source SHA256 even
+                    #    though the MBR region is NOT on disk yet.
                     if not self.skip_verify and not self.cancel_event.is_set():
                         verify_readback(dev,
                                         expected_sha256=write_result.source_sha256,
                                         length=write_result.bytes_written,
                                         on_progress=self.on_progress,
-                                        cancel_event=self.cancel_event)
+                                        cancel_event=self.cancel_event,
+                                        first_block=write_result.first_block_data)
+                    # 3.5 Write the deferred first block back to offset 0.
+                    # With Mount-Manager letter removed (lock_and_dismount
+                    # called DeleteVolumeMountPointW), Windows cannot
+                    # auto-mount even after the MBR appears — until step
+                    # 4 explicitly re-attaches a letter.
+                    if (write_result.first_block_data is not None
+                            and not self.cancel_event.is_set()):
+                        n = dev.write(0, write_result.first_block_data)
+                        if n != len(write_result.first_block_data):
+                            from astromechos_imager.core.errors import WriteError  # noqa: PLC0415
+                            raise WriteError(
+                                f"short write of deferred first block: "
+                                f"{n}/{len(write_result.first_block_data)}"
+                            )
+                        dev.flush()
                     # 4. Rootfs personalization + boot partition customize
                     if not self.skip_customize and not self.cancel_event.is_set():
                         self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
-                        mbr = dev.read(0, 512)
-                        # Read MBR while we still hold the raw device handle;
-                        # then RELEASE the volume locks BEFORE customize so
-                        # Windows can fully re-mount the freshly-written
-                        # FAT32 partition under its original drive letter.
-                        # Without this, the FSCTL_LOCK_VOLUME from
-                        # lock_and_dismount blocks Windows from completing
-                        # the remount, and DriveLetterBootPartition's
-                        # write_bytes hits "Access Denied" because the
-                        # volume is in a half-mounted state. The α path
-                        # uses regular Python file I/O — it does not go
-                        # through our kernel32 handle.
-                        for h in locked_handles:
-                            try:
-                                self.platform_io.close_handle(h)
-                            except Exception:
-                                pass
-                        locked_handles = []  # outer finally must not double-close
-                        # Trigger another properties refresh now that the
-                        # locks are released — Windows actually completes
-                        # the re-mount this time.
-                        self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
-                        # Brief wait for the post-release remount to settle.
-                        time.sleep(2.0)
-                        preferred = (self.target.drive_letters[0]
-                                     if self.target.drive_letters else None)
+                        # Take the MBR from the deferred-write buffer when
+                        # available (no disk round-trip); fall back to a
+                        # raw read when the source was too small to defer
+                        # a first block.
+                        mbr = (write_result.first_block_data[:512]
+                               if write_result.first_block_data is not None
+                               else dev.read(0, 512))
+                        # Re-attach our original drive letter to the freshly
+                        # written volume. lock_and_dismount removed the
+                        # letter via DeleteVolumeMountPointW so verify could
+                        # run without Windows interference; now we put the
+                        # letter back so DriveLetterBootPartition can write
+                        # the AstromechOS bundle via normal Win32 file I/O.
+                        target_letter = (self.target.drive_letters[0]
+                                         if self.target.drive_letters else None)
+                        if target_letter is not None:
+                            attach = getattr(
+                                self.platform_io,
+                                "attach_letter_to_unmounted_volume",
+                                None,
+                            )
+                            if attach is not None:
+                                attach(target_letter, self.target.physical_drive_id)
                         bp = _bootpartition_open(
                             raw_device_path=self.target.device_path,
                             mbr_bytes=mbr,
                             known_letters_before=known_letters_before,
-                            preferred_letter=preferred,
+                            preferred_letter=target_letter,
                         )
                         if bp is not None:
                             try:

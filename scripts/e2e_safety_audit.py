@@ -31,7 +31,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from astromechos_imager.platform.windows import _wmi_query, enumerate_removable_drives
 
-EXPECTED_PHYS_ID = 7
+import os as _os
+
+# Specific phys_id to enforce (e.g. when the operator knows exactly which
+# device they plugged). When unset, the audit only requires "exactly one
+# removable drive" — Windows reassigns phys_id across hardware swaps so
+# pinning a specific id is brittle, but the safety contract "no fixed
+# disk in scope" is still upheld.
+EXPECTED_PHYS_ID = int(_os.environ["E2E_EXPECTED_PHYS_ID"]) if "E2E_EXPECTED_PHYS_ID" in _os.environ else None
 IMAGES_DIR = Path(r"J:\R2-D2_Build\images")
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "e2e_audit"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -84,10 +91,10 @@ def audit_filter() -> bool:
         return False
 
     sole = drives[0]
-    if sole.physical_drive_id != EXPECTED_PHYS_ID:
+    if EXPECTED_PHYS_ID is not None and sole.physical_drive_id != EXPECTED_PHYS_ID:
         log(f"**❌ Sole drive is phys_id={sole.physical_drive_id}, expected "
-            f"{EXPECTED_PHYS_ID}.** Refuse to proceed — operator must "
-            f"replug the intended SD card.")
+            f"{EXPECTED_PHYS_ID}** (E2E_EXPECTED_PHYS_ID was set). Refuse "
+            f"to proceed — operator must replug the intended SD card.")
         return False
 
     has_i = any(l == "I" for l in sole.drive_letters)

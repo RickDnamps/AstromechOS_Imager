@@ -17,13 +17,16 @@ INVALID_HANDLE_VALUE = -1
 
 # Volume control
 FSCTL_LOCK_VOLUME = 0x00090018
+FSCTL_UNLOCK_VOLUME = 0x0009001C
 FSCTL_DISMOUNT_VOLUME = 0x00090020
 FSCTL_ALLOW_EXTENDED_DASD_IO = 0x00090083
 
 # Disk IOCTL
 IOCTL_DISK_UPDATE_PROPERTIES = 0x00070140
 IOCTL_DISK_GET_DRIVE_GEOMETRY_EX = 0x000700A0
+IOCTL_DISK_DELETE_DRIVE_LAYOUT = 0x0007C100
 IOCTL_STORAGE_EJECT_MEDIA = 0x002D4808
+IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000
 
 
 class DISK_GEOMETRY_EX(ctypes.Structure):
@@ -77,4 +80,34 @@ def kernel32():
             ctypes.POINTER(ctypes.c_longlong), wintypes.DWORD,
         ]
         _kernel32.SetFilePointerEx.restype = wintypes.BOOL
+        # Mount Manager APIs — see rpi-imager's diskpart_util.cpp pattern:
+        # after lock+dismount+unlock+close, call DeleteVolumeMountPointW
+        # to drop the drive letter from Mount Manager state. Without this,
+        # Windows re-discovers the freshly-written partition table and
+        # auto-mounts via the OLD letter assignment, racing with verify
+        # readback and corrupting hashes (audit Bug #0).
+        _kernel32.DeleteVolumeMountPointW.argtypes = [wintypes.LPCWSTR]
+        _kernel32.DeleteVolumeMountPointW.restype = wintypes.BOOL
+        # Listing volumes (used to discover the new volume GUID Windows
+        # assigns to the freshly-written partition, so we can re-attach
+        # our original drive letter for the customize step).
+        _kernel32.FindFirstVolumeW.argtypes = [
+            wintypes.LPWSTR, wintypes.DWORD,
+        ]
+        _kernel32.FindFirstVolumeW.restype = wintypes.HANDLE
+        _kernel32.FindNextVolumeW.argtypes = [
+            wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD,
+        ]
+        _kernel32.FindNextVolumeW.restype = wintypes.BOOL
+        _kernel32.FindVolumeClose.argtypes = [wintypes.HANDLE]
+        _kernel32.FindVolumeClose.restype = wintypes.BOOL
+        _kernel32.SetVolumeMountPointW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPCWSTR,
+        ]
+        _kernel32.SetVolumeMountPointW.restype = wintypes.BOOL
+        _kernel32.GetVolumePathNamesForVolumeNameW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPWSTR,
+            wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+        ]
+        _kernel32.GetVolumePathNamesForVolumeNameW.restype = wintypes.BOOL
     return _kernel32

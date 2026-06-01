@@ -140,10 +140,13 @@ from astromechos_imager.core.errors import DriveLockError, DrivePermissionError
 from astromechos_imager.platform._win32 import (
     GENERIC_READ, GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, FILE_FLAG_WRITE_THROUGH,
-    FSCTL_LOCK_VOLUME, FSCTL_DISMOUNT_VOLUME, INVALID_HANDLE_VALUE,
-    IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_STORAGE_EJECT_MEDIA,
+    FSCTL_ALLOW_EXTENDED_DASD_IO, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
+    FSCTL_DISMOUNT_VOLUME, INVALID_HANDLE_VALUE,
+    IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+    IOCTL_STORAGE_EJECT_MEDIA, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
     DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, kernel32,
 )
+import struct as _struct
 
 
 def _ctl(handle: int, code: int, in_buf: bytes = b"") -> None:
@@ -176,11 +179,55 @@ def _create_volume_handle(letter: str) -> int:
     return h
 
 
+def _delete_mount_point(letter: str) -> bool:
+    """Remove the drive-letter assignment via Mount Manager.
+
+    Unlike FSCTL_DISMOUNT_VOLUME (which only unmounts the filesystem
+    on a single handle), DeleteVolumeMountPointW removes the drive
+    letter entirely from Mount Manager state — Windows can no longer
+    re-mount the freshly-written partition under the same letter, so
+    it cannot inject ``System Volume Information`` bytes during the
+    verify_readback window (audit Bug #0). Pattern borrowed from
+    rpi-imager's ``diskpart_util.cpp``.
+
+    Returns True on success, False on failure (caller logs).
+    """
+    k = kernel32()
+    path = f"{letter}:\\"
+    ok = bool(k.DeleteVolumeMountPointW(path))
+    if not ok:
+        err = ctypes.get_last_error()
+        _log.info(
+            "  DeleteVolumeMountPointW(%s) failed (Win32 err %d) "
+            "— continuing anyway",
+            path, err,
+        )
+    else:
+        _log.info("  DeleteVolumeMountPointW(%s) OK", path)
+    return ok
+
+
 def lock_and_dismount(letters: tuple[str, ...]) -> list[int]:
-    """For each drive letter, lock + dismount and keep the handle open.
-    Returns the list of handles — caller closes them after raw write completes.
-    Refs design spec §5.2 — retries 3× at 500 ms."""
-    handles: list[int] = []
+    """Bug #0 fix: dismount then DROP the drive-letter assignment.
+
+    Per rpi-imager's ``diskpart_util.cpp`` pattern:
+      1. Open ``\\\\.\\X:`` volume handle.
+      2. FSCTL_LOCK_VOLUME (with retries — Windows 11 may temporarily
+         hold the volume via Explorer / antivirus / search indexer).
+      3. FSCTL_DISMOUNT_VOLUME (flush + invalidate any open handles).
+      4. FSCTL_UNLOCK_VOLUME + CloseHandle — we don't need to hold the
+         lock anymore because step 5 removes the letter entirely.
+      5. ``DeleteVolumeMountPointW("X:\\\\")`` — the KEY step. Removes
+         the drive-letter assignment from Mount Manager. Without this,
+         Windows re-discovers the freshly-written partition table mid-
+         flash via USB PnP polling and auto-mounts under the OLD letter
+         assignment, then writes ``System Volume Information`` to the
+         FAT root — racing with our verify_readback and corrupting hashes.
+
+    Returns an EMPTY list (no handles to manage downstream — the API
+    shape is preserved for backwards compatibility with the
+    PlatformIO Protocol and FlashJob.run's outer cleanup loop).
+    """
     for letter in letters:
         h = _create_volume_handle(letter)
         last_err = None
@@ -193,19 +240,41 @@ def lock_and_dismount(letters: tuple[str, ...]) -> list[int]:
                 time.sleep(0.5)
         else:
             kernel32().CloseHandle(h)
-            for prev in handles:
-                kernel32().CloseHandle(prev)
             raise DriveLockError(
                 f"FSCTL_LOCK_VOLUME failed for {letter}: after 3 retries "
                 f"(close Explorer / antivirus). Last err: {last_err}"
             )
-        _ctl(h, FSCTL_DISMOUNT_VOLUME)
-        handles.append(h)
-    return handles
+        try:
+            _ctl(h, FSCTL_DISMOUNT_VOLUME)
+        finally:
+            # Always release the lock + close handle even if dismount raised
+            # — we're about to delete the mount point anyway.
+            try:
+                _ctl(h, FSCTL_UNLOCK_VOLUME)
+            except OSError:
+                pass
+            kernel32().CloseHandle(h)
+        _delete_mount_point(letter)
+    # Brief settle delay — Windows's Mount Manager + Volume Snapshot Service
+    # both react to the DeleteVolumeMountPointW call. Without a pause the
+    # next CreateFileW on \\.\PHYSICALDRIVEn can land while the volume is in
+    # a transitional "letter just removed, partition still claimed" state,
+    # and subsequent writes to in-partition sectors (offset ≥ FAT32 start)
+    # return ERROR_ACCESS_DENIED. 1 s matches rpi-imager's QThread::msleep
+    # between volumes in diskpart_util.cpp.
+    time.sleep(1.0)
+    return []
 
 
 def open_raw_device(physical_drive_id: int) -> int:
-    r"""Open \\.\PHYSICALDRIVEn for raw read+write. Returns handle or raises."""
+    r"""Open \\.\PHYSICALDRIVEn for raw read+write. Returns handle or raises.
+
+    Enables FSCTL_ALLOW_EXTENDED_DASD_IO on the handle (rpi-imager
+    ``file_operations_windows.cpp:349``) so subsequent writes can land in
+    ANY sector of the physical drive — without this, Windows filters
+    writes to sectors that fall within a recognised partition and returns
+    ERROR_ACCESS_DENIED at the partition's start offset.
+    """
     k = kernel32()
     path = f"\\\\.\\PHYSICALDRIVE{physical_drive_id}"
     h = k.CreateFileW(
@@ -216,7 +285,189 @@ def open_raw_device(physical_drive_id: int) -> int:
     if h == INVALID_HANDLE_VALUE:
         err = ctypes.get_last_error()
         raise OSError(err, f"CreateFileW({path}) failed")
+    try:
+        _ctl(h, FSCTL_ALLOW_EXTENDED_DASD_IO)
+        _log.info("  FSCTL_ALLOW_EXTENDED_DASD_IO OK on %s", path)
+    except OSError as exc:
+        _log.info(
+            "  FSCTL_ALLOW_EXTENDED_DASD_IO failed for %s (%s) — continuing "
+            "(expected on physical-drive handles; IOCTL_DISK_DELETE_DRIVE_LAYOUT "
+            "handles partition-write filtering separately)",
+            path, exc,
+        )
+    # Wipe the in-memory partition layout so Windows stops filtering writes
+    # to "in-partition" sectors. Without this, the partition manager (PARTMGR)
+    # returns ERROR_ACCESS_DENIED at the first write that lands inside the
+    # OLD FAT32 partition's byte range (offset 8 MB on Pi-OS layouts) once
+    # the original volume handle is gone (after DeleteVolumeMountPointW).
+    # The actual on-disk MBR is rewritten anyway by the orchestrator's
+    # deferred-first-block step.
+    try:
+        _ctl(h, IOCTL_DISK_DELETE_DRIVE_LAYOUT)
+        _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT OK on %s", path)
+        _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
+        _log.info("  IOCTL_DISK_UPDATE_PROPERTIES post-wipe OK on %s", path)
+    except OSError as exc:
+        _log.info(
+            "  IOCTL_DISK_DELETE_DRIVE_LAYOUT failed for %s (%s) — continuing",
+            path, exc,
+        )
     return h
+
+
+# ── Mount-point re-attach (post-write, pre-customize) ─────────────────────
+
+
+def _list_volumes() -> list[str]:
+    """Enumerate Windows volume GUIDs via FindFirstVolumeW / FindNextVolumeW."""
+    k = kernel32()
+    buf = ctypes.create_unicode_buffer(260)
+    h = k.FindFirstVolumeW(buf, len(buf))
+    if h == INVALID_HANDLE_VALUE:
+        return []
+    volumes: list[str] = [buf.value]
+    try:
+        while k.FindNextVolumeW(h, buf, len(buf)):
+            volumes.append(buf.value)
+    finally:
+        k.FindVolumeClose(h)
+    return volumes
+
+
+def _volume_has_letter(volume_guid: str) -> bool:
+    """True iff Mount Manager has at least one drive-letter alias for the volume."""
+    k = kernel32()
+    buf = ctypes.create_unicode_buffer(1024)
+    returned = wintypes.DWORD(0)
+    ok = k.GetVolumePathNamesForVolumeNameW(
+        volume_guid, buf, len(buf), ctypes.byref(returned),
+    )
+    if not ok:
+        return False
+    # Mount Manager returns a multistring: drive letters first (e.g. "I:\\"),
+    # mount point folders next. We only care whether ANY single-letter root
+    # alias exists.
+    raw = buf[: returned.value]
+    parts = [p for p in raw.split("\x00") if p]
+    return any(len(p) == 3 and p[1] == ":" and p[2] == "\\" for p in parts)
+
+
+def _volume_disk_extents(volume_guid: str) -> list[int]:
+    r"""Return list of PhysicalDrive numbers backing this volume.
+
+    Uses ``IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`` — returns a struct
+    ``VOLUME_DISK_EXTENTS`` whose layout is:
+
+        struct VOLUME_DISK_EXTENTS {
+            DWORD NumberOfDiskExtents;
+            DWORD _padding;          // alignment to 8-byte
+            DISK_EXTENT Extents[1];  // variable-length array
+        };
+        struct DISK_EXTENT {
+            DWORD DiskNumber;
+            DWORD _padding;          // alignment to 8-byte
+            LONGLONG StartingOffset;
+            LONGLONG ExtentLength;
+        };
+
+    Returns the DiskNumber of each extent. Empty list on any failure
+    (the caller treats this as "can't identify the backing drive" and
+    refuses to attach a letter to the volume).
+    """
+    k = kernel32()
+    path = volume_guid.rstrip("\\")  # CreateFileW dislikes trailing backslash here
+    h = k.CreateFileW(
+        path, 0,  # zero access — query-only, no read/write needed
+        FILE_SHARE_READ | FILE_SHARE_WRITE, None,
+        OPEN_EXISTING, 0, None,
+    )
+    if h == INVALID_HANDLE_VALUE:
+        return []
+    try:
+        out_buf = (ctypes.c_byte * 4096)()
+        returned = wintypes.DWORD(0)
+        ok = k.DeviceIoControl(
+            h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+            None, 0, out_buf, ctypes.sizeof(out_buf),
+            ctypes.byref(returned), None,
+        )
+        if not ok:
+            return []
+        raw = bytes(out_buf)
+        n = _struct.unpack_from("<I", raw, 0)[0]
+        # First DISK_EXTENT starts at offset 8 (after NumberOfDiskExtents + padding)
+        disks: list[int] = []
+        for i in range(n):
+            extent_off = 8 + i * 24  # each DISK_EXTENT is 24 bytes (4+4 pad+8+8)
+            if extent_off + 4 > len(raw):
+                break
+            disks.append(_struct.unpack_from("<I", raw, extent_off)[0])
+        return disks
+    finally:
+        k.CloseHandle(h)
+
+
+def attach_letter_to_unmounted_volume(
+    letter: str,
+    physical_drive_id: int,
+    timeout_s: float = 15.0,
+) -> bool:
+    r"""Assign ``letter`` to the letterless volume backed by ``physical_drive_id``.
+
+    Post-write counterpart of ``_delete_mount_point``: after the raw flash
+    completes (and we ran ``update_disk_properties``), Mount Manager
+    discovers the new partition as a "letterless" volume. We assign our
+    original drive letter back so ``DriveLetterBootPartition(letter)`` can
+    write the AstromechOS bundle through normal Win32 file I/O.
+
+    The ``physical_drive_id`` filter is **safety-critical**: a naive
+    "first letterless volume" scan would happily attach the letter to a
+    Windows Recovery NTFS partition or any other letterless volume on
+    the system — the operator's letter would land on the wrong drive
+    and the customize step's bundle would never reach the SD.
+
+    Polls up to ``timeout_s`` seconds because Mount Manager registers
+    the new volume asynchronously after the partition-table re-read.
+
+    Returns True on success, False if no matching letterless volume
+    showed up within the timeout (caller logs / treats as failure).
+    """
+    k = kernel32()
+    mount_path = f"{letter}:\\"
+    deadline = time.monotonic() + timeout_s
+    seen_letterless: set[str] = set()
+    while time.monotonic() < deadline:
+        for vol in _list_volumes():
+            if _volume_has_letter(vol):
+                continue
+            extents = _volume_disk_extents(vol)
+            if physical_drive_id not in extents:
+                if vol not in seen_letterless:
+                    seen_letterless.add(vol)
+                    _log.info(
+                        "  skipping letterless volume %s (backed by disks %r, "
+                        "not target %d)", vol, extents, physical_drive_id,
+                    )
+                continue
+            # Match — this letterless volume IS on the target physical drive.
+            ok = bool(k.SetVolumeMountPointW(mount_path, vol))
+            if ok:
+                _log.info(
+                    "  SetVolumeMountPointW(%s, %s) OK (disk %d)",
+                    mount_path, vol, physical_drive_id,
+                )
+                return True
+            err = ctypes.get_last_error()
+            _log.info(
+                "  SetVolumeMountPointW(%s, %s) failed (Win32 err %d)",
+                mount_path, vol, err,
+            )
+        time.sleep(0.5)
+    _log.info(
+        "  No letterless volume on disk %d to attach %s to after %.1f s",
+        physical_drive_id, mount_path, timeout_s,
+    )
+    return False
 
 
 def close_handle(h: int) -> None:
@@ -333,3 +584,14 @@ class WindowsPlatformIO:
 
     def eject_media(self, handle):
         eject_media(handle)
+
+    def attach_letter_to_unmounted_volume(
+        self, letter: str, physical_drive_id: int, timeout_s: float = 15.0,
+    ) -> bool:
+        """Re-attach the original drive letter after the Bug #0 dismount dance.
+
+        Safety: filters letterless volumes by physical drive id so we never
+        attach the operator's letter to a Windows Recovery partition or any
+        other letterless system volume.
+        """
+        return attach_letter_to_unmounted_volume(letter, physical_drive_id, timeout_s)

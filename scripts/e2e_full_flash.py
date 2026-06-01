@@ -58,7 +58,7 @@ from astromechos_imager.platform.windows import (
     WindowsPlatformIO, enumerate_removable_drives,
 )
 
-EXPECTED_PHYS_ID = 7
+EXPECTED_PHYS_ID = int(os.environ["E2E_EXPECTED_PHYS_ID"]) if "E2E_EXPECTED_PHYS_ID" in os.environ else None
 IMAGES_DIR = Path(r"J:\R2-D2_Build\images")
 MASTER_IMG = IMAGES_DIR / "AstromechOS_Master_31-05-2026.img.gz"
 SLAVE_IMG = IMAGES_DIR / "AstromechOS_Slave_31-05-2026.img.gz"
@@ -66,6 +66,12 @@ SLAVE_IMG = IMAGES_DIR / "AstromechOS_Slave_31-05-2026.img.gz"
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "e2e_audit"
 OUT.mkdir(parents=True, exist_ok=True)
 REPORT = OUT / "FULL_FLASH_REPORT.md"
+
+#: Resolved mount letter for the target SD (e.g. "I", "K"). Set in main()
+#: from the safety_recheck()'s DiskRef; used by post_inject_cmdline,
+#: wait_for_mount, validate, and the directory dumps in lieu of the
+#: previously-hardcoded "I:/" paths.
+MOUNT_LETTER: str = ""
 
 SYNTH = dict(
     install_user="testuser",
@@ -94,9 +100,14 @@ def safety_recheck() -> DiskRef:
         log(f"**❌ Expected exactly 1 removable drive; got {len(drives)}.** ABORT.")
         raise SystemExit(2)
     sole = drives[0]
-    if sole.physical_drive_id != EXPECTED_PHYS_ID:
+    if EXPECTED_PHYS_ID is not None and sole.physical_drive_id != EXPECTED_PHYS_ID:
         log(f"**❌ Sole removable drive is phys_id={sole.physical_drive_id}, "
-            f"not {EXPECTED_PHYS_ID}.** ABORT.")
+            f"not {EXPECTED_PHYS_ID}** (E2E_EXPECTED_PHYS_ID was set). ABORT.")
+        raise SystemExit(2)
+    if not sole.drive_letters:
+        log(f"**❌ Sole drive phys_id={sole.physical_drive_id} has NO drive "
+            f"letter assigned by Windows — can't read back the SD content "
+            f"via Path(letter:/). ABORT.**")
         raise SystemExit(2)
     log(f"✅ Sole removable drive locked in: phys_id={sole.physical_drive_id} "
         f"({sole.model}, {sole.size_bytes / 1024**3:.1f} GB, letters={sole.drive_letters})")
@@ -154,9 +165,9 @@ def post_inject_cmdline(role: Role) -> bool:
     Returns True if the arg ended up in cmdline.txt (whether by our write
     or already present).
     """
-    cmdline_path = Path("I:/cmdline.txt")
+    cmdline_path = Path(f"{MOUNT_LETTER}:/cmdline.txt")
     if not cmdline_path.exists():
-        log(f"  ⚠️ I:\\cmdline.txt missing for {role.value} — "
+        log(f"  ⚠️ {MOUNT_LETTER}:\\cmdline.txt missing for {role.value} — "
             "post-injection skipped")
         return False
     raw = cmdline_path.read_bytes()
@@ -172,16 +183,17 @@ def post_inject_cmdline(role: Role) -> bool:
 
 
 # ── Mount waiter ───────────────────────────────────────────────────────
-def wait_for_i(max_wait_s: float = 30.0) -> bool:
-    log("  ⏳ waiting for I: to remount after raw write…")
+def wait_for_mount(max_wait_s: float = 30.0) -> bool:
+    root = Path(f"{MOUNT_LETTER}:/")
+    log(f"  ⏳ waiting for {MOUNT_LETTER}: to remount after raw write…")
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_wait_s:
-        if Path("I:/").exists() and any(Path("I:/").iterdir()):
+        if root.exists() and any(root.iterdir()):
             t = time.monotonic() - t0
-            log(f"  ✅ I: available after {t:.1f}s")
+            log(f"  ✅ {MOUNT_LETTER}: available after {t:.1f}s")
             return True
         time.sleep(0.5)
-    log("  ❌ I: did not appear within timeout")
+    log(f"  ❌ {MOUNT_LETTER}: did not appear within timeout")
     return False
 
 
@@ -242,8 +254,8 @@ def flash_cycle(role: Role, image: Path, target: DiskRef, master_pair,
     log(f"  ✅ source SHA256: {result.source_sha256}")
     log("")
 
-    # Wait for I: remount + post-inject cmdline.txt
-    wait_for_i()
+    # Wait for the SD to remount + post-inject cmdline.txt
+    wait_for_mount()
     cmdline_ok = post_inject_cmdline(role)
 
     return {"role": role_label, "ok": True, "elapsed": elapsed,
@@ -263,7 +275,7 @@ def validate(role: Role, hotspot_ssid: str, master_pubkey: str) -> dict:
         log(f"  {glyph} {name}{(' — ' + detail) if detail else ''}")
         findings.append((name, ok, detail))
 
-    root = Path("I:/")
+    root = Path(f"{MOUNT_LETTER}:/")
     # 1. Trigger marker (must be LAST, must exist)
     check("/ASTROMECH_FIRSTBOOT_READY present", (root / "ASTROMECH_FIRSTBOOT_READY").exists())
 
@@ -362,6 +374,10 @@ def main() -> int:
 
     # Defense-in-depth: re-check the drive list before touching anything.
     target = safety_recheck()
+    global MOUNT_LETTER
+    MOUNT_LETTER = target.drive_letters[0]
+    log(f"Mount letter resolved: **{MOUNT_LETTER}:** (phys_id={target.physical_drive_id})")
+    log("")
 
     # Session state: one ed25519 keypair + one hotspot bootstrap, shared
     # across both Master and Slave (the Slave's authorized_keys is built
@@ -417,11 +433,11 @@ def main() -> int:
         log("\n### Master directory dump")
         log("")
         log("```")
-        for p in sorted(Path("I:/").rglob("*")):
+        for p in sorted(Path(f"{MOUNT_LETTER}:/").rglob("*")):
             if "System Volume" in str(p):
                 continue
             try:
-                rel = p.relative_to("I:/")
+                rel = p.relative_to(f"{MOUNT_LETTER}:/")
             except ValueError:
                 continue
             marker = "DIR " if p.is_dir() else "FILE"
@@ -440,14 +456,14 @@ def main() -> int:
         return 1
     s_val = validate(Role.SLAVE, hotspot.ssid, master_pub)
 
-    log("\n### Slave directory dump (final state of I:)")
+    log(f"\n### Slave directory dump (final state of {MOUNT_LETTER}:)")
     log("")
     log("```")
-    for p in sorted(Path("I:/").rglob("*")):
+    for p in sorted(Path(f"{MOUNT_LETTER}:/").rglob("*")):
         if "System Volume" in str(p):
             continue
         try:
-            rel = p.relative_to("I:/")
+            rel = p.relative_to(f"{MOUNT_LETTER}:/")
         except ValueError:
             continue
         marker = "DIR " if p.is_dir() else "FILE"

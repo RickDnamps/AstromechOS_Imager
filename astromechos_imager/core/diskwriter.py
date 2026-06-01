@@ -28,20 +28,46 @@ class DiskWriterProgress:
 class DiskWriteResult:
     bytes_written: int
     source_sha256: str
+    #: First chunk of the source that was deliberately NOT written to the
+    #: device — Windows would otherwise auto-mount the freshly-written FAT32
+    #: partition mid-flash and inject ``System Volume Information`` bytes,
+    #: corrupting the verify_readback comparison (audit Bug #0). Carries the
+    #: bytes of the MBR / boot sector / first 1 MB, hashed in-flight so the
+    #: source SHA256 is unaffected. Callers (orchestrator) write this back
+    #: to offset 0 AFTER verify_readback succeeds, completing the partition
+    #: table the kernel needs to mount the new filesystem.
+    #:
+    #: ``None`` when the source was shorter than one ``CHUNK_SIZE`` and the
+    #: caller-supplied feature was not exercised — degenerate edge case
+    #: not seen in production (Pi OS images are always > 1 MB).
+    first_block_data: bytes | None = None
 
 
 class DiskWriter:
-    """Streams an ImageSource to a RawDevice, computing source SHA256 in flight."""
+    """Streams an ImageSource to a RawDevice, computing source SHA256 in flight.
+
+    Implements the "deferred first block" technique from rpi-imager
+    (``rpi-imager/src/downloadthread.cpp::_writeFile`` first-block branch
+    + ``_verify``): the very first chunk of the source — which contains
+    the MBR with the partition table — is hashed in-flight but NOT
+    written to the device during the streaming phase. The caller writes
+    it back at offset 0 only after ``verify_readback`` succeeds. Until
+    that final write happens, Windows sees an invalid partition table
+    and refuses to auto-mount the new FAT32 partition, eliminating the
+    race that corrupted our readback hashes in the E2E audit (Bug #0).
+    """
     CHUNK_SIZE = 1 << 20
     QUEUE_MAX = 4
 
     def __init__(self, source, raw_device: RawDevice,
                  on_progress: Callable[[DiskWriterProgress], None] | None = None,
-                 cancel_event: threading.Event | None = None):
+                 cancel_event: threading.Event | None = None,
+                 defer_first_block: bool = True):
         self.source = source
         self.dev = raw_device
         self.on_progress = on_progress or (lambda p: None)
         self.cancel = cancel_event or threading.Event()
+        self.defer_first_block = defer_first_block
         self._exc: BaseException | None = None
 
     def run(self) -> DiskWriteResult:
@@ -49,6 +75,12 @@ class DiskWriter:
         hasher = hashlib.sha256()
         producer_total = [0]
         consumer_total = [0]
+        # Deferred first block (see DiskWriteResult.first_block_data).
+        # Consumer fills this with the bytes of the first chunk it
+        # receives, then SKIPS writing them to the device and advances
+        # its offset by len(first_block) so subsequent chunks land at
+        # their correct disk offsets.
+        first_block_box: list[bytes | None] = [None]
 
         def producer():
             try:
@@ -89,6 +121,7 @@ class DiskWriter:
 
         def consumer():
             offset = 0
+            saw_first = False
             try:
                 while True:
                     if self.cancel.is_set():
@@ -96,6 +129,21 @@ class DiskWriter:
                     chunk = q.get()
                     if chunk is None:
                         break
+                    if self.defer_first_block and not saw_first:
+                        # Buffer the first chunk (contains MBR + boot
+                        # sector). DO NOT write to disk — orchestrator
+                        # writes it back after verify_readback succeeds.
+                        first_block_box[0] = bytes(chunk)  # detach from queue buffer
+                        offset += len(chunk)
+                        consumer_total[0] = offset
+                        saw_first = True
+                        self.on_progress(DiskWriterProgress(
+                            phase="decompress_write",
+                            bytes_done=offset,
+                            bytes_total=self.source.uncompressed_size,
+                            throughput_bps=0.0,
+                        ))
+                        continue
                     written = self.dev.write(offset, chunk)
                     if written != len(chunk):
                         raise WriteError(f"short write at {offset}: {written}/{len(chunk)}")
@@ -125,27 +173,47 @@ class DiskWriter:
         return DiskWriteResult(
             bytes_written=consumer_total[0],
             source_sha256=hasher.hexdigest(),
+            first_block_data=first_block_box[0],
         )
 
 
 def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
                      on_progress: Callable[[DiskWriterProgress], None] | None = None,
-                     cancel_event: threading.Event | None = None) -> None:
-    """Read back `length` bytes from offset 0 and compare SHA256.
+                     cancel_event: threading.Event | None = None,
+                     first_block: bytes | None = None) -> None:
+    """Read back `length` bytes and compare SHA256 to ``expected_sha256``.
 
-    Raises HashMismatchError with first_diff_offset on mismatch (block-aligned,
-    not byte-precise — pinpointing requires a second pass we don't bother with).
+    When ``first_block`` is provided, the function:
+      - hashes ``first_block`` into the verify hash via ``hasher.update``;
+      - starts the disk read from offset ``len(first_block)`` (skipping
+        the region the orchestrator has deliberately NOT written yet —
+        the MBR region kept off-disk to prevent Windows auto-mount during
+        the write/verify window — see ``DiskWriter`` docstring and
+        audit Bug #0).
+
+    When ``first_block`` is ``None`` the function reads the full range
+    from offset 0 (legacy behaviour for callers that don't use the
+    deferred-first-block path — image-to-image tests, fakes, callers
+    that disable ``DiskWriter.defer_first_block``).
+
+    Raises ``HashMismatchError`` if the computed hash doesn't match.
     """
     on_progress = on_progress or (lambda p: None)
     cancel = cancel_event or threading.Event()
     hasher = hashlib.sha256()
     chunk_size = 1 << 20
-    offset = 0
-    # Compare block-by-block against the expected hash *streamed* — we don't
-    # have the source bytes anymore, so we only know "the final hash mismatched";
-    # to give an offset we compare each readback chunk against a single-chunk
-    # SHA256 computed by the caller (see DiskWriter.source_sha256 path). Here,
-    # we just hash and compare at the end.
+
+    if first_block is not None:
+        # Hash-inject the deferred first block — its bytes ARE part of
+        # the source image's SHA256, but they are NOT on disk yet.
+        hasher.update(first_block)
+        offset = len(first_block)
+        on_progress(DiskWriterProgress(
+            phase="verify", bytes_done=offset, bytes_total=length, throughput_bps=0.0,
+        ))
+    else:
+        offset = 0
+
     while offset < length:
         if cancel.is_set():
             return

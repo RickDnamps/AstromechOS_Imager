@@ -51,6 +51,18 @@ Rectangle {
         }
     }
 
+    // Cycle 2+: one role is already done (greyed out, non-selectable), so the
+    // remaining role is the ONLY choice — auto-SELECT it (not just highlight)
+    // so the operator just hits NEXT instead of clicking the obvious card.
+    // Re-runs when the card is inserted after the step loads.
+    function _autoSelectProposed() {
+        if (hasOneCard && proposed !== "" && wizardState.currentRole !== proposed)
+            _assignRole(proposed)
+    }
+    Component.onCompleted: _autoSelectProposed()
+    onProposedChanged: _autoSelectProposed()
+    onDriveCountChanged: _autoSelectProposed()
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 28

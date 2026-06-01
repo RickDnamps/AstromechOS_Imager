@@ -184,6 +184,7 @@ Rectangle {
             variant: "primary"
             horizontalPadding: 22
             onClicked: {
+                flashViewModel.resetForNextCycle()   // status -> idle, clear progress/hash
                 wizardState.resetForNextCycle()
                 wizardState.goto(4)   // back to Step 4 Role
             }

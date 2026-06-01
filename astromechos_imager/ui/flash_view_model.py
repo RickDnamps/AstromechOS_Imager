@@ -317,6 +317,45 @@ class FlashViewModel(QObject):
         )
 
     @Slot()
+    def resetForNextCycle(self) -> None:
+        """Reset the per-CYCLE flash UI state so the next card starts fresh.
+
+        Wired to Step 6 'CONTINUE / insert next card' (alongside
+        ``wizardState.resetForNextCycle()``). Without this the status stays
+        ``done`` from the previous card, so Step 5 renders the "already
+        flashed" state for the next card instead of going back to a clean
+        READY-to-write / Validating-source start. The session hotspot SSID is
+        deliberately PRESERVED — it is shared across both cards.
+        """
+        self._status = "idle"
+        self._error_message = ""
+        self._master_progress = 0.0
+        self._slave_progress = 0.0
+        self._master_phase = ""
+        self._slave_phase = ""
+        self._master_throughput_bps = 0.0
+        self._slave_throughput_bps = 0.0
+        self._master_hash_progress = 0.0
+        self._slave_hash_progress = 0.0
+        self._master_hash = ""
+        self._slave_hash = ""
+        self._master_hash_sidecar_match = None
+        self._slave_hash_sidecar_match = None
+        self._user_cancelled = False
+        self._cancel_event.clear()
+        for sig in (
+            self.statusChanged, self.errorMessageChanged,
+            self.masterProgressChanged, self.masterPhaseChanged,
+            self.masterThroughputBpsChanged,
+            self.slaveProgressChanged, self.slavePhaseChanged,
+            self.slaveThroughputBpsChanged,
+            self.masterHashProgressChanged, self.slaveHashProgressChanged,
+            self.masterHashChanged, self.slaveHashChanged,
+            self.masterHashSidecarMatchChanged, self.slaveHashSidecarMatchChanged,
+        ):
+            sig.emit()
+
+    @Slot()
     def endSession(self) -> None:
         """Reset the per-session state so the next deployment starts fresh.
 

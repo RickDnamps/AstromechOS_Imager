@@ -17,12 +17,18 @@ Rectangle {
 
     // Block "NEXT" on any HARD failure — the role marker (or filename
     // pattern, in legacy-image mode) actively says we'd flash the wrong
-    // card OR the validator hit an unrecoverable internal error. Soft
-    // states like "checking" or "unknown_marker_absent" let the operator
-    // proceed: the FlashJob self-validates before writing the trigger.
+    // card OR the validator hit an unrecoverable internal error. Also
+    // block during "checking" so the operator can't skip ahead while
+    // the async role-marker read is still in flight — otherwise a
+    // mismatch verdict that lands after the wizard has already moved
+    // on never gets surfaced (operator-reported regression). The
+    // "unknown_marker_absent" state remains a soft pass because the
+    // FlashJob self-validates before writing the trigger.
     readonly property var hardBlockStates: ["mismatch", "check_failed"]
     readonly property bool masterRoleBlocks: hardBlockStates.indexOf(wizardState.masterImageRoleStatus) >= 0
     readonly property bool slaveRoleBlocks:  hardBlockStates.indexOf(wizardState.slaveImageRoleStatus)  >= 0
+    readonly property bool masterChecking: wizardState.masterImageRoleStatus === "checking"
+    readonly property bool slaveChecking:  wizardState.slaveImageRoleStatus  === "checking"
 
     FileDialog {
         id: masterDialog
@@ -38,14 +44,33 @@ Rectangle {
     }
 
     // ── Reusable role-status badge (lives below the path line) ────────
+    //
+    // The badge reads ``status`` and ``filenameHint`` DIRECTLY from
+    // ``wizardState`` via declarative bindings keyed off ``isMaster``.
+    // The earlier imperative pattern (Loader.onLoaded { item.status = … }
+    // + a Connections block that updated parent.item.status) had a
+    // race: the validator emits ``"checking"`` synchronously and
+    // ``"ok"`` from a daemon thread BEFORE the Loader finishes
+    // instantiating the badge, so the Connections handlers ran with
+    // ``parent.item === null`` and silently dropped both updates. The
+    // operator then saw an EMPTY badge until Back+Next forced a
+    // re-instantiation that picked up the now-current status.
+    // Declarative bindings on wizardState properties dodge the race
+    // entirely — Qt re-evaluates the moment the property changes,
+    // regardless of when the badge was created.
     Component {
         id: roleBadge
         RowLayout {
             id: badgeRow
             spacing: 8
-            property string status: "none"
-            property string roleLabel: "MASTER"
-            property string filenameHint: ""
+            property bool isMaster: true   // set by Loader.onLoaded
+            readonly property string status:
+                isMaster ? wizardState.masterImageRoleStatus
+                         : wizardState.slaveImageRoleStatus
+            readonly property string roleLabel: isMaster ? "MASTER" : "SLAVE"
+            readonly property string filenameHint:
+                isMaster ? wizardState.masterFilenameHint
+                         : wizardState.slaveFilenameHint
 
             // Audit High #26 + Low #43: status dot uses theme tokens
             // (WCAG-compliant on both dark and light cards) and the
@@ -178,20 +203,7 @@ Rectangle {
                     Layout.fillWidth: true
                     active: wizardState.masterImagePath !== ""
                     sourceComponent: roleBadge
-                    onLoaded: {
-                        item.status = wizardState.masterImageRoleStatus
-                        item.roleLabel = "MASTER"
-                        item.filenameHint = wizardState.masterFilenameHint
-                    }
-                    Connections {
-                        target: wizardState
-                        function onMasterImageRoleStatusChanged(s) {
-                            if (parent.item) parent.item.status = s
-                        }
-                        function onMasterFilenameHintChanged(h) {
-                            if (parent.item) parent.item.filenameHint = h
-                        }
-                    }
+                    onLoaded: item.isMaster = true
                 }
             }
         }
@@ -250,20 +262,7 @@ Rectangle {
                     Layout.fillWidth: true
                     active: wizardState.slaveImagePath !== ""
                     sourceComponent: roleBadge
-                    onLoaded: {
-                        item.status = wizardState.slaveImageRoleStatus
-                        item.roleLabel = "SLAVE"
-                        item.filenameHint = wizardState.slaveFilenameHint
-                    }
-                    Connections {
-                        target: wizardState
-                        function onSlaveImageRoleStatusChanged(s) {
-                            if (parent.item) parent.item.status = s
-                        }
-                        function onSlaveFilenameHintChanged(h) {
-                            if (parent.item) parent.item.filenameHint = h
-                        }
-                    }
+                    onLoaded: item.isMaster = false
                 }
             }
         }
@@ -276,10 +275,10 @@ Rectangle {
         spacing: 10
         AstroButton { text: "← BACK"; variant: "secondary"; onClicked: wizardState.back() }
         AstroButton {
-            text: "NEXT →"
+            text: (masterChecking || slaveChecking) ? "VERIFYING…" : "NEXT →"
             variant: "primary"
-            enabled: (!needMaster || (wizardState.masterImagePath !== "" && !masterRoleBlocks))
-                  && (!needSlave  || (wizardState.slaveImagePath  !== "" && !slaveRoleBlocks))
+            enabled: (!needMaster || (wizardState.masterImagePath !== "" && !masterRoleBlocks && !masterChecking))
+                  && (!needSlave  || (wizardState.slaveImagePath  !== "" && !slaveRoleBlocks  && !slaveChecking))
             onClicked: wizardState.next()
         }
     }

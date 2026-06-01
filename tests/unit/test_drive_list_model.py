@@ -39,7 +39,7 @@ class _StubPlatform:
         return list(self.drives)
 
     # Unused by DriveListModel but required by the Protocol shape
-    def lock_and_dismount(self, letters):
+    def lock_and_dismount(self, letters, physical_drive_id=None):
         return []
 
     def open_raw_device(self, phys_id):

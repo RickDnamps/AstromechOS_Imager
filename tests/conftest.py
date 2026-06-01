@@ -108,7 +108,7 @@ def fake_platform_io(tmp_path):
         def enumerate_removable_drives(self):
             return list(self.drives.values())
 
-        def lock_and_dismount(self, letters):
+        def lock_and_dismount(self, letters, physical_drive_id=None):
             self._next_h += 1
             return [self._next_h + i for i, _ in enumerate(letters)]
 

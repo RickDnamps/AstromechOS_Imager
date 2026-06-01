@@ -208,78 +208,90 @@ def _delete_mount_point(letter: str) -> bool:
     return ok
 
 
-def lock_and_dismount(letters: tuple[str, ...]) -> list[int]:
-    """Bug #0 fix: dismount then DROP the drive-letter assignment.
+def _open_volume_handle(open_path: str) -> int:
+    """CreateFileW a volume for FSCTL ops. ``open_path`` is ``\\\\.\\X:`` or a
+    ``\\?\\Volume{guid}`` (trailing backslash already stripped). Returns the
+    handle or INVALID_HANDLE_VALUE."""
+    k = kernel32()
+    return k.CreateFileW(
+        open_path, GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, 0, None,
+    )
 
-    Per rpi-imager's ``diskpart_util.cpp`` pattern:
-      1. Open ``\\\\.\\X:`` volume handle.
-      2. FSCTL_LOCK_VOLUME (with retries — Windows 11 may temporarily
-         hold the volume via Explorer / antivirus / search indexer).
-      3. FSCTL_DISMOUNT_VOLUME (flush + invalidate any open handles).
-      4. FSCTL_UNLOCK_VOLUME + CloseHandle — we don't need to hold the
-         lock anymore because step 5 removes the letter entirely.
-      5. ``DeleteVolumeMountPointW("X:\\\\")`` — the KEY step. Removes
-         the drive-letter assignment from Mount Manager. Without this,
-         Windows re-discovers the freshly-written partition table mid-
-         flash via USB PnP polling and auto-mounts under the OLD letter
-         assignment, then writes ``System Volume Information`` to the
-         FAT root — racing with our verify_readback and corrupting hashes.
 
-    Returns an EMPTY list (no handles to manage downstream — the API
-    shape is preserved for backwards compatibility with the
-    PlatformIO Protocol and FlashJob.run's outer cleanup loop).
+def lock_and_dismount(letters: tuple[str, ...],
+                      physical_drive_id: int | None = None) -> list[int]:
+    r"""Lock + dismount every volume on the target and HOLD the locks open.
+
+    This is the Win32DiskImager / rpi-imager approach. The caller MUST keep
+    the returned handles open for the ENTIRE write + verify + customize, and
+    close them only at the very end (closing a handle releases its
+    FSCTL_LOCK_VOLUME, letting Windows remount the freshly-written card).
+
+    Holding the lock for the whole flash is what:
+      * stops Windows re-mounting the volume mid-write and re-protecting its
+        sectors — the ERROR_ACCESS_DENIED we saw at the FAT32 offset once
+        IOCTL_DISK_DELETE_DRIVE_LAYOUT was removed; and
+      * stops the "Format K:?" / "not accessible" pop-up — a locked volume
+        cannot be mounted by the shell.
+
+    We do NOT clear the partition table (DELETE_DRIVE_LAYOUT) — that forced
+    Windows to see the disk go RAW and fired the pop-up. We do NOT delete
+    the mount point either — the held lock is the whole mechanism, and the
+    letter comes back cleanly when we close the handle at the end.
+
+    Volumes are discovered both by drive letter AND, when
+    ``physical_drive_id`` is given, by GUID for any letterless volume on the
+    target drive (a freshly-inserted or previously-letter-stripped SD), so
+    the lock is held even when Windows assigned no letter.
     """
+    open_paths: list[str] = []
     for letter in letters:
-        h = _create_volume_handle(letter)
+        open_paths.append(f"\\\\.\\{letter}:")
+    if physical_drive_id is not None:
+        try:
+            for vol in _list_volumes():           # \\?\Volume{guid}\
+                if physical_drive_id in _volume_disk_extents(vol):
+                    open_paths.append(vol.rstrip("\\"))
+        except Exception as exc:  # noqa: BLE001
+            _log.info("volume enumeration for lock failed (%s) — "
+                      "locking by letter only", exc)
+
+    held: list[int] = []
+    seen: set[str] = set()
+    for open_path in open_paths:
+        if open_path in seen:
+            continue
+        seen.add(open_path)
+        h = _open_volume_handle(open_path)
+        if h == INVALID_HANDLE_VALUE:
+            continue   # volume vanished / no media — skip
+        locked = False
         last_err = None
-        for attempt in range(3):
+        for _attempt in range(8):     # geometric-ish backoff, ~ rpi-imager
             try:
                 _ctl(h, FSCTL_LOCK_VOLUME)
+                locked = True
                 break
             except OSError as e:
                 last_err = e
-                time.sleep(0.5)
-        else:
+                time.sleep(0.25)
+        if not locked:
+            # Could not get exclusive access (Explorer / AV / indexer).
             kernel32().CloseHandle(h)
+            for prev in held:
+                kernel32().CloseHandle(prev)
             raise DriveLockError(
-                f"FSCTL_LOCK_VOLUME failed for {letter}: after 3 retries "
-                f"(close Explorer / antivirus). Last err: {last_err}"
+                f"FSCTL_LOCK_VOLUME failed for {open_path} after retries "
+                f"(close Explorer / antivirus and retry). Last err: {last_err}"
             )
         try:
             _ctl(h, FSCTL_DISMOUNT_VOLUME)
-        finally:
-            # Always release the lock + close handle even if dismount raised
-            # — we're about to delete the mount point anyway.
-            try:
-                _ctl(h, FSCTL_UNLOCK_VOLUME)
-            except OSError:
-                pass
-            kernel32().CloseHandle(h)
-        _delete_mount_point(letter)
-    # PHASE 0 native shell-quiet: fire SHChangeNotify(MEDIAREMOVED |
-    # DRIVEREMOVED) for each letter via astro_flash.dll, plus
-    # SetThreadErrorMode on this worker thread. SHChangeNotify is the
-    # signal the pure-Python path never sent — it tells Explorer the
-    # drive is gone so the shell stops polling the device and never
-    # renders the "Format K:?" / "K: is not accessible" modal dialog
-    # mid-flash. DeleteVolumeMountPointW (above) removes the letter from
-    # Mount Manager; SHChangeNotify removes it from Explorer's view.
-    # No-op when the DLL isn't built/present (degrades to current behaviour).
-    try:
-        from astromechos_imager.platform import native_shell_quiet
-        if native_shell_quiet.available() and letters:
-            native_shell_quiet.lock_and_quiet(letters)
-    except Exception as exc:  # noqa: BLE001
-        _log.info("native shell-quiet unavailable (%s) — continuing", exc)
-    # Brief settle delay — Windows's Mount Manager + Volume Snapshot Service
-    # both react to the DeleteVolumeMountPointW call. Without a pause the
-    # next CreateFileW on \\.\PHYSICALDRIVEn can land while the volume is in
-    # a transitional "letter just removed, partition still claimed" state,
-    # and subsequent writes to in-partition sectors (offset >= FAT32 start)
-    # return ERROR_ACCESS_DENIED. 1 s matches rpi-imager's QThread::msleep
-    # between volumes in diskpart_util.cpp.
-    time.sleep(1.0)
-    return []
+        except OSError:
+            pass   # best-effort; the held lock already blocks remount
+        held.append(h)   # KEEP open + locked for the whole flash
+        _log.info("  locked + dismounted %s (held)", open_path)
+    return held
 
 
 def open_raw_device(physical_drive_id: int) -> int:
@@ -309,31 +321,26 @@ def open_raw_device(physical_drive_id: int) -> int:
     if h == INVALID_HANDLE_VALUE:
         err = ctypes.get_last_error()
         raise OSError(err, f"CreateFileW({path}) failed")
+    # FSCTL_ALLOW_EXTENDED_DASD_IO lets us write any sector of the raw
+    # device. NOTE: we deliberately do NOT call IOCTL_DISK_DELETE_DRIVE_LAYOUT
+    # / IOCTL_DISK_UPDATE_PROPERTIES here. Those wipe the partition table and
+    # force Windows to re-scan — which makes the shell see the disk go RAW
+    # and fire the "Format K:?" / "K:\\ is not accessible" pop-up. They are
+    # also unnecessary: what authorises raw in-partition writes is the
+    # FSCTL_LOCK_VOLUME that lock_and_dismount now HOLDS for the whole flash
+    # (the Win32DiskImager model). While we own that lock the partition
+    # manager permits writes inside the locked volume AND cannot re-mount it
+    # mid-flash, so no pop-up and no ERROR_ACCESS_DENIED. (The earlier
+    # "write at 8 MB succeeds without the lock" probe was a false negative —
+    # it ran on a card with NO drive letter, where the volume was already
+    # un-mounted; a card whose FAT32 Windows still recognises needs the held
+    # lock.) The deferred-MBR write happens at offset 0 via the orchestrator.
     try:
         _ctl(h, FSCTL_ALLOW_EXTENDED_DASD_IO)
         _log.info("  FSCTL_ALLOW_EXTENDED_DASD_IO OK on %s", path)
     except OSError as exc:
         _log.info(
-            "  FSCTL_ALLOW_EXTENDED_DASD_IO failed for %s (%s) — continuing "
-            "(expected on physical-drive handles; IOCTL_DISK_DELETE_DRIVE_LAYOUT "
-            "handles partition-write filtering separately)",
-            path, exc,
-        )
-    # Wipe the in-memory partition layout so Windows stops filtering writes
-    # to "in-partition" sectors. Without this, the partition manager (PARTMGR)
-    # returns ERROR_ACCESS_DENIED at the first write that lands inside the
-    # OLD FAT32 partition's byte range (offset 8 MB on Pi-OS layouts) once
-    # the original volume handle is gone (after DeleteVolumeMountPointW).
-    # The actual on-disk MBR is rewritten anyway by the orchestrator's
-    # deferred-first-block step.
-    try:
-        _ctl(h, IOCTL_DISK_DELETE_DRIVE_LAYOUT)
-        _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT OK on %s", path)
-        _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
-        _log.info("  IOCTL_DISK_UPDATE_PROPERTIES post-wipe OK on %s", path)
-    except OSError as exc:
-        _log.info(
-            "  IOCTL_DISK_DELETE_DRIVE_LAYOUT failed for %s (%s) — continuing",
+            "  FSCTL_ALLOW_EXTENDED_DASD_IO failed for %s (%s) — continuing",
             path, exc,
         )
     return h
@@ -783,8 +790,8 @@ class WindowsPlatformIO:
     def enumerate_removable_drives(self):
         return list(enumerate_removable_drives())
 
-    def lock_and_dismount(self, letters):
-        return lock_and_dismount(letters)
+    def lock_and_dismount(self, letters, physical_drive_id=None):
+        return lock_and_dismount(letters, physical_drive_id)
 
     def open_raw_device(self, physical_drive_id):
         h = open_raw_device(physical_drive_id)

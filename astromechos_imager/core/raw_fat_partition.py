@@ -124,3 +124,16 @@ class RawFatBootPartition:
                 self._device.close()
             except Exception:
                 pass
+        # We have intentionally torn everything down. pyfatfs keeps GC
+        # finalizers (PyFat.__del__ / fs.base.FS.__del__) that re-run
+        # close() -> our RawSectorFile.flush() at interpreter shutdown; if
+        # self._pfs.close() above raised early the sector file was never
+        # marked closed, so that finalizer would try to write a dirty
+        # sector to the now-closed device handle and print a harmless but
+        # noisy "Exception ignored in __del__ ... SetFilePointerEx failed".
+        # Force the closed marker so the finalizer short-circuits. Safe: the
+        # device is already gone, there is nothing left to flush.
+        try:
+            self._raw_file._closed = True
+        except Exception:
+            pass

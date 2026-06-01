@@ -136,20 +136,28 @@ class FlashJob:
                 native_shell_quiet.quiet_thread()
         except Exception:
             pass
-        # Audit High #15: lock_and_dismount handles MUST be closed. With the
-        # userspace-FAT customize path lock_and_dismount returns [] (it does
-        # the dismount + DeleteVolumeMountPoint + SHChangeNotify and keeps no
-        # handle), but the outer cleanup loop is preserved for the Protocol.
+        # Audit High #15: lock_and_dismount handles MUST be closed. They are
+        # now HELD (locked) for the entire flash — the Win32DiskImager /
+        # rpi-imager model — and the outer `finally` closes them at the very
+        # end (closing releases each FSCTL_LOCK_VOLUME → Windows remounts the
+        # freshly-written card). Holding the lock is what authorises raw
+        # in-partition writes (no ERROR_ACCESS_DENIED) AND keeps the volume
+        # un-mountable (no "Format K:?" pop-up), with no partition-table
+        # surgery.
         locked_handles: list[int] = []
         write_result = None
         try:
             try:
-                # 1. Lock + dismount any drive letters for this physical
-                #    drive (removes the letter from Mount Manager + tells
-                #    Explorer the drive is gone). After this the SD has NO
-                #    drive letter for the whole flash.
+                # 1. Lock + dismount every volume on this physical drive
+                #    (lettered AND letterless, found by GUID) and KEEP the
+                #    locks held for the whole flash. Passing the physical
+                #    drive id lets us lock a volume even when Windows assigned
+                #    no drive letter.
                 locked_handles = list(
-                    self.platform_io.lock_and_dismount(self.target.drive_letters) or []
+                    self.platform_io.lock_and_dismount(
+                        self.target.drive_letters,
+                        self.target.physical_drive_id,
+                    ) or []
                 )
                 # 2. Open ONE raw device handle (NO_BUFFERING | WRITE_THROUGH |
                 #    SEQUENTIAL_SCAN) and use it for write, verify AND the final

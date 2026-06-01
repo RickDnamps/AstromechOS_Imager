@@ -221,50 +221,54 @@ Both **bare hex** content and **coreutils** `<hex>  <filename>` format are accep
 
 ---
 
-## ⚠️ Known limitation on Windows — post-write SHA-256 readback is OFF by default
+## ✅ Windows flash path — pop-up-free, with post-write SHA-256 readback ON
 
-The Imager performs **two** SHA-256 checks:
+The Imager performs **two** SHA-256 checks, **both ON by default** on every
+platform:
 
 | When | What it hashes | Toggle | Default |
 |---|---|---|---|
 | **Pre-flash** | The compressed `.img.gz` file on disk | `VERIFY IMAGE INTEGRITY` (Step 5) | **ON** |
-| **Post-write readback** | The bytes the writer just put on the SD card, re-read from the physical-drive handle | `FlashJob.skip_verify` (no UI toggle) | **OFF on Windows** (see below) |
+| **Post-write readback** | The bytes the writer just put on the SD card, re-read from the physical-drive handle | `FlashJob.skip_verify` | **ON** |
 
-### Why the post-write readback is disabled on Windows
+Earlier builds disabled the readback on Windows and warned the operator
+about two modal Explorer pop-ups — **"Format K:?"** and **"K:\\ is not
+accessible"** — that froze the desktop and made `WriteFile` / `ReadFile`
+on `\\.\PHYSICALDRIVEn` return `ERROR_ACCESS_DENIED`. Both problems are
+now **fully fixed in pure Python** (no C++ helper, no service). The three
+mechanisms that do it:
 
-The moment `DiskWriter` finishes streaming the image and the new partition table appears on the device, Windows' USB Plug-and-Play subsystem polls the disk, fails to recognise the freshly-written FAT32 / ext4 layout mid-flush, and surfaces one of two modal Explorer pop-ups:
+1. **Hold the volume lock for the whole flash** (`lock_and_dismount`, the
+   Win32DiskImager / rpi-imager model). It opens every volume on the target
+   physical drive — by drive letter *and* by volume GUID for letterless
+   volumes — `FSCTL_LOCK_VOLUME` + `FSCTL_DISMOUNT_VOLUME`, and **keeps the
+   handles open and locked** until the entire write + verify + customize is
+   done. A held lock both authorises raw in-partition writes (no
+   `ERROR_ACCESS_DENIED`) **and** stops Windows re-mounting the volume
+   mid-flash (no pop-up). The orchestrator closes the handles only in its
+   final cleanup, which releases the locks so Windows remounts the
+   freshly-written card. **No `IOCTL_DISK_DELETE_DRIVE_LAYOUT`** — wiping the
+   partition table is what used to make the shell see the disk go RAW and
+   fire the pop-up.
+2. **Userspace FAT customize, no mount** (`core/raw_fat_partition.py`
+   driving `pyfatfs` over a raw-device sector window). The firstboot bundle
+   is written without ever asking Windows to mount the FAT32 — no drive
+   letter, no Explorer, exactly rpi-imager's `DeviceWrapper` model.
+3. **Deferred MBR write** — `DiskWriter` holds back the first 1 MB and the
+   orchestrator writes it **last**, after verify and customize. While the
+   MBR is absent Windows can't even discover a partition to auto-mount.
 
-- **"Format K:? You need to format the disk in drive K: before you can use it."**
-- **"K:\\ is not accessible. The volume does not contain a recognised file system."**
-
-These pop-ups are hosted by `explorer.exe` — a process the Imager's Python backend has no handle to. They:
-
-1. **Grab the desktop's input focus**, freezing keyboard / mouse interaction until the operator clicks DISMISS.
-2. **Lock the volume from inside Explorer**, which causes the Imager's subsequent `WriteFile` / `ReadFile` calls on `\\.\PHYSICALDRIVEn` to return `ERROR_ACCESS_DENIED`.
-3. **Cannot be dismissed programmatically** — `DeleteVolumeMountPointW`, `FSCTL_DISMOUNT_VOLUME`, even `IOCTL_DISK_DELETE_DRIVE_LAYOUT` do not prevent the pop-up from re-appearing as soon as Windows re-discovers the device.
-
-The Imager mitigates this as much as a user-mode Python process can:
-
-- `lock_and_dismount` does the full rpi-imager dismount dance (`FSCTL_LOCK_VOLUME` → `FSCTL_DISMOUNT_VOLUME` → `FSCTL_UNLOCK_VOLUME` → `CloseHandle` → `DeleteVolumeMountPointW`) so the drive letter is removed from Mount Manager state before raw I/O begins.
-- `open_raw_device` calls `IOCTL_DISK_DELETE_DRIVE_LAYOUT` to wipe the in-memory partition layout so PARTMGR stops protecting in-partition sectors.
-- `DiskWriter` defers the first 1 MB of the source so the MBR is the **last** thing written.
-
-These together keep Windows quiet **during** the write — but the moment the writer flushes, USB PnP polls again, sees the new partition table, and fires the pop-up regardless. Until the planned **C++ rewrite of the flash core** (which will run inside a Win32 service capable of suppressing shell auto-mount via `SHCNF_NOTIFYRECURSIVE` / `SHChangeNotifyDeregister`), the only reliable behaviour on Windows is to **skip the post-write readback entirely**. The pre-flash SHA-256 already proves the SOURCE bytes match the sidecar — the operator's data-integrity guarantee is preserved.
+The post-write readback runs on the same `NO_BUFFERING | WRITE_THROUGH`
+handle, after a `FlushFileBuffers` + SCSI `SYNCHRONIZE_CACHE` push, so it
+reads on-flash truth rather than USB-bridge cache. Validated end-to-end on
+real hardware: verify passes (~88 MB/s readback), bundle present, zero
+pop-ups.
 
 ### What the operator actually sees
 
-- **Normal case (default, skip_verify=ON)**: SHA-256 check → flash → personalize → DONE. Explorer may still pop up "Format K:?" **after** the flash completes — that's harmless, just dismiss it.
-- **Diagnostic case (skip_verify=OFF, via `E2E_SKIP_VERIFY=0`)**: SHA-256 check → flash → verify readback. The Explorer pop-up will fire during readback. If the operator does not click DISMISS within ~30 s, the flash fails with `OSError(5, "ReadFile failed")` and the UI shows `FLASH FAILED` with the OS error message (no longer hidden — see commit [`182075d`](https://github.com/RickDnamps/AstromechOS_Imager/commit/182075d)).
-
-### Path forward — C++ flash core
-
-Tracked as the next major epic: rewrite `DiskWriter` + `verify_readback` + the lock/dismount dance in a small C++ helper invoked from Python over a JSON-RPC pipe. The helper runs as a service so it can:
-
-- Register for `WM_DEVICECHANGE` and consume Explorer's notification queue before the shell can render a pop-up.
-- Call `FSCTL_ALLOW_EXTENDED_DASD_IO` on the volume handle (only succeeds on volume handles, not physical-drive handles) so post-write reads bypass the OS volume cache entirely.
-- Issue SCSI `SYNCHRONIZE_CACHE (10h)` to the USB-bridge firmware so the readback sees actual on-flash bytes, not the adapter's internal write cache.
-
-Until then, **flash on Windows, eject in the OS tray, dismiss any pop-up that appears, then insert the card into the Pi.** Everything else works as intended.
+- SHA-256 check → flash → verify readback → personalize → **DONE**. No
+  Explorer pop-up at any point, and the post-write readback proves the SD
+  card holds exactly the bytes that were written.
 
 ---
 

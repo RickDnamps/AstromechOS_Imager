@@ -859,6 +859,29 @@ def _query_sector_size(h: int) -> int:
     return int(out.BytesPerSector)
 
 
+def _query_disk_size(h: int) -> int:
+    """Total disk size in bytes, queried from an OPEN physical-drive handle.
+
+    Uses IOCTL_DISK_GET_DRIVE_GEOMETRY_EX (DISK_GEOMETRY_EX.DiskSize). This
+    deliberately avoids re-running the WMI enumeration: WMI is a COM call,
+    and the flash runs on a Qt worker thread that has NOT initialised COM,
+    so a WMI query there raises ``pywintypes.com_error`` (observed:
+    -2147221020 'Incorrect syntax'). Reading the geometry from the handle we
+    just opened needs no COM and works on any thread. Returns 0 on failure
+    (callers treat size as advisory — the write is bounded by the source).
+    """
+    out = DISK_GEOMETRY_EX()
+    written = wintypes.DWORD(0)
+    ok = kernel32().DeviceIoControl(
+        h, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, None, 0,
+        ctypes.byref(out), ctypes.sizeof(out),
+        ctypes.byref(written), None,
+    )
+    if not ok:
+        return 0
+    return int(out.DiskSize)
+
+
 # ── WindowsPlatformIO facade ───────────────────────────────────────────────
 
 class WindowsPlatformIO:
@@ -870,12 +893,16 @@ class WindowsPlatformIO:
 
     def open_raw_device(self, physical_drive_id):
         h = open_raw_device(physical_drive_id)
-        # Re-query size from WMI to avoid a second sector_size syscall during write loop
-        size = 0
-        for d in enumerate_removable_drives():
-            if d.physical_drive_id == physical_drive_id:
-                size = d.size_bytes
-                break
+        # Get the disk size from the handle we just opened (IOCTL, no COM).
+        # The previous code re-ran the WMI enumeration here, but this method
+        # runs on the Qt FLASH WORKER THREAD, which has not initialised COM —
+        # so the WMI query raised pywintypes.com_error ('Incorrect syntax')
+        # and aborted every real flash (invisible to direct-call test
+        # harnesses that run on the COM-initialised main thread). IOCTL on
+        # the open handle is thread-safe and COM-free.
+        size = _query_disk_size(h)
+        _log.info("open_raw_device: phys_id=%s handle=0x%X size=%d",
+                  physical_drive_id, h, size)
         return _Win32RawDevice(h, size)
 
     def open_plain_raw_device(self, physical_drive_id):

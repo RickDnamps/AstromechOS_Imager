@@ -581,7 +581,27 @@ def attach_letter_to_unmounted_volume(
     return False
 
 
-def close_handle(h: int) -> None:
+def close_handle(h: int | None) -> None:
+    """Idempotent, recycle-safe CloseHandle.
+
+    No-ops on a ``None`` / ``INVALID_HANDLE_VALUE`` / ``0`` handle so a
+    double-close can NEVER reach Win32. This matters for two reasons:
+
+      1. Calling ``CloseHandle`` twice on the same value fails with
+         ERROR_INVALID_HANDLE (errno 6) — the noisy double-close.
+      2. Far worse: Windows recycles handle VALUES. Between the first and
+         second close, an unrelated ``CreateFileW`` may have been handed the
+         same numeric value; the second ``CloseHandle`` would then close a
+         LIVE handle belonging to another object, so a later legitimate
+         operation on it fails with ERROR_ACCESS_DENIED (errno 5) on a
+         handle the caller still believes is valid.
+
+    Owners (``_Win32RawDevice`` / ``_PlainRawDevice`` / the locked volume
+    handles) null their stored handle after the first close so the value is
+    never passed here twice, and this guard is the belt-and-suspenders.
+    """
+    if h is None or h == INVALID_HANDLE_VALUE or h == 0:
+        return
     kernel32().CloseHandle(h)
 
 
@@ -662,11 +682,18 @@ class _Win32RawDevice:
             self._sector_size = _query_sector_size(self._h)
         return self._sector_size
 
+    def _require_open(self) -> int:
+        h = self._h
+        if h is None:
+            raise OSError(6, "operation on a closed raw device handle")
+        return h
+
     def write(self, offset: int, data: bytes) -> int:
-        _seek(self._h, offset)
+        h = self._require_open()
+        _seek(h, offset)
         written = wintypes.DWORD(0)
         ok = kernel32().WriteFile(
-            self._h, ctypes.c_char_p(data), len(data),
+            h, ctypes.c_char_p(data), len(data),
             ctypes.byref(written), None,
         )
         if not ok:
@@ -675,7 +702,8 @@ class _Win32RawDevice:
         return written.value
 
     def read(self, offset: int, length: int) -> bytes:
-        _seek(self._h, offset)
+        h = self._require_open()
+        _seek(h, offset)
         # NO_BUFFERING requires a sector/page-aligned destination buffer.
         # A misaligned buffer can return stale bridge-cached bytes right
         # after a multi-GB write (the deterministic verify_readback bug).
@@ -686,17 +714,25 @@ class _Win32RawDevice:
         aligned = (ctypes.addressof(backing) + align - 1) & ~(align - 1)
         buf = (ctypes.c_char * length).from_address(aligned)
         got = wintypes.DWORD(0)
-        ok = kernel32().ReadFile(self._h, buf, length, ctypes.byref(got), None)
+        ok = kernel32().ReadFile(h, buf, length, ctypes.byref(got), None)
         if not ok:
             err = ctypes.get_last_error()
             raise OSError(err, f"ReadFile failed at offset {offset}")
         return bytes(buf.raw[: got.value])
 
     def flush(self) -> None:
-        kernel32().FlushFileBuffers(self._h)
+        h = self._h
+        if h is None:
+            return  # already closed — nothing to flush, never raise
+        kernel32().FlushFileBuffers(h)
 
     def close(self) -> None:
-        close_handle(self._h)
+        # Idempotent: swap-then-close so the handle value is passed to
+        # close_handle exactly once. A second close() (e.g. an orchestrator
+        # finally racing a GC finalizer) sees None and no-ops — no
+        # ERROR_INVALID_HANDLE, no risk of closing a recycled live handle.
+        h, self._h = self._h, None
+        close_handle(h)
 
 
 class _PlainRawDevice:
@@ -729,21 +765,29 @@ class _PlainRawDevice:
             raise OSError(err, f"CreateFileW({path}) [plain] failed")
         self._h = h
 
+    def _require_open(self) -> int:
+        h = self._h
+        if h is None:
+            raise OSError(6, "operation on a closed plain raw device handle")
+        return h
+
     def read(self, offset: int, length: int) -> bytes:
-        _seek(self._h, offset)
+        h = self._require_open()
+        _seek(h, offset)
         buf = ctypes.create_string_buffer(length)
         got = wintypes.DWORD(0)
-        ok = kernel32().ReadFile(self._h, buf, length, ctypes.byref(got), None)
+        ok = kernel32().ReadFile(h, buf, length, ctypes.byref(got), None)
         if not ok:
             err = ctypes.get_last_error()
             raise OSError(err, f"ReadFile [plain] failed at offset {offset}")
         return bytes(buf.raw[: got.value])
 
     def write(self, offset: int, data: bytes) -> int:
-        _seek(self._h, offset)
+        h = self._require_open()
+        _seek(h, offset)
         written = wintypes.DWORD(0)
         ok = kernel32().WriteFile(
-            self._h, ctypes.c_char_p(data), len(data),
+            h, ctypes.c_char_p(data), len(data),
             ctypes.byref(written), None,
         )
         if not ok:
@@ -752,10 +796,18 @@ class _PlainRawDevice:
         return int(written.value)
 
     def flush(self) -> None:
-        kernel32().FlushFileBuffers(self._h)
+        h = self._h
+        if h is None:
+            return  # already closed — nothing to flush, never raise
+        kernel32().FlushFileBuffers(h)
 
     def close(self) -> None:
-        close_handle(self._h)
+        # Idempotent: see _Win32RawDevice.close. The userspace-FAT customize
+        # closes this via RawFatBootPartition.close, which pyfatfs's GC
+        # finalizers can re-enter — so the swap-then-close guard is what
+        # keeps that second pass from re-closing a recycled handle value.
+        h, self._h = self._h, None
+        close_handle(h)
 
 
 def open_plain_raw_device(physical_drive_id: int) -> _PlainRawDevice:

@@ -1,4 +1,4 @@
-"""RawFatBootPartition — userspace FAT32 customize over a raw device.
+r"""RawFatBootPartition — userspace FAT32 customize over a raw device.
 
 Satisfies the ``core.platform_io.BootPartition`` Protocol (write_bytes /
 read_bytes / mkdir / exists / close) by driving ``pyfatfs`` directly on a
@@ -92,6 +92,7 @@ class RawFatBootPartition:
 
         self._pfs = pfs
         self._raw_file = raw_file
+        self._closed = False
 
     # ── BootPartition Protocol ────────────────────────────────────────
     def write_bytes(self, path: str, data: bytes) -> None:
@@ -107,6 +108,15 @@ class RawFatBootPartition:
         return self._pfs.exists(path)  # type: ignore[no-any-return]
 
     def close(self) -> None:
+        # Strictly idempotent: a second close() (orchestrator finally racing
+        # a pyfatfs GC finalizer, a context manager, a re-entrant cleanup)
+        # returns immediately without touching the FAT or any handle. The
+        # underlying _Win32/_PlainRawDevice.close is also idempotent, but
+        # short-circuiting here avoids re-running PyFatFS.close() (which
+        # would re-flush the FAT to an already-freed device handle).
+        if self._closed:
+            return
+        self._closed = True
         # PyFatFS.close() flushes the FAT + marks the volume clean, then
         # closes our RawSectorFile (which flushes its dirty sectors to the
         # device). When we opened the device ourselves (open_on_drive),

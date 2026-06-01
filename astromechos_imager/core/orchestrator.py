@@ -238,6 +238,13 @@ class FlashJob:
                         dev.flush()
                         self._sync_cache(dev)
                 finally:
+                    # Safe to close now: DiskWriter.run() unconditionally
+                    # joins its producer + consumer threads before it
+                    # returns OR raises (t_p.join(); t_c.join() precede both
+                    # paths), and verify_readback runs synchronously on this
+                    # thread — so no background reader/writer can still touch
+                    # this handle. close() is idempotent (swap-then-close),
+                    # so a redundant close on an error path is harmless.
                     dev.close()
                 return FlashJobResult(ok=True,
                                       bytes_written=write_result.bytes_written,
@@ -287,8 +294,24 @@ class FlashJob:
                     error=wrapped,
                 )
         finally:
-            # Always release the volume locks — failure path included.
-            for h in locked_handles:
+            # STICKY LOCK release — this is the ONLY place the held
+            # FSCTL_LOCK_VOLUME handles are closed, and it runs strictly
+            # LAST: after the inner `finally` closed the raw `dev` handle and
+            # after write + verify + customize + deferred-MBR all completed
+            # (or after a failure). Closing a locked volume handle releases
+            # its lock and lets Windows remount the freshly-written card, so
+            # releasing any earlier would let PARTMGR reprotect the partition
+            # mid-flash and deny in-partition writes (ERROR_ACCESS_DENIED).
+            #
+            # Dedupe on the numeric value and drop each handle as we go so a
+            # value can never be passed to CloseHandle twice (recycle-safe);
+            # close_handle is itself idempotent as belt-and-suspenders.
+            seen_handles: set[int] = set()
+            while locked_handles:
+                h = locked_handles.pop()
+                if h in seen_handles:
+                    continue
+                seen_handles.add(h)
                 try:
                     self.platform_io.close_handle(h)
                 except Exception:

@@ -191,6 +191,15 @@ class FlashJob:
                         dev.flush()
                     # 4. Rootfs personalization + boot partition customize
                     if not self.skip_customize and not self.cancel_event.is_set():
+                        # Surface the customization phase to the UI — otherwise the
+                        # progress bar sits at 100% for 2-5 s while FAT32 writes happen,
+                        # which operators perceive as a freeze.
+                        self.on_progress(DiskWriterProgress(
+                            phase="customizing",
+                            bytes_done=0,
+                            bytes_total=0,
+                            throughput_bps=0.0,
+                        ))
                         self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
                         # Take the MBR from the deferred-write buffer when
                         # available (no disk round-trip); fall back to a

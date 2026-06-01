@@ -289,6 +289,30 @@ fixed with a blocking end-of-stream sentinel (never drops a queued chunk).
   **DONE**. No Explorer pop-up at any point, and the post-write readback
   proves the SD card holds exactly the bytes that were written.
 
+### Cancel / failure auto-recovery — card restored to clean exFAT
+
+A flash that is **cancelled** or **fails** mid-write leaves the card RAW:
+`open_raw_device` wiped the partition layout up front
+(`IOCTL_DISK_DELETE_DRIVE_LAYOUT`) and the real MBR is only written back on
+success, so Windows would otherwise see no filesystem and nag *"Format
+K:?"* — making the operator think the card is bricked.
+
+To avoid that, `FlashJob.run` tracks whether a valid MBR was written. If the
+device was opened but the flash did **not** complete (cancel or error), the
+cleanup path best-effort **quick-formats the target to a clean exFAT
+volume** (`diskpart`: `clean` → `create partition primary` →
+`format fs=exfat quick` → `assign`). The operator gets a normal, recognised
+drive back instead of a "broken" one. It is:
+
+- **strictly scoped** to the target `physical_drive_id` (the disk just
+  flashed) — never another drive;
+- **best-effort** — logs and returns on any error, never raises or hangs, so
+  it can't mask the real result or block the cancel;
+- **skipped on success** (the freshly-written image is never touched);
+- **exFAT**, so it works on any card size (no 32 GB FAT32 limit).
+
+The UI shows a brief `restoring card…` phase while it runs.
+
 ---
 
 ## 📦 Distribution & Releases

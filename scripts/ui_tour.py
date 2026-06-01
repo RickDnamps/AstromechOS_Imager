@@ -15,7 +15,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QObject, QMetaObject
 
 # Make the package importable when run as a loose script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -53,14 +53,16 @@ def main() -> int:
     # out for the step-1 capture instead of fighting it. For 2-6 we drive
     # navigation explicitly via WizardState.goto(). We capture each step
     # in dark mode, then re-walk in light mode.
+    # 4th element = optional action to run after navigating, before capture.
     base_plan = [
-        ("00-splash",      None,   200),   # captured during the splash
-        ("01-mode",        None,  1800),   # let the splash timer fire
-        ("02-images",         2,   700),
-        ("03-storage",        3,   700),
-        ("04-customize",      4,   700),
-        ("05-flash",          5,   700),
-        ("06-done",           6,   700),
+        ("00-splash",        None,   200, None),   # captured during the splash
+        ("01-mode",          None,  1800, None),   # let the splash timer fire
+        ("02-images",           2,   700, None),
+        ("03-storage",          3,   700, None),
+        ("04-customize",        4,   700, None),
+        ("05-flash",            5,   700, None),
+        ("05b-write-confirm",   5,   700, "open_confirm"),  # ⚡ WRITE warning dialog
+        ("06-done",             6,   700, None),
     ]
     themes = ["dark", "light"]
 
@@ -70,25 +72,41 @@ def main() -> int:
 
     plan = []
     for theme_name in themes:
-        for name, step, settle in base_plan:
-            plan.append((f"{theme_name}/{name}", theme_name, step, settle))
+        for name, step, settle, action in base_plan:
+            plan.append((f"{theme_name}/{name}", theme_name, step, settle, action))
 
     idx = {"i": 0}
+
+    def _confirm_dialog():
+        return window.findChild(QObject, "confirmDialog")
 
     def step():
         i = idx["i"]
         if i >= len(plan):
             app.quit()
             return
-        name, theme_name, target_step, settle_ms = plan[i]
+        name, theme_name, target_step, settle_ms, action = plan[i]
         if theme_mgr is not None:
             theme_mgr.setMode(theme_name)
+        # Close any lingering modal confirm dialog from a previous capture
+        # before navigating (it belongs to the Step 5 page being left).
+        dlg = _confirm_dialog()
+        if dlg is not None:
+            QMetaObject.invokeMethod(dlg, "close")
         # Reset wizard back to step 1 between themes so the splash logic
         # is consistent.
         if name.endswith("00-splash") and i > 0:
             state.goto(1)   # ensure fresh navigation surface
         if target_step is not None:
             state.goto(target_step)
+        # Optional action: pop the ⚡ WRITE confirmation dialog open so we can
+        # capture the "ERASE TARGET DRIVE(S)?" warning the operator sees.
+        if action == "open_confirm":
+            def _open():
+                d = _confirm_dialog()
+                if d is not None:
+                    QMetaObject.invokeMethod(d, "open")
+            QTimer.singleShot(200, _open)
         QTimer.singleShot(settle_ms, lambda: capture(name))
 
     def capture(name: str):

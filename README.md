@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3127/)
 [![PySide6 6.7](https://img.shields.io/badge/PySide6-6.7-41CD52.svg?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython-6/)
 [![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?logo=windows&logoColor=white)](#-distribution--releases)
-[![Tests: 437 passing](https://img.shields.io/badge/tests-437%20passing-5ec07a.svg)](#)
+[![Tests: 563 passing](https://img.shields.io/badge/tests-563%20passing-5ec07a.svg)](#)
 [![Bundle: 132 MB](https://img.shields.io/badge/bundle-132%20MB-5e9bd6.svg)](#-distribution--releases)
 [![Installer: 36 MB](https://img.shields.io/badge/installer-36%20MB-5e9bd6.svg)](#-distribution--releases)
 
@@ -22,43 +22,47 @@ The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron 
 
 The startup splash auto-advances to Step 1 after ~1.5 s. The dark navy chrome stays constant across both themes for visual continuity with the rest of the AstromechOS toolchain.
 
-![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=10)
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=11)
 
 ### Step 1 — Selection
 
 The operator picks **what** to flash: both cards (recommended), only the Master, or only the Slave. R2 line-art glyphs reinforce the choice.
 
-![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection_light.png?v=10)
+![Step 1 — Selection](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_selection_light.png?v=11)
 
 ### Step 2 — Target Drives
 
 Removable drives are enumerated live (system disk is hidden for safety). Each row carries `MASTER` and `SLAVE` assignment buttons that lock the chosen physical device to the chosen role.
 
-![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=10)
+![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=11)
 
 ### Step 3 — Security Validation
 
 Once images are selected, the wizard runs the FAT32 role-marker validation (Strategy D) and the filename pattern check in the background. Each image row gets a colored badge: green = certified, amber = legacy without marker but plausible by filename, red = hard mismatch → `NEXT` disabled.
 
-![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=10)
+![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=11)
 
 ### Step 4 — Customize
 
 Three groups: the **Linux account** (UID-1000 username + password for SSH), the **private robot hotspot** (wlan0 link between Master and Slave), and the optional **home Wi-Fi** (wlan1, also configurable later from the robot's web UI). All fields use a non-blocking fallback — leave any of them blank to ship the safe defaults (`astromech` / `astropass`), or type custom values. A prominent security warning under the Login section reminds the operator that there is no recovery mechanism if a custom password is lost.
 
-![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=10)
+![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=11)
 
 ### Step 5 — Confirm & Flash
 
 Final summary with optional SHA-256 integrity toggle. The destructive `⚡ WRITE` button only goes live after the confirmation dialog and (if enabled) a clean checksum verification. The flashing phase shows live progress per role.
 
-![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=10)
+![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=11)
+
+Clicking `⚡ WRITE` does **not** flash immediately — it raises a modal **"ERASE TARGET DRIVE(S)?"** warning with a red 2 px destructive border. The operator must confirm the drive letters match the intended cards and click `⚡ ERASE & WRITE`; `CANCEL` backs out. This is the last guard before the irreversible write.
+
+![Step 5 — WRITE confirmation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_write_confirm_light.png?v=11)
 
 ### Step 6 — Complete
 
 Once both cards have been flashed, verified and personalized, the wizard surfaces the next-step recap and a `FLASH ANOTHER` shortcut.
 
-![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=10)
+![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=11)
 
 > 🗂️ **For maintainers** — production screenshots are captured locally to `J:\R2-D2_Build\AstromechOS_Screenshots\Screenshots_Imager\` and mirrored to the [`AstromechOS_Screenshots`](https://github.com/RickDnamps/AstromechOS_Screenshots) sibling repository so that this README always renders the latest UI from GitHub raw-content URLs.
 
@@ -221,54 +225,69 @@ Both **bare hex** content and **coreutils** `<hex>  <filename>` format are accep
 
 ---
 
-## ✅ Windows flash path — pop-up-free, with post-write SHA-256 readback ON
+## ✅ Windows flash path — elevated, pop-up-free, with post-write SHA-256 readback ON
 
-The Imager performs **two** SHA-256 checks, **both ON by default** on every
-platform:
+### Runs as Administrator (required)
+
+Writing raw sectors to a physical drive is a privileged operation on
+Windows. The app ships with `requestedExecutionLevel = requireAdministrator`
+(set via PyInstaller `uac_admin=True` in `astromechos_imager.spec`), so
+**Windows shows the UAC prompt at launch and the process runs elevated** —
+just accept it. Without elevation, `CreateFileW(\\.\PHYSICALDRIVEn, …)`,
+`DeleteVolumeMountPointW` and the `FSCTL_*` calls all return
+`ERROR_ACCESS_DENIED` (errno 5) and nothing is written. The Inno Setup
+installer also launches the app elevated; a bare `dist\…\AstromechOS
+Imager.exe` double-click now self-elevates the same way.
+
+> ⚠️ If you ever see `errno 5 / ACCESS_DENIED` at the flash step, the
+> process is not elevated — relaunch and accept the UAC prompt (or
+> right-click → *Run as administrator*).
+
+### Two SHA-256 checks, both ON by default
 
 | When | What it hashes | Toggle | Default |
 |---|---|---|---|
-| **Pre-flash** | The compressed `.img.gz` file on disk | `VERIFY IMAGE INTEGRITY` (Step 5) | **ON** |
-| **Post-write readback** | The bytes the writer just put on the SD card, re-read from the physical-drive handle | `FlashJob.skip_verify` | **ON** |
+| **Pre-flash** | The compressed `.img.gz` / `.img.xz` file on disk | `VERIFY IMAGE INTEGRITY` (Step 5) | **ON** |
+| **Post-write readback** | The bytes just written to the SD, re-read from the physical-drive handle | `FlashJob.skip_verify` | **ON** |
 
-Earlier builds disabled the readback on Windows and warned the operator
-about two modal Explorer pop-ups — **"Format K:?"** and **"K:\\ is not
-accessible"** — that froze the desktop and made `WriteFile` / `ReadFile`
-on `\\.\PHYSICALDRIVEn` return `ERROR_ACCESS_DENIED`. Both problems are
-now **fully fixed in pure Python** (no C++ helper, no service). The three
-mechanisms that do it:
+Earlier builds disabled the readback on Windows and warned about two modal
+Explorer pop-ups — **"Format K:?"** and **"K:\\ is not accessible"**. Both
+the pop-ups *and* the post-write checksum mismatch are now fixed in pure
+Python (no C++ helper, no service). The mechanisms, in flash order:
 
-1. **Hold the volume lock for the whole flash** (`lock_and_dismount`, the
-   Win32DiskImager / rpi-imager model). It opens every volume on the target
-   physical drive — by drive letter *and* by volume GUID for letterless
-   volumes — `FSCTL_LOCK_VOLUME` + `FSCTL_DISMOUNT_VOLUME`, and **keeps the
-   handles open and locked** until the entire write + verify + customize is
-   done. A held lock both authorises raw in-partition writes (no
-   `ERROR_ACCESS_DENIED`) **and** stops Windows re-mounting the volume
-   mid-flash (no pop-up). The orchestrator closes the handles only in its
-   final cleanup, which releases the locks so Windows remounts the
-   freshly-written card. **No `IOCTL_DISK_DELETE_DRIVE_LAYOUT`** — wiping the
-   partition table is what used to make the shell see the disk go RAW and
-   fire the pop-up.
-2. **Userspace FAT customize, no mount** (`core/raw_fat_partition.py`
-   driving `pyfatfs` over a raw-device sector window). The firstboot bundle
-   is written without ever asking Windows to mount the FAT32 — no drive
-   letter, no Explorer, exactly rpi-imager's `DeviceWrapper` model.
-3. **Deferred MBR write** — `DiskWriter` holds back the first 1 MB and the
-   orchestrator writes it **last**, after verify and customize. While the
-   MBR is absent Windows can't even discover a partition to auto-mount.
+1. **Dismount + drop the drive letter** (`lock_and_dismount`). Every volume
+   on the target physical drive — found by drive letter *and* by volume GUID
+   for letterless volumes — is `FSCTL_LOCK_VOLUME`'d, `FSCTL_DISMOUNT_VOLUME`'d,
+   then unlocked and closed; the drive letter is removed from Mount Manager
+   with `DeleteVolumeMountPointW`. This runs **before** the physical drive is
+   opened. (We do *not* hold the lock for the flash — that path denied
+   in-partition writes on real hardware.)
+2. **Wipe the in-memory partition layout** (`IOCTL_DISK_DELETE_DRIVE_LAYOUT`
+   + `IOCTL_DISK_UPDATE_PROPERTIES` in `open_raw_device`). With no recognised
+   partition, the Partition Manager stops policing "in-partition" writes, so
+   the FAT32-offset write that otherwise returns `ERROR_ACCESS_DENIED`
+   succeeds. The real MBR is restored at the very end (step 4).
+3. **Userspace FAT customize, no mount** (`core/raw_fat_partition.py` driving
+   `pyfatfs` over a raw-device sector window). The firstboot bundle is
+   written without ever asking Windows to mount the FAT32 — no drive letter,
+   no Explorer, exactly rpi-imager's `DeviceWrapper` model.
+4. **Deferred MBR write** — `DiskWriter` holds back the first 1 MB and the
+   orchestrator writes it **last**, after verify and customize. While the MBR
+   is absent Windows can't discover a partition to auto-mount, so no pop-up
+   fires during the write/verify/customize window. `SHChangeNotify` tells
+   Explorer the drive is gone for good measure.
 
 The post-write readback runs on the same `NO_BUFFERING | WRITE_THROUGH`
-handle, after a `FlushFileBuffers` + SCSI `SYNCHRONIZE_CACHE` push, so it
-reads on-flash truth rather than USB-bridge cache. Validated end-to-end on
-real hardware: verify passes (~88 MB/s readback), bundle present, zero
-pop-ups.
+handle, after `FlushFileBuffers` + SCSI `SYNCHRONIZE_CACHE`, so it reads
+on-flash truth rather than USB-bridge cache. The earlier deterministic
+readback mismatch was a producer/consumer chunk-drop race in `DiskWriter`,
+fixed with a blocking end-of-stream sentinel (never drops a queued chunk).
 
 ### What the operator actually sees
 
-- SHA-256 check → flash → verify readback → personalize → **DONE**. No
-  Explorer pop-up at any point, and the post-write readback proves the SD
-  card holds exactly the bytes that were written.
+- Accept UAC → SHA-256 check → flash → verify readback → personalize →
+  **DONE**. No Explorer pop-up at any point, and the post-write readback
+  proves the SD card holds exactly the bytes that were written.
 
 ---
 

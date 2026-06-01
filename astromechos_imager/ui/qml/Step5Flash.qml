@@ -299,6 +299,7 @@ Rectangle {
     // divider + 14 vpad; 2px destructive border (colorBorderError).
     Dialog {
         id: confirmDialog
+        objectName: "confirmDialog"   // found by scripts/ui_tour.py for the screenshot
         modal: true
         anchors.centerIn: parent
         width: 520

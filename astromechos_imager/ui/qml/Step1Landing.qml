@@ -28,7 +28,10 @@ Rectangle {
             source: splashImageUrl
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: 460
-            Layout.preferredHeight: 345
+            Layout.preferredHeight: 262   // 460 / 1.754 (clipped artwork ratio)
+            // Crop the pure-black top/bottom bars baked into the PNG so the
+            // landing shows the clean artwork (rows 71..527 = 800×456).
+            sourceClipRect: Qt.rect(0, 71, 800, 456)
             fillMode: Image.PreserveAspectFit
             smooth: true
             asynchronous: true

@@ -7,11 +7,14 @@ import "Theme.js" as Theme
 ApplicationWindow {
     id: root
     // Old-school splash: while the splash shows (displayedStepIdx === -1)
-    // the window is sized to the 800×600 (4:3) splash art so the image
-    // fills it EXACTLY — no letterbox borders, no crop. It grows to the
+    // the window matches the splash ARTWORK's aspect ratio so the image
+    // fills it EXACTLY — no borders, no crop. The source PNG is 800×600 but
+    // has ~71 px of pure-black bars baked into its top + bottom; we crop
+    // those at render (sourceClipRect below) leaving 800×456 (≈1.754), so
+    // the splash window is sized 982×560 (same ratio). It grows to the
     // wizard size the moment the first step appears.
-    width:  displayedStepIdx >= 0 ? 920 : 800
-    height: displayedStepIdx >= 0 ? 640 : 600
+    width:  displayedStepIdx >= 0 ? 920 : 982
+    height: displayedStepIdx >= 0 ? 640 : 560
     minimumWidth: 760
     minimumHeight: 560
     visible: true
@@ -234,7 +237,10 @@ ApplicationWindow {
             Image {
                 anchors.fill: parent
                 source: splashImageUrl
-                fillMode: Image.PreserveAspectFit
+                // Crop the pure-black top/bottom bars baked into the PNG
+                // (source is 800×600; real artwork is rows 71..527 = 800×456).
+                sourceClipRect: Qt.rect(0, 71, 800, 456)
+                fillMode: Image.PreserveAspectFit   // window matches 1.754 → exact fill
                 smooth: true
                 asynchronous: true
             }
@@ -243,7 +249,7 @@ ApplicationWindow {
             ColumnLayout {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: 54
+                anchors.bottomMargin: 26
                 width: Math.min(parent.width * 0.62, 540)
                 spacing: 9
 

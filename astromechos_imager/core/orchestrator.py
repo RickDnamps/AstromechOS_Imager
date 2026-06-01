@@ -150,6 +150,13 @@ class FlashJob:
         locked_handles: list[int] = []
         write_result = None
         dev = None
+        # True once the card carries a VALID partition table again (deferred
+        # MBR written, or the whole image incl. sector 0 streamed for the
+        # degenerate no-deferred-block case). If this stays False after
+        # open_raw_device ran (which wiped the layout), the card is RAW —
+        # a cancel/failure left it unreadable and the outer finally restores
+        # a clean exFAT volume so Windows doesn't nag "Format K:?".
+        mbr_written = False
         try:
             try:
                 # 1. Dismount every volume on this physical drive (lettered
@@ -261,6 +268,13 @@ class FlashJob:
                             )
                         dev.flush()
                         self._sync_cache(dev)
+                        mbr_written = True   # card now has a valid layout
+                    elif (write_result.first_block_data is None
+                            and not self.cancel_event.is_set()):
+                        # Degenerate path (image < 1 MB, no deferred block):
+                        # the streaming write already wrote sector 0, so the
+                        # card carries the image's own MBR — it's valid.
+                        mbr_written = True
                 finally:
                     # Safe to close now: DiskWriter.run() unconditionally
                     # joins its producer + consumer threads before it
@@ -348,6 +362,29 @@ class FlashJob:
                     self.platform_io.close_handle(h)
                 except Exception:
                     pass  # best-effort; we're already in a finally
+
+            # Card-recovery: if the device was opened (so open_raw_device
+            # wiped its partition layout) but we never wrote a valid MBR back
+            # — i.e. the operator CANCELLED or the flash FAILED mid-way — the
+            # card is left RAW and Windows nags "Format K:?". Quick-format it
+            # to a clean exFAT volume so the operator sees a usable drive
+            # instead of a "broken" one. Best-effort, never raises, only ever
+            # touches the target physical drive. Runs AFTER the handle is
+            # closed (diskpart needs the device free). Skipped on a clean
+            # success (mbr_written) and on platforms without the method.
+            if dev is not None and not mbr_written:
+                restore = getattr(self.platform_io, "restore_readable_exfat", None)
+                if restore is not None:
+                    try:
+                        self.on_progress(DiskWriterProgress(
+                            phase="restoring_card", bytes_done=0,
+                            bytes_total=0, throughput_bps=0.0,
+                        ))
+                        _log.info("flash incomplete (cancel/failure) — "
+                                  "restoring target to clean exFAT")
+                        restore(self.target.physical_drive_id)
+                    except Exception:
+                        pass  # best-effort recovery; never mask the real result
 
     def _sync_cache(self, dev: object) -> None:
         """Best-effort flush of the USB-bridge firmware write cache.

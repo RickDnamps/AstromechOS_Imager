@@ -652,6 +652,67 @@ def update_disk_properties(h: int) -> None:
     _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
 
 
+def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> bool:
+    r"""Best-effort: quick-format the target drive to a clean exFAT volume.
+
+    Called after a CANCELLED or FAILED flash, where the card is left RAW
+    (open_raw_device wiped the partition layout via
+    IOCTL_DISK_DELETE_DRIVE_LAYOUT and the deferred MBR was never written).
+    Windows then nags "Format K:?" and the operator thinks the card is
+    bricked. A quick exFAT format gives them a clean, recognised drive of any
+    size (exFAT has no 32 GB limit, unlike Windows' FAT32 formatter).
+
+    Driven via ``diskpart /s <script>`` — ships with Windows, needs the admin
+    rights the app already runs with, and opens its OWN device handles (so
+    our raw handle must already be closed). STRICTLY scoped to
+    ``physical_drive_id`` (``select disk N``), which is the very disk we just
+    flashed — never another drive. Best-effort: returns False (logged) on any
+    failure and NEVER raises, so it can run safely inside a cancel/cleanup
+    path.
+    """
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    script = "\r\n".join([
+        f"select disk {physical_drive_id}",
+        "clean",
+        "create partition primary",
+        "format fs=exfat quick label=ASTROMECH",
+        "assign",
+        "exit",
+        "",
+    ])
+    fd, path = tempfile.mkstemp(suffix="-astro-restore.txt", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(script)
+        _log.info("restore_readable_exfat: diskpart quick exFAT on disk %d",
+                  physical_drive_id)
+        res = subprocess.run(
+            ["diskpart", "/s", path],
+            capture_output=True, text=True, timeout=timeout_s,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if res.returncode == 0:
+            _log.info("restore_readable_exfat: disk %d formatted exFAT OK",
+                      physical_drive_id)
+            return True
+        _log.warning("restore_readable_exfat: diskpart rc=%d on disk %d\n%s",
+                     res.returncode, physical_drive_id,
+                     (res.stdout or "")[-500:])
+        return False
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("restore_readable_exfat: failed on disk %d (%s)",
+                     physical_drive_id, exc)
+        return False
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def synchronize_cache(h: int) -> None:
     """Flush the device + USB-bridge firmware write cache.
 
@@ -943,6 +1004,10 @@ class WindowsPlatformIO:
     def sync_cache(self, handle):
         """Flush the USB-bridge firmware write cache (SCSI SYNCHRONIZE_CACHE)."""
         synchronize_cache(handle)
+
+    def restore_readable_exfat(self, physical_drive_id):
+        """Quick-format the target to clean exFAT after a cancel/failure."""
+        return restore_readable_exfat(physical_drive_id)
 
     def eject_media(self, handle):
         eject_media(handle)

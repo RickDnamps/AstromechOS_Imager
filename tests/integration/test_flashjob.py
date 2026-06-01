@@ -49,3 +49,46 @@ def test_flash_job_master_end_to_end(tmp_path, fake_platform_io, monkeypatch):
     result = job.run()
     assert isinstance(result, FlashJobResult)
     assert result.ok
+
+
+def _make_job(tmp_path, fake_platform_io, monkeypatch):
+    payload = _mbr(b"R2" * 250_000)
+    img = tmp_path / "m.img.xz"
+    img.write_bytes(lzma.compress(payload))
+    fake_platform_io.add_drive(2, size=len(payload) + 1024)
+    cfg = FirstbootConfig(
+        authorized_keys=[VALID_KEY], imager_version="0.1.0",
+        flashed_at_iso="2026-05-29T02:15:00Z",
+        hotspot_bootstrap=generate_hotspot_bootstrap("test-psk-12345"),
+    )
+    monkeypatch.setattr("astromechos_imager.core.orchestrator._bootpartition_open",
+                        lambda *a, **kw: None)
+    return FlashJob(
+        platform_io=fake_platform_io, image_path=img,
+        target=fake_platform_io.enumerate_removable_drives()[0],
+        role=Role.MASTER, firstboot_config=cfg, master_pair=generate_ed25519(),
+        skip_verify=True, skip_customize=True,
+    )
+
+
+def test_cancel_restores_card_to_exfat(tmp_path, fake_platform_io, monkeypatch):
+    """A cancelled flash leaves the card RAW (open_raw_device wiped the layout,
+    the deferred MBR was never written) — the orchestrator must best-effort
+    restore a clean exFAT volume so Windows doesn't nag 'Format K:?'."""
+    calls = []
+    fake_platform_io.restore_readable_exfat = lambda pid: calls.append(pid)
+    job = _make_job(tmp_path, fake_platform_io, monkeypatch)
+    job.cancel_event.set()              # cancel before the first write
+    job.run()
+    assert calls == [2]                 # restored exactly the target drive
+
+
+def test_success_does_not_restore_card(tmp_path, fake_platform_io, monkeypatch):
+    """A clean flash writes the deferred MBR — the card is valid, so the
+    exFAT recovery must NOT run (it would wipe the freshly-written image)."""
+    calls = []
+    fake_platform_io.restore_readable_exfat = lambda pid: calls.append(pid)
+    job = _make_job(tmp_path, fake_platform_io, monkeypatch)
+    result = job.run()
+    assert result.ok
+    assert calls == []                  # never touched a successfully-flashed card

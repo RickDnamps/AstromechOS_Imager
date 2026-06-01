@@ -362,24 +362,23 @@ def open_raw_device(physical_drive_id: int) -> int:
     # IOCTL_DISK_DELETE_DRIVE_LAYOUT wipes the in-memory partition table so
     # PARTMGR no longer policies writes as "inside a recognised partition" —
     # this is what AUTHORISES the FAT32-offset write that otherwise returns
-    # ERROR_ACCESS_DENIED (errno 5). IOCTL_DISK_UPDATE_PROPERTIES forces
-    # Windows to re-enumerate the now-empty layout. This is the proven
-    # baseline mechanism (67138da); it does NOT reintroduce the "Format K:?"
-    # pop-up because lock_and_dismount already removed the drive letter
-    # (DeleteVolumeMountPointW) and the real MBR is written LAST (deferred
-    # first block) — there is no recognised partition for the shell to react
-    # to during the write/verify/customize window. Best-effort: some bridges
-    # reject these, in which case we log and continue.
+    # ERROR_ACCESS_DENIED (errno 5).
+    #
+    # We deliberately do NOT follow it with IOCTL_DISK_UPDATE_PROPERTIES.
+    # That call FORCES Windows to re-enumerate the disk immediately; on a
+    # card that still carried a clean, Windows-RECOGNISED FAT32 (e.g. a card
+    # just flashed as Master and being re-flashed as Slave), the forced
+    # re-scan makes the shell see the volume vanish → the "Format K:?" pop-up
+    # fires. DELETE_DRIVE_LAYOUT alone authorises the write without provoking
+    # the shell; the layout is updated lazily by Windows on its own, and the
+    # deferred MBR (written LAST) means no recognised partition exists during
+    # the whole write/verify/customize window. Best-effort: some bridges
+    # reject the layout wipe, in which case we log and continue.
     try:
         _ctl(h, IOCTL_DISK_DELETE_DRIVE_LAYOUT)
         _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT OK on %s", path)
     except OSError as exc:
         _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT failed for %s (%s) — "
-                  "continuing", path, exc)
-    try:
-        _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
-    except OSError as exc:
-        _log.info("  IOCTL_DISK_UPDATE_PROPERTIES failed for %s (%s) — "
                   "continuing", path, exc)
     return h
 

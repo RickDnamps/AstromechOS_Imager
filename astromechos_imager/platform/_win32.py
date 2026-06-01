@@ -14,7 +14,16 @@ OPEN_EXISTING = 3
 FILE_FLAG_NO_BUFFERING = 0x20000000
 FILE_FLAG_WRITE_THROUGH = 0x80000000
 FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
-INVALID_HANDLE_VALUE = -1
+# CreateFileW / FindFirstVolumeW etc. have restype = wintypes.HANDLE
+# (a c_void_p). On FAILURE the Win32 API returns (HANDLE)-1, which ctypes
+# surfaces as the UNSIGNED pointer value — 0xFFFFFFFFFFFFFFFF on 64-bit,
+# 0xFFFFFFFF on 32-bit — NOT Python's signed -1. Comparing against a bare
+# -1 therefore SILENTLY MISSED every failed open: the bogus handle slipped
+# through and the first SetFilePointerEx/WriteFile on it returned
+# ERROR_INVALID_HANDLE (errno 6). Derive the sentinel from ctypes so the
+# `h == INVALID_HANDLE_VALUE` checks actually fire.
+import ctypes as _ctypes  # noqa: E402
+INVALID_HANDLE_VALUE = _ctypes.c_void_p(-1).value  # 0xFFFFFFFFFFFFFFFF on win64
 
 # Volume control
 FSCTL_LOCK_VOLUME = 0x00090018

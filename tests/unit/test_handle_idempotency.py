@@ -21,6 +21,25 @@ class _FakeKernel:
         return 1
 
 
+def test_open_raw_device_raises_on_failed_createfilew(monkeypatch):
+    """Regression: a FAILED CreateFileW returns (HANDLE)-1, which ctypes
+    surfaces as 0xFFFFFFFFFFFFFFFF (NOT -1). open_raw_device MUST detect that
+    and raise — otherwise the bogus handle reaches SetFilePointerEx and the
+    field-observed `SetFilePointerEx FAILED ... err=6` appears BEFORE any
+    byte is written. Pins the INVALID_HANDLE_VALUE sentinel fix."""
+    from astromechos_imager.platform import windows as W
+
+    class _FailingKernel(_FakeKernel):
+        def CreateFileW(self, *a, **k):
+            return W.INVALID_HANDLE_VALUE  # the unsigned (HANDLE)-1
+
+    monkeypatch.setattr(W, "kernel32", lambda: _FailingKernel())
+    monkeypatch.setattr(W.ctypes, "get_last_error", lambda: 5)
+    with pytest.raises(OSError) as ei:
+        W.open_raw_device(8)
+    assert "CreateFileW" in str(ei.value)
+
+
 def test_close_handle_skips_invalid_sentinels(monkeypatch):
     from astromechos_imager.platform import windows as W
     fk = _FakeKernel()

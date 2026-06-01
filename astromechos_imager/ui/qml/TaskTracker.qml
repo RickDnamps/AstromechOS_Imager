@@ -68,10 +68,12 @@ ColumnLayout {
                 }
             }
 
-            // ── Stage label (flexes to fill) ──
+            // ── Stage label (content-sized, so the detail can sit right
+            //    next to it instead of being shoved to the far right) ──
             Text {
-                Layout.fillWidth: true
                 Layout.alignment: Qt.AlignVCenter
+                Layout.maximumWidth: parent.width * 0.62   // elide ultra-long labels
+                elide: Text.ElideRight
                 text: modelData.label || ""
                 font.family: Theme.fontBody
                 font.pixelSize: 13
@@ -85,15 +87,21 @@ ColumnLayout {
                 Behavior on opacity { NumberAnimation { duration: Theme.durBase } }
             }
 
-            // ── Trailing detail (mono, right-aligned, hidden if empty) ──
+            // ── Detail (the %) — sits RIGHT AFTER the label for readability ──
             Text {
-                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                Layout.alignment: Qt.AlignVCenter
+                Layout.leftMargin: 6
                 text: modelData.detail || ""
                 visible: text !== ""
                 font.family: Theme.fontMono
                 font.pixelSize: 11
-                color: theme.colors.colorTextSecondary
+                font.bold: modelData.status === "active"
+                color: modelData.status === "active" ? theme.colors.colorTextAccent
+                                                      : theme.colors.colorTextSecondary
             }
+
+            // Spacer absorbs the remaining width, keeping label + detail left.
+            Item { Layout.fillWidth: true }
         }
     }
 }

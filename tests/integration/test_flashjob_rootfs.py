@@ -385,7 +385,17 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
 def test_flashjob_without_linux_account_skips_rootfs(
     tmp_path, fake_platform_io, monkeypatch
 ):
-    """FlashJob without linux_account: rootfs NOT touched, boot bundle written."""
+    """FlashJob without linux_account: ext4 rootfs surgery is NOT performed,
+    but the mandatory Pi-OS first-boot rootfs auto-resize arg IS still wired
+    into /cmdline.txt.
+
+    Decoupling lockdown (invariant #5): the resize injection is a FAT-only
+    write and is independent of the (optional) UID-1000 cold surgery. It must
+    run for EVERY card the Imager touches — even one with no account
+    customization — so the card never stays pinned at the golden image's
+    partition size. (Previously this was wrongly coupled to linux_account,
+    which is also what hid the bug where a missing debugfs.exe silently
+    skipped BOTH the rename AND the resize.)"""
     payload = _mbr_payload(_make_pi_os_mbr())
     img = tmp_path / "master.img.xz"
     img.write_bytes(lzma.compress(payload))
@@ -425,16 +435,84 @@ def test_flashjob_without_linux_account_skips_rootfs(
     result = job.run()
     assert result.ok, f"FlashJob failed: {result.error}"
 
-    # Rootfs NOT opened
+    # Rootfs NOT opened (no ext4 cold surgery without an account)
     assert open_rootfs_calls == []
 
     # Original passwd file untouched (pi still there)
     assert b"pi:x:1000" in fake_rootfs.files["/etc/passwd"]
 
-    # /cmdline.txt NOT modified (no linux_account → no personalizer)
-    assert RESIZE_INIT_ARG.encode("ascii") not in fake_boot.files["/cmdline.txt"]
+    # /cmdline.txt STILL gets the resize arg — exactly once. The resize is
+    # decoupled from cold surgery and mandatory for every card (invariant #5).
+    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
+    cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
+    assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
 
     # Bundle still written
+    assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
+
+
+def test_flashjob_resize_injected_even_when_debugfs_missing(
+    tmp_path, fake_platform_io, monkeypatch
+):
+    """Regression (the real-robot bug): a missing debugfs.exe must NOT also
+    skip the mandatory rootfs auto-resize.
+
+    Field finding 2026-06: on the deployed cards the vendored e2fsprogs tools
+    were absent, so the UID-1000 cold surgery was silently skipped — AND,
+    because the resize injection used to live INSIDE the surgery, the resize
+    arg was skipped too, pinning the rootfs at ~5 GB. This test simulates the
+    missing tool (``_open_rootfs_partition`` raises FileNotFoundError) with an
+    account set, and asserts the flash still succeeds and /cmdline.txt still
+    carries the resize arg exactly once."""
+    payload = _mbr_payload(_make_pi_os_mbr())
+    img = tmp_path / "master.img.xz"
+    img.write_bytes(lzma.compress(payload))
+    fake_platform_io.add_drive(7, size=len(payload) + 1024)
+
+    cfg = _make_cfg()
+    pair = generate_ed25519()
+    acc = LinuxAccount(
+        username="testuser",
+        cleartext_password="test123",
+        crypt_sha512="$6$salt$fakehash",
+    )
+
+    fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
+
+    def _raise_missing_debugfs(*a, **kw):
+        # Mirrors subprocess.run on a non-existent debugfs.exe (WinError 2).
+        raise FileNotFoundError(2, "The system cannot find the file specified", "debugfs.exe")
+
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._bootpartition_open",
+        lambda *a, **kw: fake_boot,
+    )
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._open_rootfs_partition",
+        _raise_missing_debugfs,
+    )
+
+    job = FlashJob(
+        platform_io=fake_platform_io,
+        image_path=img,
+        target=fake_platform_io.enumerate_removable_drives()[0],
+        role=Role.MASTER,
+        firstboot_config=cfg,
+        master_pair=pair,
+        linux_account=acc,
+        skip_verify=True,
+    )
+    result = job.run()
+    # Flash succeeds: cold surgery is skipped gracefully, the rest still runs.
+    assert result.ok, f"FlashJob failed: {result.error}"
+
+    # The UID-1000 rename did NOT happen (golden 'pi' user survives)...
+    # ...but the MANDATORY resize arg IS present, exactly once.
+    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
+    cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
+    assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
+
+    # Firstboot bundle still written (write order honoured)
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 

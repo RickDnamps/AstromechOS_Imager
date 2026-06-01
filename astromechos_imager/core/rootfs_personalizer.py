@@ -67,6 +67,53 @@ def ensure_resize_init_in_cmdline(cmdline_bytes: bytes) -> bytes:
     return (" ".join(args) + "\n").encode("ascii")
 
 
+def inject_resize_arg(boot: BootPartition) -> bool:
+    """Inject the Pi-OS first-boot rootfs auto-resize arg into /cmdline.txt.
+
+    This is a **FAT-partition-only** write: it reads and rewrites
+    ``/cmdline.txt`` on the boot partition and needs **no ext4 access /
+    debugfs / e2fsck**. It is therefore deliberately decoupled from the
+    (optional) UID-1000 cold surgery — the orchestrator calls it
+    UNCONDITIONALLY so that the mandatory rootfs auto-resize (CLAUDE.md hard
+    invariant #5) still happens even when the vendored e2fsprogs tools are
+    absent and the cold surgery is skipped.
+
+    Idempotent: a no-op (no write) when the arg is already present.
+
+    Parameters
+    ----------
+    boot:
+        An open ``BootPartition`` backend (FAT32 ``/boot``).
+
+    Returns
+    -------
+    bool
+        ``True`` if ``/cmdline.txt`` was modified, ``False`` if the arg was
+        already present (idempotent no-op).
+
+    Raises
+    ------
+    CmdlineInjectionFailedError
+        If reading or writing /cmdline.txt fails.
+    """
+    try:
+        cmdline = boot.read_bytes("/cmdline.txt")
+    except Exception as e:
+        raise CmdlineInjectionFailedError(
+            f"Could not read /cmdline.txt from boot partition: {e}"
+        ) from e
+    new_cmdline = ensure_resize_init_in_cmdline(cmdline)
+    if new_cmdline == cmdline:
+        return False
+    try:
+        boot.write_bytes("/cmdline.txt", new_cmdline)
+    except Exception as e:
+        raise CmdlineInjectionFailedError(
+            f"Could not write /cmdline.txt to boot partition: {e}"
+        ) from e
+    return True
+
+
 class RootfsPersonalizer:
     """Orchestrate the 4-step cold rename of the UID-1000 Linux user.
 
@@ -178,7 +225,11 @@ class RootfsPersonalizer:
     def _inject_cmdline(self) -> None:
         """Inject the AstromechOS first-boot resize init arg into /cmdline.txt.
 
-        No-op when ``self.boot`` is ``None``.
+        No-op when ``self.boot`` is ``None``. Delegates to the module-level
+        :func:`inject_resize_arg` so the orchestrator and this class share a
+        single implementation. (The orchestrator now also calls it directly
+        and unconditionally — see invariant #5 — so this call is idempotent
+        when both run.)
 
         Raises
         ------
@@ -187,17 +238,4 @@ class RootfsPersonalizer:
         """
         if self.boot is None:
             return
-        try:
-            cmdline = self.boot.read_bytes("/cmdline.txt")
-        except Exception as e:
-            raise CmdlineInjectionFailedError(
-                f"Could not read /cmdline.txt from boot partition: {e}"
-            ) from e
-        new_cmdline = ensure_resize_init_in_cmdline(cmdline)
-        if new_cmdline != cmdline:
-            try:
-                self.boot.write_bytes("/cmdline.txt", new_cmdline)
-            except Exception as e:
-                raise CmdlineInjectionFailedError(
-                    f"Could not write /cmdline.txt to boot partition: {e}"
-                ) from e
+        inject_resize_arg(self.boot)

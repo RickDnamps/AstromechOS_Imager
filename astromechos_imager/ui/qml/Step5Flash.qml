@@ -337,15 +337,55 @@ Rectangle {
                 height: 1; color: theme.colors.colorDivider
             }
         }
-        contentItem: Text {
-            text: wizardState.verifyIntegrity
-                ? "Image checksums will be verified, then the selected target SD card(s) will be ERASED and rewritten. This action is irreversible — confirm the drive letters above match the cards you intend to flash."
-                : "The selected target SD card(s) will be ERASED and rewritten with the chosen image(s). This action is irreversible — confirm the drive letters above match the cards you intend to flash."
-            color: theme.colors.colorTextPrimary
-            font.family: Theme.fontBody; font.pixelSize: 13
-            wrapMode: Text.Wrap; lineHeight: 1.35
-            leftPadding: 24; rightPadding: 24
-            topPadding: 22; bottomPadding: 22
+        contentItem: ColumnLayout {
+            spacing: 0
+            Text {
+                Layout.fillWidth: true
+                text: wizardState.verifyIntegrity
+                    ? "Image checksums will be verified, then the selected target SD card(s) will be ERASED and rewritten. This action is irreversible — confirm the drive letters above match the cards you intend to flash."
+                    : "The selected target SD card(s) will be ERASED and rewritten with the chosen image(s). This action is irreversible — confirm the drive letters above match the cards you intend to flash."
+                color: theme.colors.colorTextPrimary
+                font.family: Theme.fontBody; font.pixelSize: 13
+                wrapMode: Text.Wrap; lineHeight: 1.35
+                leftPadding: 24; rightPadding: 24
+                topPadding: 22
+                bottomPadding: flashViewModel.coldSurgeryAvailable ? 22 : 12
+            }
+            // Cold-surgery-unavailable warning: the vendored e2fsprogs tools
+            // (debugfs.exe / e2fsck.exe) are missing, so the rootfs UID-1000
+            // rename cannot run and the card will keep the golden image's
+            // default username/password. Surfaced here (not just in the log)
+            // so the operator knows BEFORE committing the write.
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24; Layout.rightMargin: 24; Layout.bottomMargin: 18
+                visible: !flashViewModel.coldSurgeryAvailable
+                implicitHeight: warnRow.implicitHeight + 20
+                radius: Theme.radiusCard
+                color: Qt.rgba(theme.colors.colorBorderWarn.r,
+                               theme.colors.colorBorderWarn.g,
+                               theme.colors.colorBorderWarn.b, 0.10)
+                border.color: theme.colors.colorBorderWarn
+                border.width: 1
+                RowLayout {
+                    id: warnRow
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 10
+                    Text {
+                        text: "⚠"; color: theme.colors.colorBorderWarn
+                        font.family: Theme.fontTitle; font.pixelSize: 16; font.bold: true
+                        Layout.alignment: Qt.AlignTop
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "EXT4 tools missing: this card will keep the image's DEFAULT username & password (cold surgery skipped). Rootfs auto-resize is unaffected. To enable account customization, populate vendor/ and rebuild."
+                        color: theme.colors.colorTextPrimary
+                        font.family: Theme.fontBody; font.pixelSize: 12
+                        wrapMode: Text.Wrap; lineHeight: 1.3
+                    }
+                }
+            }
         }
         footer: Rectangle {
             implicitHeight: 72

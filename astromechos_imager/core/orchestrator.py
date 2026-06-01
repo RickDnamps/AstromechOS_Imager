@@ -239,6 +239,31 @@ class FlashJob:
                         )
                         if bp is not None:
                             try:
+                                # Invariant #5 (MANDATORY, BOTH cards): wire the
+                                # Pi-OS first-boot rootfs auto-resize into
+                                # /cmdline.txt. This is a FAT-only write that
+                                # needs NO ext4/debugfs, so it runs
+                                # UNCONDITIONALLY and BEFORE the optional
+                                # UID-1000 cold surgery — decoupled from it so a
+                                # missing debugfs.exe (cold surgery skipped) can
+                                # never also skip the resize. Without resize the
+                                # rootfs stays pinned at the golden image's ~5 GB
+                                # and the Pi runs out of disk within days.
+                                # Idempotent (no-op if the arg is already there).
+                                if not self.cancel_event.is_set():
+                                    from astromechos_imager.core.rootfs_personalizer import (  # noqa: PLC0415
+                                        inject_resize_arg,
+                                    )
+                                    if inject_resize_arg(bp):
+                                        _log.info(
+                                            "PHASE customize: rootfs auto-resize "
+                                            "arg injected into /cmdline.txt"
+                                        )
+                                    else:
+                                        _log.info(
+                                            "PHASE customize: rootfs auto-resize "
+                                            "arg already present (idempotent)"
+                                        )
                                 if (
                                     self.linux_account is not None
                                     and not self.cancel_event.is_set()

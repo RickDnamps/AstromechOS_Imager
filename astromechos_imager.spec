@@ -47,8 +47,25 @@ if VENDOR_DIR.exists():
         # Native flash core (C ABI, ctypes) — the "tame the shell" layer
         # and (future phases) the raw-write / userspace-FAT engine.
         "astro_flash.dll",
+        # ── Cygwin e2fsprogs runtime (the supported source) ──────────────
+        # MSYS2 dropped e2fsprogs mid-2025, so the rootfs cold-surgery tools
+        # come from Cygwin's e2fsprogs package. Cygwin's POSIX shim is
+        # cygwin1.dll (NOT msys-2.0.dll). The full transitive DLL closure of
+        # debugfs.exe + e2fsck.exe (per `cygcheck`) is the 10 below — ship
+        # ALL of them or the .exes fail to load at runtime.
+        "cygwin1.dll",
+        "cygblkid-1.dll",
+        "cygcom_err-2.dll",
+        "cyge2p-2.dll",
+        "cygext2fs-2.dll",
+        "cyggcc_s-seh-1.dll",
+        "cygiconv-2.dll",
+        "cygintl-8.dll",
+        "cygss-2.dll",
+        "cyguuid-1.dll",
+        # ── Legacy MSYS2 runtime (kept for back-compat if an older vendor/
+        # was populated from MSYS2; only shipped when actually present) ───
         "msys-2.0.dll",
-        # Transitive MSYS2 runtime dependencies needed by debugfs/e2fsck
         "msys-com_err-1.dll",
         "msys-e2p-2.dll",
         "msys-ext2fs-2.dll",

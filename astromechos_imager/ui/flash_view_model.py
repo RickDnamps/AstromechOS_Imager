@@ -164,6 +164,12 @@ class FlashViewModel(QObject):
     # BOTH cards so the runtime master-slave handshake works. UI binds to
     # this for the persistent "Session hotspot: Astromech-XXXX" header.
     sessionSsidChanged = Signal(str)
+    # True when the vendored e2fsprogs tools are present so the rootfs
+    # UID-1000 cold surgery (username/password rename) can run. When False,
+    # the UI shows a clear warning that the card will keep the golden image's
+    # default account. Probed once at construction (vendor/ contents don't
+    # change mid-session); never blocks the WRITE button.
+    coldSurgeryAvailableChanged = Signal()
 
     def __init__(self, wizard_state, parent=None):
         super().__init__(parent)
@@ -211,6 +217,9 @@ class FlashViewModel(QObject):
         # both master and slave cards carry the SAME SSID + PSK into
         # /boot/astromech_init.cfg. None until startSession() runs.
         self._session_hotspot: HotspotBootstrap | None = None
+        # Probe the vendored e2fsprogs tools ONCE. Drives the UI warning when
+        # the rootfs UID-1000 cold surgery can't run (creds stay golden).
+        self._cold_surgery_available = ext4_tools_available()
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -290,6 +299,13 @@ class FlashViewModel(QObject):
     @Property(str, notify=sessionSsidChanged)
     def sessionSsid(self) -> str:
         return self._session_hotspot.ssid if self._session_hotspot else ""
+
+    @Property(bool, notify=coldSurgeryAvailableChanged)
+    def coldSurgeryAvailable(self) -> bool:
+        """False when the vendored e2fsprogs tools are missing, so the UI can
+        warn that the card will keep the golden image's default UID-1000
+        account (username/password NOT customized). Does not block WRITE."""
+        return self._cold_surgery_available
 
     @Slot()
     def startSession(self) -> None:
@@ -773,6 +789,32 @@ DEFAULT_HOTSPOT_PASSWORD = "astropass"
 #: sentinel put, never drop a chunk). Verify is therefore correct and ON
 #: by default everywhere.
 _WINDOWS_SKIP_VERIFY = False
+
+
+def ext4_tools_available() -> bool:
+    """Return True when the vendored e2fsprogs tools (debugfs + e2fsck) are
+    present so the rootfs UID-1000 cold surgery (username/password rename)
+    can run.
+
+    On non-Windows dev/test hosts the surgery uses the system e2fsprogs and
+    is assumed available. On Windows it requires the bundled ``vendor/``
+    binaries (``debugfs.exe`` / ``e2fsck.exe`` + their runtime DLL). When
+    they're missing, the flash still succeeds but the card keeps the golden
+    image's default UID-1000 account — so the UI surfaces a clear warning
+    instead of letting the operator discover it only after boot.
+    """
+    import sys  # noqa: PLC0415
+    if sys.platform != "win32":
+        return True
+    try:
+        from astromechos_imager.core.vendored_binaries import (  # noqa: PLC0415
+            debugfs_exe, e2fsck_exe,
+        )
+        debugfs_exe()
+        e2fsck_exe()
+        return True
+    except Exception:  # noqa: BLE001 — any resolution failure == unavailable
+        return False
 
 
 def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):

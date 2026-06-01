@@ -105,20 +105,60 @@ class DiskWriter:
             except BaseException as e:
                 self._exc = e
             finally:
-                # Always drop the sentinel even on cancel so the
-                # consumer's q.get() unblocks.
-                try:
-                    q.put_nowait(None)
-                except queue.Full:
-                    # Consumer is alive but queue is full; drain one and
-                    # retry once. If still full the consumer crashed and
-                    # we leak the sentinel — acceptable, the queue dies
-                    # with this thread.
+                # Deliver the end-of-stream sentinel so the consumer's
+                # blocking q.get() unblocks. Use a BLOCKING put with a
+                # cancel-aware timeout loop — NEVER drop a queued chunk to
+                # make room.
+                #
+                # The previous ``q.get_nowait()`` drop-to-fit was a real
+                # data-loss + length bug: on a SLOW device (an SD card at
+                # ~10 MB/s vs near-instant decompression) the consumer
+                # always lags, so the queue is FULL when the producer
+                # finishes — and the drop silently discarded the last
+                # data chunk that had ALREADY been folded into
+                # ``source_sha256``. Result: the device was 1 chunk
+                # (~1 MB) short, ``bytes_written`` undercounted by the
+                # same amount, and verify_readback compared a 1-MB-short
+                # readback against the full-image hash → a deterministic
+                # SHA-256 mismatch on every large flash. (It never bit on
+                # fast targets, where the queue drains before finish.)
+                #
+                # In the normal path the consumer keeps draining until it
+                # sees the sentinel, so the blocking put always succeeds
+                # within a slot's time. On CANCEL the consumer may have
+                # already stopped draining; there we DO discard from the
+                # queue to avoid deadlocking the join (the data is being
+                # abandoned anyway).
+                while True:
                     try:
-                        q.get_nowait()
-                        q.put_nowait(None)
-                    except (queue.Empty, queue.Full):
-                        pass
+                        q.put(None, timeout=0.5)
+                        break
+                    except queue.Full:
+                        if self.cancel.is_set():
+                            try:
+                                q.get_nowait()
+                            except queue.Empty:
+                                pass
+                        # else: consumer is alive and draining — retry.
+
+        # Prefer the compressed-stream position when the source exposes
+        # it — that's always 0..100% of a known fixed total (the .gz
+        # file size on disk). For sources without it (raw .img, .xz,
+        # .zip), fall back to the decompressed byte offset and rely on
+        # ``source.uncompressed_size``. Gzip's ``ISIZE`` field is
+        # ``uncompressed_size mod 2^32`` so for Pi-OS-sized images
+        # (~5.7 GB) it wraps to ~1.7 GB — the UI used to render that
+        # as "320 %" before this switch.
+        use_compressed_progress = (
+            callable(getattr(self.source, "compressed_position", None))
+            and getattr(self.source, "compressed_size", None) is not None
+        )
+
+        def _progress_pair() -> tuple[int, int | None]:
+            if use_compressed_progress:
+                return (self.source.compressed_position(),
+                        self.source.compressed_size)  # type: ignore[attr-defined]
+            return (consumer_total[0], self.source.uncompressed_size)
 
         def consumer():
             offset = 0
@@ -153,10 +193,11 @@ class DiskWriter:
                         # massively inflate the first sample.
                         window_t0 = time.monotonic()
                         window_b0 = offset
+                        done, total = _progress_pair()
                         self.on_progress(DiskWriterProgress(
                             phase="decompress_write",
-                            bytes_done=offset,
-                            bytes_total=self.source.uncompressed_size,
+                            bytes_done=done,
+                            bytes_total=total,
                             throughput_bps=0.0,
                         ))
                         continue
@@ -173,10 +214,11 @@ class DiskWriter:
                             last_throughput_bps = delta_bytes / elapsed
                         window_t0 = now
                         window_b0 = offset
+                    done, total = _progress_pair()
                     self.on_progress(DiskWriterProgress(
                         phase="decompress_write",
-                        bytes_done=offset,
-                        bytes_total=self.source.uncompressed_size,
+                        bytes_done=done,
+                        bytes_total=total,
                         throughput_bps=last_throughput_bps,
                     ))
             except BaseException as e:

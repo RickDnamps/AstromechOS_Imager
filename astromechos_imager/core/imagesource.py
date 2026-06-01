@@ -121,21 +121,46 @@ class XzSource(_BaseSource):
 
 
 class GzSource(_BaseSource):
-    """Streaming gzip decompression."""
+    """Streaming gzip decompression.
+
+    Exposes ``compressed_size`` + ``compressed_position()`` so DiskWriter
+    can report progress as ``(bytes_read_from_gz / compressed_size)`` —
+    always 0..100% regardless of the decompressed image size. The
+    legacy ``uncompressed_size`` field is kept for callers that need
+    the post-decompress byte count, but it can be wildly wrong on
+    Pi-OS-sized images: gzip stores ``ISIZE`` as ``uncompressed_size
+    mod 2^32``, so a 5.7 GB Pi-OS image reports ``ISIZE = 1.7 GB``. The
+    UI used to render that as ``320 %`` of a 1.7 GB target before the
+    compressed-position fix landed.
+    """
     def __init__(self, path: Path):
         super().__init__(path)
+        self.compressed_size = path.stat().st_size
         self.uncompressed_size = self._read_isize()
 
     def _read_isize(self) -> int | None:
-        """Last 4 bytes of a gzip file = uncompressed size mod 2^32."""
+        """Last 4 bytes of a gzip file = uncompressed size mod 2^32.
+
+        Returns None when the value is clearly unreliable (e.g. wraps
+        below the compressed size — impossible without compression
+        actually inflating the bytes, so it must have wrapped). Pi OS
+        images still get a wrapped value bigger than their compressed
+        size; the ``compressed_position()`` channel is the only
+        progress source that's correct in every case.
+        """
         size = self.path.stat().st_size
         if size < 4:
             return None
         with self.path.open("rb") as f:
             f.seek(-4, 2)
             isize = struct.unpack("<I", f.read(4))[0]
-        # For images > 4 GB this wraps. Caller treats None and 0 as "unknown".
-        return isize if isize > 0 else None
+        if isize <= 0:
+            return None
+        if isize < size:
+            # Unwrapped uncompressed cannot be smaller than the
+            # compressed bytes (or compression made things bigger).
+            return None
+        return isize
 
     def __iter__(self) -> Iterator[bytes]:
         self._fh = gzip.open(self.path, "rb")
@@ -144,6 +169,25 @@ class GzSource(_BaseSource):
             if not chunk:
                 break
             yield chunk
+
+    def compressed_position(self) -> int:
+        """Bytes consumed so far from the COMPRESSED .gz file on disk.
+
+        Reads through to the underlying file handle Python's gzip
+        module wraps. Returns 0 when the iterator hasn't started yet
+        (the source is closed) or when the gzip backend doesn't
+        expose ``fileobj`` (defensive — every CPython release since
+        3.0 has had it).
+        """
+        if self._fh is None:
+            return 0
+        fileobj = getattr(self._fh, "fileobj", None)
+        if fileobj is None:
+            return 0
+        try:
+            return int(fileobj.tell())
+        except Exception:
+            return 0
 
 
 import zipfile

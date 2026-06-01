@@ -706,25 +706,34 @@ DEFAULT_HOTSPOT_PASSWORD = "astropass"
 
 #: Default ``skip_verify`` for FlashJobs built from the UI on Windows.
 #:
-#: Windows triggers a modal Explorer pop-up ("Format K:?" / "K:\\ is not
-#: accessible") the moment its USB PnP poller spots the freshly-written
-#: partition table mid-flash. That pop-up:
-#:   1. Grabs the desktop's input focus, freezing keyboard/mouse interaction
-#:      until the operator clicks DISMISS;
-#:   2. Locks the volume from inside the Explorer process, which causes
-#:      DiskWriter's WriteFile / verify_readback to receive
-#:      ERROR_ACCESS_DENIED on subsequent I/O;
-#:   3. Cannot be dismissed programmatically from the Python backend — the
-#:      hosting process (Explorer.exe) is outside our handle table.
+#: The customize path no longer mounts the partition (userspace FAT over a
+#: raw handle), so the "Format K:?" pop-up is gone and the bundle lands
+#: correctly with no drive letter involved.
 #:
-#: Until the planned C++ rewrite of the flash core (which will run inside
-#: a Win32 service that suppresses shell auto-mount), the only reliable
-#: workaround is to skip the post-write SHA-256 readback entirely. The
-#: pre-flash SHA-256 of the source image (controlled by the operator-
-#: facing "VERIFY IMAGE INTEGRITY" toggle on Step 5) is unaffected — it
-#: hashes the on-disk image file before any device I/O.
-import sys as _sys
-_WINDOWS_SKIP_VERIFY = _sys.platform.startswith("win")
+#: The post-write SHA-256 READBACK, however, is unreliable on cheap USB-SD
+#: bridges: reading the device back within a few seconds of a multi-GB
+#: write returns deterministically-stale bytes from the bridge's read
+#: cache. The ON-DISK bytes are correct (a fresh read minutes later, and a
+#: full byte-for-byte diff against the source, both match) — only the
+#: immediate read-back lies, which trips verify_readback with a bogus hash
+#: mismatch. SCSI SYNCHRONIZE_CACHE + a fresh read handle + a settle delay
+#: did not fully tame this particular bridge.
+#:
+#: Post-write SHA-256 readback default.
+#:
+#: This was long blamed on a USB-bridge cache, but the real cause was a
+#: producer/consumer race in DiskWriter: on a slow target (an SD card at
+#: ~10 MB/s, where the write consumer lags the decompressing producer) the
+#: producer's end-of-stream path discarded the last queued data chunk to
+#: fit the sentinel. The chunk was already folded into ``source_sha256``
+#: but never written, so the device was ~1 MB short, ``bytes_written``
+#: undercounted by the same amount, and verify_readback compared a
+#: 1-MB-short readback against the full-image hash → a deterministic
+#: SHA-256 mismatch on every large flash. (Fast targets drained the queue
+#: before finish, so it never bit them.) Fixed in DiskWriter (blocking
+#: sentinel put, never drop a chunk). Verify is therefore correct and ON
+#: by default everywhere.
+_WINDOWS_SKIP_VERIFY = False
 
 
 def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):

@@ -373,4 +373,76 @@ Rectangle {
         }
         onAccepted: flashViewModel.startFromWizard()
     }
+
+    // ── Blocking "cancelling / restoring card" overlay ────────────────────
+    // While a cancel winds down, the worker thread is still flushing and —
+    // when the write had started — quick-formatting the card back to a clean
+    // exFAT volume. Without a modal block the WRITE-ready view reappears the
+    // instant CANCEL is clicked, so the operator could yank the card (or
+    // re-flash) before the restore finishes. This modal covers the whole
+    // window, eats all input, and cannot be dismissed; it auto-closes when
+    // the worker reports done (status leaves "cancelling").
+    Popup {
+        id: cancelOverlay
+        parent: Overlay.overlay
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        width: 520
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        padding: 0
+        background: Rectangle {
+            radius: Theme.radiusCard
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderIdle
+            border.width: 1
+        }
+        contentItem: ColumnLayout {
+            spacing: 16
+            Item { Layout.preferredHeight: 8 }
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 14
+                BusyIndicator {
+                    running: cancelOverlay.visible
+                    Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                }
+                Text {
+                    text: "CANCELLING"
+                    color: theme.colors.colorTextPrimary
+                    font.family: Theme.fontTitle; font.pixelSize: 16
+                    font.bold: true; font.letterSpacing: 1.6
+                }
+            }
+            Text {
+                Layout.fillWidth: true
+                Layout.leftMargin: 28; Layout.rightMargin: 28
+                horizontalAlignment: Text.AlignHCenter
+                text: flashViewModel.masterPhase === "restoring_card"
+                    ? "Restoring the card to a clean, readable state…"
+                    : "Stopping the write and cleaning up…"
+                color: theme.colors.colorTextPrimary
+                font.family: Theme.fontBody; font.pixelSize: 13
+                wrapMode: Text.Wrap; lineHeight: 1.35
+            }
+            Text {
+                Layout.fillWidth: true
+                Layout.leftMargin: 28; Layout.rightMargin: 28
+                Layout.bottomMargin: 10
+                horizontalAlignment: Text.AlignHCenter
+                text: "⚠ Do not remove the card."
+                color: theme.colors.colorBorderError
+                font.family: Theme.fontBody; font.pixelSize: 12; font.bold: true
+            }
+        }
+        Connections {
+            target: flashViewModel
+            function onStatusChanged() {
+                if (flashViewModel.status === "cancelling")
+                    cancelOverlay.open()
+                else
+                    cancelOverlay.close()
+            }
+        }
+    }
 }

@@ -24,6 +24,7 @@ def _build_job(
     *,
     fake_platform_io,
     on_progress,
+    image_path: Path,
     skip_customize: bool = False,
 ) -> FlashJob:
     fake_platform_io.add_drive(7, size=1 << 24)  # 16 MB sparse
@@ -35,7 +36,7 @@ def _build_job(
     )
     return FlashJob(
         platform_io=fake_platform_io,
-        image_path=Path("/dev/null"),
+        image_path=image_path,
         target=target,
         role=Role.MASTER,
         firstboot_config=cfg,
@@ -72,16 +73,19 @@ class _StubDiskWriter:
 @patch("astromechos_imager.core.orchestrator.DiskWriter", _StubDiskWriter)
 @patch("astromechos_imager.core.orchestrator.open_image")
 def test_flash_job_emits_customizing_before_bootpartition(
-    open_image_mock, fake_platform_io,
+    open_image_mock, fake_platform_io, tmp_path,
 ):
     """The customize block MUST emit ``phase=customizing`` before
     diving into ``update_disk_properties`` / ``_bootpartition_open``."""
     open_image_mock.return_value.__enter__.return_value = b""
     captured: list[DiskWriterProgress] = []
 
+    img = tmp_path / "stub.img"
+    img.write_bytes(b"\x00")  # real file so preflight's is_file() passes
     job = _build_job(
         fake_platform_io=fake_platform_io,
         on_progress=captured.append,
+        image_path=img,
         skip_customize=False,
     )
     result = job.run()
@@ -98,15 +102,18 @@ def test_flash_job_emits_customizing_before_bootpartition(
 @patch("astromechos_imager.core.orchestrator.DiskWriter", _StubDiskWriter)
 @patch("astromechos_imager.core.orchestrator.open_image")
 def test_flash_job_no_customizing_when_skip_customize(
-    open_image_mock, fake_platform_io,
+    open_image_mock, fake_platform_io, tmp_path,
 ):
     """When ``skip_customize=True``, no ``customizing`` ping must fire."""
     open_image_mock.return_value.__enter__.return_value = b""
     captured: list[DiskWriterProgress] = []
 
+    img = tmp_path / "stub.img"
+    img.write_bytes(b"\x00")  # real file so preflight's is_file() passes
     job = _build_job(
         fake_platform_io=fake_platform_io,
         on_progress=captured.append,
+        image_path=img,
         skip_customize=True,
     )
     result = job.run()

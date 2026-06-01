@@ -192,6 +192,15 @@ class FlashJob:
         mbr_written = False
         try:
             try:
+                # PHASE PREFLIGHT — validate EVERYTHING that can fail BEFORE
+                # any destructive device mutation. A failure here raises a
+                # PreflightError (sd_state="SAFE") that the `except ImagerError`
+                # below returns as ok=False with the card UNTOUCHED: no
+                # lock/dismount, no partition wipe, no RAW card, no "Format?"
+                # popup. Only a clean preflight proceeds to the flash sequence.
+                _log.info("PHASE preflight: validating before any device mutation")
+                self._preflight()
+                _log.info("PHASE preflight: PASSED — beginning flash")
                 # 1. Dismount every volume on this physical drive (lettered
                 #    AND letterless, found by GUID) and remove the drive
                 #    letter from Mount Manager — BEFORE opening the physical
@@ -463,97 +472,138 @@ class FlashJob:
         except Exception:
             pass
 
-    def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
-        """Open the ext4 rootfs partition and apply RootfsPersonalizer.
+    def _resolve_ext4_tools(self) -> "tuple[Path, Path]":
+        """Resolve the e2fsprogs tools (debugfs, e2fsck) used for cold surgery.
 
-        Parameters
-        ----------
-        mbr_bytes:
-            First 512 bytes of the disk (already read during customize step).
-        boot:
-            Already-opened BootPartition object (shared with FirstbootBundle).
+        Explicit job paths win; else the BUNDLED ``vendor/`` tools on Windows
+        (same resolver as the rest of the app); else POSIX system paths on
+        dev/test hosts. Returns paths WITHOUT probing — existence and
+        loadability are validated up front by :meth:`_preflight`.
         """
-        from astromechos_imager.core.rootfs_personalizer import RootfsPersonalizer  # noqa: PLC0415
-
         debugfs = self.ext4_debugfs_exe
         e2fsck = self.ext4_e2fsck_exe
-        # Resolve the e2fsprogs tools when the job didn't carry explicit
-        # paths. On Windows that means the BUNDLED debugfs.exe / e2fsck.exe
-        # from vendor/ (via the same resolver the rest of the app uses) —
-        # NOT the old ``/usr/sbin/debugfs`` WSL/dev fallback, which simply
-        # does not exist on a Windows host and crashed the customize step
-        # with a raw FileNotFoundError (WinError 2). If the tool is genuinely
-        # missing, the subprocess raises FileNotFoundError and the outer
-        # try/except below SKIPS the cold surgery with a loud warning instead
-        # of failing the whole flash.
         if debugfs is None or e2fsck is None:
             import sys  # noqa: PLC0415
             if sys.platform == "win32":
-                # Default to the BUNDLED tools in vendor/ (NOT the old
-                # ``/usr/sbin/debugfs`` WSL fallback, which doesn't exist on
-                # Windows and crashed customize with WinError 2). Use the
-                # path directly without an existence check so the
-                # ``_open_rootfs_partition`` seam stays monkeypatchable in
-                # tests; a genuinely missing tool surfaces as a subprocess
-                # FileNotFoundError naming the correct vendor path. The UI
-                # path (_build_flash_job) resolves these eagerly with a clear
-                # pre-write error, so this branch is the test / direct-job
-                # fallback.
                 from astromechos_imager.core.vendored_binaries import vendor_root  # noqa: PLC0415
                 debugfs = debugfs or (vendor_root() / "debugfs.exe")
                 e2fsck = e2fsck or (vendor_root() / "e2fsck.exe")
             else:
-                # POSIX dev/test host — system e2fsprogs.
                 debugfs = debugfs or Path("/usr/sbin/debugfs")
                 e2fsck = e2fsck or Path("/usr/sbin/e2fsck")
-        try:
-            rp = _open_rootfs_partition(
-                raw_device_path=self.target.device_path,
-                mbr_bytes=mbr_bytes,
-                debugfs_exe=debugfs,
-                e2fsck_exe=e2fsck,
-            )
-            if rp is None:
-                return  # no Linux partition → skip
+        return debugfs, e2fsck
+
+    def _on_real_windows(self) -> bool:
+        """True only on the real Win32 platform backend (not test fakes)."""
+        import sys  # noqa: PLC0415
+        return (sys.platform == "win32"
+                and type(self.platform_io).__name__ == "WindowsPlatformIO")
+
+    def _preflight(self) -> None:
+        """Validate EVERYTHING that can fail BEFORE any destructive device
+        mutation (lock/dismount + the IOCTL_DISK_DELETE_DRIVE_LAYOUT partition
+        wipe in open_raw_device).
+
+        Operator contract (2026-06-01): run() calls this FIRST. On any problem
+        it raises a ``PreflightError`` (sd_state="SAFE") so the flash aborts
+        with the card **UNTOUCHED** — no partition wipe, no RAW card, no
+        Windows "Format?" popup. Only when it returns cleanly does the
+        destructive flash sequence begin.
+
+        Cold-surgery checks (tool load + device-open probe) run ONLY on the
+        real Windows backend — test fakes skip them.
+        """
+        from astromechos_imager.core.errors import (  # noqa: PLC0415
+            ColdSurgeryUnavailableError, DriveNotFoundError,
+        )
+        # 1. Source image present (cheap, always).
+        if not self.image_path.is_file():
+            raise DriveNotFoundError(f"image file not found: {self.image_path}")
+
+        # 2. Cold-surgery readiness — only when an account rename is requested,
+        #    and only on the real Windows backend.
+        if self.linux_account is None or not self._on_real_windows():
+            return
+        import subprocess  # noqa: PLC0415
+        debugfs, e2fsck = self._resolve_ext4_tools()
+        # 2a. Tools exist and actually LOAD (catches a missing .exe or a
+        #     missing Cygwin runtime DLL — they'd otherwise blow up mid-flash).
+        for label, exe in (("debugfs", debugfs), ("e2fsck", e2fsck)):
             try:
-                RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
-            finally:
-                rp.close()
-        except Exception as exc:  # noqa: BLE001
-            # Cold surgery is STRICTLY best-effort — it must NEVER abort the
-            # flash. The image write, verify, mandatory rootfs auto-resize
-            # (decoupled, already applied), and userspace-FAT firstboot bundle
-            # have all succeeded; the deferred MBR is about to be written. If
-            # we let an error escape here the flash aborts BEFORE the MBR write
-            # → the card is left RAW → Windows nags "Format?" and the operator
-            # thinks the flash bricked the card.
-            #
-            # Failure modes we swallow (log loudly, skip the UID-1000 rename,
-            # keep the golden image's default account):
-            #   * FileNotFoundError / WinError 2 — debugfs.exe / e2fsck.exe
-            #     missing (vendor/ not populated).
-            #   * OSError errno 21 (ERROR_NOT_READY) / sharing violations —
-            #     the Cygwin e2fsprogs could not open the raw device at the
-            #     ext4 offset.
-            #   * RootfsModError / CalledProcessError — debugfs ran but a
-            #     rename/fsck step failed (e.g. no valid ext4 superblock at
-            #     the resolved device path).
-            # debugfs only ever writes via a valid ext4 superblock, so a
-            # failed open/parse cannot corrupt the card or any other disk.
-            errno_part = ""
-            if isinstance(exc, OSError) and exc.errno is not None:
-                errno_part = f" errno={exc.errno}"
-                winerr = getattr(exc, "winerror", None)
-                if winerr is not None:
-                    errno_part += f" winerror={winerr}"
-            _log.warning(
-                "rootfs UID-1000 cold surgery SKIPPED (non-fatal): %s: %s%s. "
-                "debugfs=%s e2fsck=%s. The card keeps the golden image's "
-                "DEFAULT UID-1000 account; the flash + auto-resize still "
-                "completed normally.",
-                type(exc).__name__, exc, errno_part, debugfs, e2fsck,
-                exc_info=True,
-            )
+                subprocess.run([str(exe), "-V"], capture_output=True,
+                               text=True, timeout=20)
+            except FileNotFoundError as e:
+                raise ColdSurgeryUnavailableError(
+                    f"{label} not found at {exe}"
+                ) from e
+            except OSError as e:
+                raise ColdSurgeryUnavailableError(
+                    f"{label} could not launch ({exe}): errno={e.errno}"
+                ) from e
+        # 2b. Can the e2fsprogs OPEN the target raw device? This is what threw
+        #     errno 21 (ERROR_NOT_READY) mid-flash — catch it here, before any
+        #     write, so the card is never touched on failure.
+        self._probe_device_open(debugfs)
+
+    def _probe_device_open(self, debugfs: "Path") -> None:
+        """Non-destructive read-only probe: can the Cygwin e2fsprogs OPEN the
+        target raw device? Reads the superblock location and quits (no ``-w``,
+        no offset). Raises ColdSurgeryUnavailableError if the device is
+        unreachable (the errno-21 / Cygwin device-path family).
+
+        Discriminator (e2fsprogs emits stable English):
+          * "Bad magic number in super-block" — debugfs READ the device but
+            found no ext4 there (expected on a not-yet-flashed card) → the
+            device is accessible → OK.
+          * returncode 0 — opened an actual ext4 → OK.
+          * anything else (open failure / not ready / no medium) → abort.
+        """
+        import subprocess  # noqa: PLC0415
+        cyg = _physicaldrive_to_cygwin(self.target.device_path)
+        try:
+            proc = subprocess.run([str(debugfs), "-R", "quit", cyg],
+                                  capture_output=True, text=True, timeout=30)
+        except OSError as e:
+            from astromechos_imager.core.errors import ColdSurgeryUnavailableError  # noqa: PLC0415
+            raise ColdSurgeryUnavailableError(
+                f"could not run debugfs to probe {cyg}: errno={getattr(e, 'errno', None)}"
+            ) from e
+        out = ((proc.stderr or "") + (proc.stdout or "")).lower()
+        if "super-block" in out or "bad magic" in out or proc.returncode == 0:
+            _log.info("PREFLIGHT cold-surgery: e2fsprogs opened device %s OK", cyg)
+            return
+        from astromechos_imager.core.errors import ColdSurgeryUnavailableError  # noqa: PLC0415
+        raise ColdSurgeryUnavailableError(
+            f"the bundled ext4 tools cannot open the target drive ({cyg}) — "
+            f"cold surgery would fail. debugfs said: "
+            f"{(proc.stderr or proc.stdout or '<no output>').strip()[:300]}"
+        )
+
+    def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
+        """Open the ext4 rootfs partition and apply RootfsPersonalizer.
+
+        Errors PROPAGATE — no silent skip. Cold-surgery readiness (tools load +
+        device openable) is validated up front by :meth:`_preflight` before any
+        device mutation, so reaching here means it should succeed. If apply()
+        still fails it is a genuine fault: let it bubble up so the flash reports
+        the error (run()'s finally then restores the card to a clean exFAT).
+        The operator is NEVER left believing a personalized card succeeded when
+        it did not.
+        """
+        from astromechos_imager.core.rootfs_personalizer import RootfsPersonalizer  # noqa: PLC0415
+        debugfs, e2fsck = self._resolve_ext4_tools()
+        rp = _open_rootfs_partition(
+            raw_device_path=self.target.device_path,
+            mbr_bytes=mbr_bytes,
+            debugfs_exe=debugfs,
+            e2fsck_exe=e2fsck,
+        )
+        if rp is None:
+            return  # no Linux partition → nothing to personalize
+        try:
+            RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
+        finally:
+            rp.close()
 
 
 @dataclass(frozen=True)

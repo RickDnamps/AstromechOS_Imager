@@ -451,19 +451,19 @@ def test_flashjob_without_linux_account_skips_rootfs(
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
-def test_flashjob_resize_injected_even_when_debugfs_missing(
+def test_flashjob_cold_surgery_error_propagates_no_silent_skip(
     tmp_path, fake_platform_io, monkeypatch
 ):
-    """Regression (the real-robot bug): a missing debugfs.exe must NOT also
-    skip the mandatory rootfs auto-resize.
+    """A cold-surgery failure at customize time PROPAGATES (flash fails) —
+    it is NOT silently swallowed.
 
-    Field finding 2026-06: on the deployed cards the vendored e2fsprogs tools
-    were absent, so the UID-1000 cold surgery was silently skipped — AND,
-    because the resize injection used to live INSIDE the surgery, the resize
-    arg was skipped too, pinning the rootfs at ~5 GB. This test simulates the
-    missing tool (``_open_rootfs_partition`` raises FileNotFoundError) with an
-    account set, and asserts the flash still succeeds and /cmdline.txt still
-    carries the resize arg exactly once."""
+    Operator decision 2026-06-01: cold-surgery readiness is validated up front
+    by _preflight; if surgery still fails after that, the operator must be told
+    (no card that quietly kept the golden account while reporting success).
+    Here _open_rootfs_partition raises (simulating debugfs failure) and we
+    assert the flash reports ok=False. The decoupled resize ran BEFORE the
+    surgery, so the (about-to-be-restored) cmdline already carries the arg, and
+    the firstboot trigger — written AFTER surgery — is absent."""
     payload = _mbr_payload(_make_pi_os_mbr())
     img = tmp_path / "master.img.xz"
     img.write_bytes(lzma.compress(payload))
@@ -479,8 +479,7 @@ def test_flashjob_resize_injected_even_when_debugfs_missing(
 
     fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
 
-    def _raise_missing_debugfs(*a, **kw):
-        # Mirrors subprocess.run on a non-existent debugfs.exe (WinError 2).
+    def _raise_debugfs_error(*a, **kw):
         raise FileNotFoundError(2, "The system cannot find the file specified", "debugfs.exe")
 
     monkeypatch.setattr(
@@ -489,7 +488,7 @@ def test_flashjob_resize_injected_even_when_debugfs_missing(
     )
     monkeypatch.setattr(
         "astromechos_imager.core.orchestrator._open_rootfs_partition",
-        _raise_missing_debugfs,
+        _raise_debugfs_error,
     )
 
     job = FlashJob(
@@ -503,17 +502,14 @@ def test_flashjob_resize_injected_even_when_debugfs_missing(
         skip_verify=True,
     )
     result = job.run()
-    # Flash succeeds: cold surgery is skipped gracefully, the rest still runs.
-    assert result.ok, f"FlashJob failed: {result.error}"
+    # NO silent skip — the error propagates, flash reports failure.
+    assert not result.ok, "cold-surgery error must NOT be silently swallowed"
+    assert result.error is not None
 
-    # The UID-1000 rename did NOT happen (golden 'pi' user survives)...
-    # ...but the MANDATORY resize arg IS present, exactly once.
+    # Decoupled resize ran BEFORE surgery, so the arg was already written...
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
-    cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
-    assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
-
-    # Firstboot bundle still written (write order honoured)
-    assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
+    # ...but the trigger (written AFTER surgery) never landed.
+    assert not fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
 def test_physicaldrive_to_cygwin_mapping():
@@ -529,17 +525,19 @@ def test_physicaldrive_to_cygwin_mapping():
     assert _physicaldrive_to_cygwin("/mnt/j/image.img") == "/mnt/j/image.img"
 
 
-def test_flashjob_cold_surgery_error_is_nonfatal_resize_and_mbr_survive(
+def test_flashjob_preflight_failure_aborts_before_touching_card(
     tmp_path, fake_platform_io, monkeypatch
 ):
-    """A cold-surgery runtime error (e.g. errno 21 ERROR_NOT_READY from the
-    Cygwin e2fsprogs failing to open the raw device) MUST NOT abort the flash.
+    """A preflight failure aborts BEFORE any destructive device mutation —
+    the card is never locked, dismounted, or wiped (no RAW card / no popup).
 
-    Regression for the field errno-21 + "Format?" popup: cold surgery used to
-    only swallow FileNotFoundError, so any other error escaped, aborted the
-    flash BEFORE the deferred-MBR write, and left the card RAW. Now ANY
-    cold-surgery failure is swallowed: the flash completes, the MBR is written,
-    and the mandatory resize arg is present."""
+    Operator decision 2026-06-01: validate first, fail fast, leave the card
+    intact. Here _preflight raises (simulating a cold-surgery readiness failure
+    such as errno 21) and we assert: ok=False, the error is a PreflightError
+    (sd_state='SAFE'), and open_raw_device / lock_and_dismount were NEVER
+    called."""
+    from astromechos_imager.core.errors import ColdSurgeryUnavailableError
+
     payload = _mbr_payload(_make_pi_os_mbr())
     img = tmp_path / "master.img.xz"
     img.write_bytes(lzma.compress(payload))
@@ -552,22 +550,28 @@ def test_flashjob_cold_surgery_error_is_nonfatal_resize_and_mbr_survive(
         crypt_sha512="$6$salt$fakehash",
     )
 
-    fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
+    # Record any destructive device access.
+    touched: list[str] = []
+    orig_open = fake_platform_io.open_raw_device
+    orig_lock = fake_platform_io.lock_and_dismount
 
-    class _RootfsRaisesNotReady:
-        # debugfs subprocess can't open the device → OSError errno 21.
-        def read_bytes(self, path):
-            raise OSError(21, "The device is not ready")
-        def close(self):
-            pass
+    def _spy_open(*a, **kw):
+        touched.append("open_raw_device")
+        return orig_open(*a, **kw)
 
+    def _spy_lock(*a, **kw):
+        touched.append("lock_and_dismount")
+        return orig_lock(*a, **kw)
+
+    monkeypatch.setattr(fake_platform_io, "open_raw_device", _spy_open)
+    monkeypatch.setattr(fake_platform_io, "lock_and_dismount", _spy_lock)
+
+    # Force a preflight failure (as if the cold-surgery device probe failed).
     monkeypatch.setattr(
-        "astromechos_imager.core.orchestrator._bootpartition_open",
-        lambda *a, **kw: fake_boot,
-    )
-    monkeypatch.setattr(
-        "astromechos_imager.core.orchestrator._open_rootfs_partition",
-        lambda *a, **kw: _RootfsRaisesNotReady(),
+        FlashJob, "_preflight",
+        lambda self: (_ for _ in ()).throw(
+            ColdSurgeryUnavailableError("simulated errno 21 device probe failure")
+        ),
     )
 
     job = FlashJob(
@@ -581,14 +585,12 @@ def test_flashjob_cold_surgery_error_is_nonfatal_resize_and_mbr_survive(
         skip_verify=True,
     )
     result = job.run()
-    # Flash SUCCEEDS despite the cold-surgery errno 21.
-    assert result.ok, f"FlashJob should not abort on cold-surgery error: {result.error}"
 
-    # Resize arg present (decoupled, applied before surgery), exactly once.
-    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
-    assert fake_boot.files["/cmdline.txt"].decode("ascii").split().count(RESIZE_INIT_ARG) == 1
-    # Firstboot bundle (trigger written last) still completed.
-    assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
+    assert not result.ok
+    assert isinstance(result.error, ColdSurgeryUnavailableError)
+    assert result.error.sd_state == "SAFE"
+    # The card was NEVER touched — no lock/dismount, no partition wipe.
+    assert touched == [], f"preflight failure still touched the device: {touched}"
 
 
 def test_flashjob_cancellation_before_rootfs_skips_bundle(

@@ -11,18 +11,19 @@
 .pragma library
 
 // ── Fonts ────────────────────────────────────────────────────────────
-// Orbitron is bundled in resources/fonts as OTF and registered at
-// startup (app.py _load_fonts). Used EVERYWHERE in the UI — titles,
-// subtitles, buttons, body copy, field labels. Brand identity is
-// non-negotiable: AstromechOS Imager ships an authentic R2-D2 /
-// Sci-Fi look. Reverts audit High #23, which had downgraded body
-// copy to "Segoe UI" for readability; readability is now handled by
-// tuning size / weight / colour contrast rather than the typeface.
-// fontMono stays Consolas because monospaced character-cell predict-
-// ability is functional (hash digests, drive paths), not stylistic.
-var fontTitle    = "Orbitron"
-var fontSubtitle = "Orbitron"
-var fontBody     = "Orbitron"
+// HYBRID typography (operator decision, 2026-06): Orbitron keeps the
+// R2-D2 / Sci-Fi brand on the PROMINENT, SHORT elements — big step
+// titles, button captions and field labels (all `fontTitle`) — while
+// the SMALLER running text (descriptive subtitles + body / helper copy)
+// uses Segoe UI, the native Windows UI font, because Orbitron's wide
+// geometric letterforms are tiring to read at small sizes / long
+// sentences. This supersedes the earlier "Orbitron everywhere" rule.
+// Orbitron is still bundled (resources/fonts, app.py _load_fonts);
+// Segoe UI ships with Windows so needs no bundling. fontMono stays
+// Consolas for hash digests / drive paths (functional monospacing).
+var fontTitle    = "Orbitron"     // big titles, buttons, short caps labels
+var fontSubtitle = "Segoe UI"     // descriptive subtitle lines
+var fontBody     = "Segoe UI"     // body + helper copy (long, small text)
 var fontMono     = "Consolas"
 
 // ── Geometry ─────────────────────────────────────────────────────────

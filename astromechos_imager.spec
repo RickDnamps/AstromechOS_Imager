@@ -44,6 +44,9 @@ if VENDOR_DIR.exists():
     _VENDOR_ALLOWLIST = {
         "debugfs.exe",
         "e2fsck.exe",
+        # Native flash core (C ABI, ctypes) — the "tame the shell" layer
+        # and (future phases) the raw-write / userspace-FAT engine.
+        "astro_flash.dll",
         "msys-2.0.dll",
         # Transitive MSYS2 runtime dependencies needed by debugfs/e2fsck
         "msys-com_err-1.dll",

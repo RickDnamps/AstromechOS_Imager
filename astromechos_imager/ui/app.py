@@ -116,6 +116,23 @@ def _qml_main_path() -> Path:
 
 def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     """Construct the QApplication + QML engine + WizardState. Used by main() and tests."""
+    # On Windows, suppress the shell's "Le volume ne contient pas de
+    # système de fichiers connu" / "Format K:?" pop-ups that fire when
+    # we read or write a removable device mid-flash. Without this our
+    # raw-write phase reliably triggers a modal Explorer dialog the
+    # moment USB PnP polls the disk — the dialog steals focus, locks
+    # the volume, and the customize step then dies with
+    # FileNotFoundError(errno=2). SetErrorMode is process-inherited so
+    # both the GUI and any subprocess we spawn benefit. Must run before
+    # QGuiApplication so the flag is in force during plugin init too.
+    if sys.platform == "win32":
+        try:
+            from astromechos_imager.platform.windows import (
+                _suppress_shell_error_dialogs_for_process,
+            )
+            _suppress_shell_error_dialogs_for_process()
+        except Exception:
+            pass  # non-fatal — pop-ups will still appear, that's all
     # Install Qt's message handler BEFORE QGuiApplication so any warnings
     # emitted during Qt init (plugin loading, style resolution, etc.) land
     # in our startup.log instead of disappearing into a console=False stderr.

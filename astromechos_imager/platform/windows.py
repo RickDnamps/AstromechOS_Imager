@@ -140,6 +140,7 @@ from astromechos_imager.core.errors import DriveLockError, DrivePermissionError
 from astromechos_imager.platform._win32 import (
     GENERIC_READ, GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, FILE_FLAG_WRITE_THROUGH,
+    FILE_FLAG_SEQUENTIAL_SCAN,
     FSCTL_ALLOW_EXTENDED_DASD_IO, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
     FSCTL_DISMOUNT_VOLUME, INVALID_HANDLE_VALUE,
     IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_DISK_DELETE_DRIVE_LAYOUT,
@@ -255,11 +256,26 @@ def lock_and_dismount(letters: tuple[str, ...]) -> list[int]:
                 pass
             kernel32().CloseHandle(h)
         _delete_mount_point(letter)
+    # PHASE 0 native shell-quiet: fire SHChangeNotify(MEDIAREMOVED |
+    # DRIVEREMOVED) for each letter via astro_flash.dll, plus
+    # SetThreadErrorMode on this worker thread. SHChangeNotify is the
+    # signal the pure-Python path never sent — it tells Explorer the
+    # drive is gone so the shell stops polling the device and never
+    # renders the "Format K:?" / "K: is not accessible" modal dialog
+    # mid-flash. DeleteVolumeMountPointW (above) removes the letter from
+    # Mount Manager; SHChangeNotify removes it from Explorer's view.
+    # No-op when the DLL isn't built/present (degrades to current behaviour).
+    try:
+        from astromechos_imager.platform import native_shell_quiet
+        if native_shell_quiet.available() and letters:
+            native_shell_quiet.lock_and_quiet(letters)
+    except Exception as exc:  # noqa: BLE001
+        _log.info("native shell-quiet unavailable (%s) — continuing", exc)
     # Brief settle delay — Windows's Mount Manager + Volume Snapshot Service
     # both react to the DeleteVolumeMountPointW call. Without a pause the
     # next CreateFileW on \\.\PHYSICALDRIVEn can land while the volume is in
     # a transitional "letter just removed, partition still claimed" state,
-    # and subsequent writes to in-partition sectors (offset ≥ FAT32 start)
+    # and subsequent writes to in-partition sectors (offset >= FAT32 start)
     # return ERROR_ACCESS_DENIED. 1 s matches rpi-imager's QThread::msleep
     # between volumes in diskpart_util.cpp.
     time.sleep(1.0)
@@ -277,10 +293,18 @@ def open_raw_device(physical_drive_id: int) -> int:
     """
     k = kernel32()
     path = f"\\\\.\\PHYSICALDRIVE{physical_drive_id}"
+    # rpi-imager's OpenDevice flag set for physical drives
+    # (file_operations_windows.cpp:286): NO_BUFFERING bypasses the OS page
+    # cache so reads hit the device, WRITE_THROUGH commits writes, and
+    # SEQUENTIAL_SCAN hints "don't cache aggressively". Together with a
+    # 4096-aligned read buffer (see _Win32RawDevice.read), this is the
+    # recipe that lets the post-write verify read truth on the first pass.
     h = k.CreateFileW(
         path, GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE, None,
-        OPEN_EXISTING, FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH, None,
+        OPEN_EXISTING,
+        FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH | FILE_FLAG_SEQUENTIAL_SCAN,
+        None,
     )
     if h == INVALID_HANDLE_VALUE:
         err = ctypes.get_last_error()
@@ -350,6 +374,72 @@ def _volume_has_letter(volume_guid: str) -> bool:
     raw = buf[: returned.value]
     parts = [p for p in raw.split("\x00") if p]
     return any(len(p) == 3 and p[1] == ":" and p[2] == "\\" for p in parts)
+
+
+def _volume_has_recognised_fs(volume_guid: str) -> bool:
+    """True iff Windows can parse the filesystem at the volume root.
+
+    Used as a readiness probe BEFORE attaching a drive letter to a
+    just-discovered volume. After a raw write + IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+    Mount Manager often still has the OLD volume entry around (the one we
+    overwrote) for a few seconds; the NEW volume Windows assigns to the
+    freshly-written FAT32 appears asynchronously. Attaching K: to the
+    stale entry produces the "Le volume ne contient pas de système de
+    fichiers connu" pop-up and a customize step that immediately fails
+    with FileNotFoundError(errno=2). Skipping volumes whose
+    GetVolumeInformationW returns False lets us wait for the real,
+    parseable volume to materialise.
+    """
+    k = kernel32()
+    name_buf = ctypes.create_unicode_buffer(256)
+    fs_buf = ctypes.create_unicode_buffer(256)
+    serial = wintypes.DWORD(0)
+    max_comp = wintypes.DWORD(0)
+    flags = wintypes.DWORD(0)
+    ok = k.GetVolumeInformationW(
+        volume_guid,
+        name_buf, len(name_buf),
+        ctypes.byref(serial),
+        ctypes.byref(max_comp),
+        ctypes.byref(flags),
+        fs_buf, len(fs_buf),
+    )
+    if not ok:
+        return False
+    # An empty filesystem name string means Windows mounted the volume
+    # but couldn't identify the filesystem — treat as not-ready.
+    return bool(fs_buf.value)
+
+
+def _suppress_shell_error_dialogs_for_process() -> None:
+    """Tell Windows not to render shell-level error message boxes.
+
+    Sets ``SEM_FAILCRITICALERRORS`` (0x0001) — when our process triggers
+    a critical I/O error on a removable device (CD ejected, USB unplugged,
+    "you need to format the disk in drive X:?"), the system DOES NOT
+    display the message box. ``GetLastError`` still returns the
+    underlying status code so we can surface a clean English message in
+    the UI ourselves. Inherited by child processes — combined with
+    Mount-Manager state pre-cleanup in ``lock_and_dismount``, this is
+    the closest user-mode equivalent of rpi-imager's userspace FAT32
+    writer that never asks Windows to mount the freshly-written
+    partition at all.
+    """
+    k = kernel32()
+    SEM_FAILCRITICALERRORS = 0x0001
+    SEM_NOOPENFILEERRORBOX = 0x8000  # also suppresses "file in use" dialogs
+    try:
+        # Preserve the existing flags so other process facets keep working.
+        prev = k.GetErrorMode()
+        k.SetErrorMode(prev | SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX)
+        _log.info(
+            "  SetErrorMode SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX OK "
+            "(was 0x%04X)", prev,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.info(
+            "  SetErrorMode failed (%s) — Windows pop-ups may still appear", exc,
+        )
 
 
 def _volume_disk_extents(volume_guid: str) -> list[int]:
@@ -449,7 +539,21 @@ def attach_letter_to_unmounted_volume(
                         "not target %d)", vol, extents, physical_drive_id,
                     )
                 continue
-            # Match — this letterless volume IS on the target physical drive.
+            # Right physical drive — but is Windows done parsing its
+            # filesystem? After IOCTL_DISK_DELETE_DRIVE_LAYOUT the stale
+            # pre-flash volume entry may linger for a few seconds before
+            # Mount Manager replaces it with the new one. Attaching the
+            # operator letter to the stale entry produces the "Le volume
+            # ne contient pas de système de fichiers connu" pop-up and a
+            # customize step that fails with FileNotFoundError(errno=2).
+            if not _volume_has_recognised_fs(vol):
+                _log.info(
+                    "  skipping volume %s on disk %d — GetVolumeInformationW "
+                    "reports no recognised FS yet (will retry)",
+                    vol, physical_drive_id,
+                )
+                continue
+            # Match — and the FS is parseable.
             ok = bool(k.SetVolumeMountPointW(mount_path, vol))
             if ok:
                 _log.info(
@@ -477,6 +581,50 @@ def close_handle(h: int) -> None:
 def update_disk_properties(h: int) -> None:
     """After writing partition table, force Windows to re-enumerate volumes."""
     _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
+
+
+def synchronize_cache(h: int) -> None:
+    """Flush the device + USB-bridge firmware write cache.
+
+    Issues SCSI SYNCHRONIZE_CACHE(10) via IOCTL_SCSI_PASS_THROUGH_DIRECT so
+    a cheap USB-SATA/USB-SD bridge commits its internal write cache to the
+    flash before we read it back. Falls back to FlushFileBuffers when the
+    bridge rejects the passthrough (common on consumer adapters). Best-
+    effort: logs and returns on any failure.
+    """
+    from astromechos_imager.platform._win32 import (  # noqa: PLC0415
+        IOCTL_SCSI_PASS_THROUGH_DIRECT, SCSI_IOCTL_DATA_UNSPECIFIED,
+        SCSIOP_SYNCHRONIZE_CACHE, SCSI_PASS_THROUGH_DIRECT_WITH_SENSE,
+    )
+    k = kernel32()
+    pkt = SCSI_PASS_THROUGH_DIRECT_WITH_SENSE()
+    pkt.sptd.Length = ctypes.sizeof(type(pkt.sptd))
+    pkt.sptd.CdbLength = 10
+    pkt.sptd.DataIn = SCSI_IOCTL_DATA_UNSPECIFIED
+    pkt.sptd.DataTransferLength = 0
+    pkt.sptd.TimeOutValue = 60
+    pkt.sptd.SenseInfoLength = 32
+    pkt.sptd.SenseInfoOffset = (
+        SCSI_PASS_THROUGH_DIRECT_WITH_SENSE.Sense.offset
+    )
+    pkt.sptd.Cdb[0] = SCSIOP_SYNCHRONIZE_CACHE  # 0x35
+    out = wintypes.DWORD(0)
+    ok = k.DeviceIoControl(
+        h, IOCTL_SCSI_PASS_THROUGH_DIRECT,
+        ctypes.byref(pkt), ctypes.sizeof(pkt),
+        ctypes.byref(pkt), ctypes.sizeof(pkt),
+        ctypes.byref(out), None,
+    )
+    if ok:
+        _log.info("  SCSI SYNCHRONIZE_CACHE OK")
+        return
+    err = ctypes.get_last_error()
+    _log.info("  SCSI SYNCHRONIZE_CACHE not supported (err %d) — "
+              "falling back to FlushFileBuffers", err)
+    try:
+        k.FlushFileBuffers(h)
+    except Exception:
+        pass
 
 
 def eject_media(h: int) -> None:
@@ -521,7 +669,15 @@ class _Win32RawDevice:
 
     def read(self, offset: int, length: int) -> bytes:
         _seek(self._h, offset)
-        buf = ctypes.create_string_buffer(length)
+        # NO_BUFFERING requires a sector/page-aligned destination buffer.
+        # A misaligned buffer can return stale bridge-cached bytes right
+        # after a multi-GB write (the deterministic verify_readback bug).
+        # rpi-imager uses qMallocAligned(size, 4096) (downloadthread.cpp:1882);
+        # over-allocate and read into the 4096-aligned interior.
+        align = 4096
+        backing = (ctypes.c_char * (length + align))()
+        aligned = (ctypes.addressof(backing) + align - 1) & ~(align - 1)
+        buf = (ctypes.c_char * length).from_address(aligned)
         got = wintypes.DWORD(0)
         ok = kernel32().ReadFile(self._h, buf, length, ctypes.byref(got), None)
         if not ok:
@@ -534,6 +690,70 @@ class _Win32RawDevice:
 
     def close(self) -> None:
         close_handle(self._h)
+
+
+class _PlainRawDevice:
+    r"""Raw \\.\PHYSICALDRIVEn opened WITHOUT FILE_FLAG_NO_BUFFERING.
+
+    The streaming-write handle uses NO_BUFFERING | WRITE_THROUGH for speed,
+    but NO_BUFFERING also demands page-aligned USER BUFFERS — which plain
+    ctypes buffers are not guaranteed to be. The userspace FAT customize
+    (RawFatBootPartition) does many small, arbitrary-offset read-modify-
+    write operations whose buffers come from Python, so it needs a plain
+    (cached) handle: sector-aligned OFFSET/LENGTH is still required for a
+    physical-drive handle, but the user buffer alignment is not. The
+    RawSectorFile layer guarantees the sector alignment.
+
+    Opened with no DELETE_DRIVE_LAYOUT / DASD calls — by the time customize
+    runs, the streaming handle already wiped the layout, and the FAT region
+    at 8 MB is writable.
+    """
+    SECTOR = 512
+
+    def __init__(self, physical_drive_id: int):
+        path = f"\\\\.\\PHYSICALDRIVE{physical_drive_id}"
+        h = kernel32().CreateFileW(
+            path, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, None,
+            OPEN_EXISTING, 0, None,
+        )
+        if h == INVALID_HANDLE_VALUE:
+            err = ctypes.get_last_error()
+            raise OSError(err, f"CreateFileW({path}) [plain] failed")
+        self._h = h
+
+    def read(self, offset: int, length: int) -> bytes:
+        _seek(self._h, offset)
+        buf = ctypes.create_string_buffer(length)
+        got = wintypes.DWORD(0)
+        ok = kernel32().ReadFile(self._h, buf, length, ctypes.byref(got), None)
+        if not ok:
+            err = ctypes.get_last_error()
+            raise OSError(err, f"ReadFile [plain] failed at offset {offset}")
+        return bytes(buf.raw[: got.value])
+
+    def write(self, offset: int, data: bytes) -> int:
+        _seek(self._h, offset)
+        written = wintypes.DWORD(0)
+        ok = kernel32().WriteFile(
+            self._h, ctypes.c_char_p(data), len(data),
+            ctypes.byref(written), None,
+        )
+        if not ok:
+            err = ctypes.get_last_error()
+            raise OSError(err, f"WriteFile [plain] failed at offset {offset}")
+        return int(written.value)
+
+    def flush(self) -> None:
+        kernel32().FlushFileBuffers(self._h)
+
+    def close(self) -> None:
+        close_handle(self._h)
+
+
+def open_plain_raw_device(physical_drive_id: int) -> _PlainRawDevice:
+    """Open a plain (cached) raw device handle for the userspace FAT step."""
+    return _PlainRawDevice(physical_drive_id)
 
 
 def _seek(h: int, offset: int) -> None:
@@ -576,11 +796,19 @@ class WindowsPlatformIO:
                 break
         return _Win32RawDevice(h, size)
 
+    def open_plain_raw_device(self, physical_drive_id):
+        """Cached (non-NO_BUFFERING) handle for the userspace FAT customize."""
+        return open_plain_raw_device(physical_drive_id)
+
     def close_handle(self, handle):
         close_handle(handle)
 
     def update_disk_properties(self, handle):
         update_disk_properties(handle)
+
+    def sync_cache(self, handle):
+        """Flush the USB-bridge firmware write cache (SCSI SYNCHRONIZE_CACHE)."""
+        synchronize_cache(handle)
 
     def eject_media(self, handle):
         eject_media(handle)

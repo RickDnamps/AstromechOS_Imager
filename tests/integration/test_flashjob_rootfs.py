@@ -328,12 +328,12 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
     fake_boot_master   = FakeBootPartitionForFlash(STOCK_CMDLINE)
     fake_boot_slave    = FakeBootPartitionForFlash(STOCK_CMDLINE)
 
-    # The orchestrator calls _bootpartition_open / _open_rootfs_partition
-    # keyword-only with raw_device_path=\\.\PHYSICALDRIVEN. Route by the
-    # trailing physical drive number so each role gets its own partition
-    # fakes (master ⇒ id 10 ⇒ PHYSICALDRIVE10, slave ⇒ id 11).
-    def _route_boot(*a, raw_device_path: str = "", **kw):
-        return fake_boot_master if raw_device_path.endswith("10") else fake_boot_slave
+    # The orchestrator calls _bootpartition_open(platform_io,
+    # physical_drive_id, mbr) positionally and _open_rootfs_partition with
+    # raw_device_path=\\.\PHYSICALDRIVEN. Route each to its per-role fake:
+    # master ⇒ id 10 ⇒ PHYSICALDRIVE10, slave ⇒ id 11.
+    def _route_boot(platform_io=None, physical_drive_id=None, *a, **kw):
+        return fake_boot_master if physical_drive_id == 10 else fake_boot_slave
 
     def _route_rootfs(*a, raw_device_path: str = "", **kw):
         return fake_rootfs_master if raw_device_path.endswith("10") else fake_rootfs_slave

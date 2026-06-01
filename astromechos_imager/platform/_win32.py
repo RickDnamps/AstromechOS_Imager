@@ -13,6 +13,7 @@ FILE_SHARE_WRITE = 0x00000002
 OPEN_EXISTING = 3
 FILE_FLAG_NO_BUFFERING = 0x20000000
 FILE_FLAG_WRITE_THROUGH = 0x80000000
+FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
 INVALID_HANDLE_VALUE = -1
 
 # Volume control
@@ -27,6 +28,37 @@ IOCTL_DISK_GET_DRIVE_GEOMETRY_EX = 0x000700A0
 IOCTL_DISK_DELETE_DRIVE_LAYOUT = 0x0007C100
 IOCTL_STORAGE_EJECT_MEDIA = 0x002D4808
 IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x00560000
+# SCSI pass-through (SYNCHRONIZE_CACHE to flush USB-bridge firmware cache).
+IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x0004D014
+SCSI_IOCTL_DATA_UNSPECIFIED = 2
+SCSIOP_SYNCHRONIZE_CACHE = 0x35
+
+
+class SCSI_PASS_THROUGH_DIRECT(ctypes.Structure):
+    """winioctl SCSI_PASS_THROUGH_DIRECT + an inline 32-byte sense buffer."""
+    _fields_ = [
+        ("Length", wintypes.USHORT),
+        ("ScsiStatus", ctypes.c_ubyte),
+        ("PathId", ctypes.c_ubyte),
+        ("TargetId", ctypes.c_ubyte),
+        ("Lun", ctypes.c_ubyte),
+        ("CdbLength", ctypes.c_ubyte),
+        ("SenseInfoLength", ctypes.c_ubyte),
+        ("DataIn", ctypes.c_ubyte),
+        ("DataTransferLength", wintypes.ULONG),
+        ("TimeOutValue", wintypes.ULONG),
+        ("DataBuffer", ctypes.c_void_p),
+        ("SenseInfoOffset", wintypes.ULONG),
+        ("Cdb", ctypes.c_ubyte * 16),
+    ]
+
+
+class SCSI_PASS_THROUGH_DIRECT_WITH_SENSE(ctypes.Structure):
+    _fields_ = [
+        ("sptd", SCSI_PASS_THROUGH_DIRECT),
+        ("Filler", wintypes.ULONG),
+        ("Sense", ctypes.c_ubyte * 32),
+    ]
 
 
 class DISK_GEOMETRY_EX(ctypes.Structure):
@@ -110,4 +142,32 @@ def kernel32():
             wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
         ]
         _kernel32.GetVolumePathNamesForVolumeNameW.restype = wintypes.BOOL
+        # GetVolumeInformationW — query whether a volume actually has a
+        # recognised filesystem. Used as a readiness probe before
+        # attaching the operator's drive letter: a stale Mount Manager
+        # entry surviving an IOCTL_DISK_DELETE_DRIVE_LAYOUT would otherwise
+        # be picked up first, attaching K: to a phantom volume Windows
+        # then refuses to read ("Le volume ne contient pas de système
+        # de fichiers connu" pop-up).
+        _kernel32.GetVolumeInformationW.argtypes = [
+            wintypes.LPCWSTR,            # lpRootPathName ("X:\")
+            wintypes.LPWSTR,             # lpVolumeNameBuffer
+            wintypes.DWORD,              # nVolumeNameSize
+            ctypes.POINTER(wintypes.DWORD),  # lpVolumeSerialNumber
+            ctypes.POINTER(wintypes.DWORD),  # lpMaximumComponentLength
+            ctypes.POINTER(wintypes.DWORD),  # lpFileSystemFlags
+            wintypes.LPWSTR,             # lpFileSystemNameBuffer
+            wintypes.DWORD,              # nFileSystemNameSize
+        ]
+        _kernel32.GetVolumeInformationW.restype = wintypes.BOOL
+        # SetErrorMode lets the process tell Windows NOT to surface its
+        # own "Format X:?" / "X: is not accessible" message boxes when
+        # opening a freshly-written removable device. We OR
+        # SEM_FAILCRITICALERRORS into the inherited error mode at app
+        # boot so the shell pop-ups stay suppressed even when the user
+        # explicitly mounts a half-written partition.
+        _kernel32.SetErrorMode.argtypes = [wintypes.UINT]
+        _kernel32.SetErrorMode.restype = wintypes.UINT
+        _kernel32.GetErrorMode.argtypes = []
+        _kernel32.GetErrorMode.restype = wintypes.UINT
     return _kernel32

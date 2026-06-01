@@ -3,45 +3,42 @@
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from astromechos_imager.core.bootpartition import (
-    BootPartitionLayout,
     find_first_fat32_partition,
     find_rootfs_partition,
-    open_boot_partition as _open_boot_partition_impl,
 )
 
 
 def _bootpartition_open(
-    raw_device_path: str,
+    platform_io: "PlatformIO",
+    physical_drive_id: int,
     mbr_bytes: bytes,
-    known_letters_before: set[str],
-    preferred_letter: str | None = None,
 ) -> "object | None":
-    """Parse the MBR, find the FAT32 partition, and open it.
+    r"""Parse the MBR, find the FAT32 partition, open it via userspace FAT.
 
-    Returns None if no FAT32 partition is found (so callers can skip customize).
-    This is the single monkeypatching point for tests.
+    Returns None if no FAT32 partition is found (so callers can skip
+    customize). This is the single monkeypatching point for tests.
 
-    ``preferred_letter`` (when provided) is forwarded to
-    ``open_boot_partition`` so an already-assigned target letter is used
-    directly instead of going through the brittle "new letter detection"
-    fallback (see Bug #2 in the E2E audit).
+    The returned ``RawFatBootPartition`` reads and writes the FAT in
+    userspace (pyfatfs over a raw ``\\.\PHYSICALDRIVEn`` handle) — Windows
+    never mounts the partition, so the "Format K:?" / "K:\\ is not
+    accessible" shell pop-ups can't fire, the customize step never races
+    Explorer, and no drive letter is involved (so the bundle physically
+    cannot leak to C: — the old letter-detection failure mode is gone by
+    construction).
     """
     from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
+    from astromechos_imager.core.raw_fat_partition import RawFatBootPartition  # noqa: PLC0415
     try:
         layout = find_first_fat32_partition(mbr_bytes)
     except BootPartitionMountError:
         return None
-    return _open_boot_partition_impl(
-        raw_device_path=raw_device_path,
-        layout=layout,
-        known_letters_before=known_letters_before,
-        preferred_letter=preferred_letter,
+    return RawFatBootPartition.open_on_drive(
+        platform_io, physical_drive_id, layout.offset, layout.size,
     )
 
 
@@ -125,48 +122,59 @@ class FlashJob:
     ext4_e2fsck_exe: Path | None = None
 
     def run(self) -> FlashJobResult:
-        # Audit High #15: lock_and_dismount returns kernel32 HANDLEs that
-        # MUST be closed, otherwise volumes stay locked until process exit
-        # and "Flash another" never gets remount + the operator can't see
-        # the freshly-written SD in Explorer.
+        # PHASE 0 native shell-quiet: set THIS worker thread's error mode
+        # (SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX) via
+        # astro_flash.dll so any shell error dialog OUR process would
+        # raise while touching the half-written removable device — the
+        # "K:\ is not accessible" box during the customize step's file
+        # I/O — is suppressed for the lifetime of this thread. (The
+        # separate "Format K:?" dialog is Explorer's own; SHChangeNotify
+        # in lock_and_dismount targets that one.) No-op without the DLL.
+        try:
+            from astromechos_imager.platform import native_shell_quiet
+            if native_shell_quiet.available():
+                native_shell_quiet.quiet_thread()
+        except Exception:
+            pass
+        # Audit High #15: lock_and_dismount handles MUST be closed. With the
+        # userspace-FAT customize path lock_and_dismount returns [] (it does
+        # the dismount + DeleteVolumeMountPoint + SHChangeNotify and keeps no
+        # handle), but the outer cleanup loop is preserved for the Protocol.
         locked_handles: list[int] = []
         write_result = None
-        # Snapshot drive letters AFTER locking the target — the target's
-        # own letter is now dismounted, so it falls OUT of the set. After
-        # flash + update_disk_properties, the newly auto-mounted partition
-        # reappears as the first letter NOT in this set. Without this
-        # snapshot, the α fallback (DriveLetterBootPartition) defaulted to
-        # the alphabetically-first present letter — typically C: (system
-        # drive) — and the AstromechOS customize bundle was silently
-        # written to the wrong volume.
-        def _snapshot_letters() -> set[str]:
-            try:
-                import ctypes  # noqa: PLC0415
-                bits = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
-                return {chr(ord("A") + i) for i in range(26) if bits & (1 << i)}
-            except Exception:
-                return set()  # non-Windows or test mock
-        known_letters_before: set[str] = set()
         try:
             try:
-                # 1. Lock + dismount any drive letters for this physical drive.
+                # 1. Lock + dismount any drive letters for this physical
+                #    drive (removes the letter from Mount Manager + tells
+                #    Explorer the drive is gone). After this the SD has NO
+                #    drive letter for the whole flash.
                 locked_handles = list(
                     self.platform_io.lock_and_dismount(self.target.drive_letters) or []
                 )
-                # Snapshot AFTER dismount — the target's letter is now absent,
-                # so when Windows re-mounts the freshly-written FAT32 partition,
-                # it will be the first letter NOT in this set.
-                known_letters_before = _snapshot_letters()
-                # 2. Open raw device + flash.
+                # 2. Open ONE raw device handle (NO_BUFFERING | WRITE_THROUGH |
+                #    SEQUENTIAL_SCAN) and use it for write, verify AND the final
+                #    MBR write — rpi-imager's exact model. NO_BUFFERING reads
+                #    bypass the OS page cache, and verify reads land in a
+                #    4096-aligned buffer (see _Win32RawDevice.read), so the
+                #    post-write read-back reads the device truth on the first
+                #    pass instead of stale bridge-cached bytes.
                 dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
                 try:
                     with open_image(self.image_path) as src:
                         dw = DiskWriter(src, dev, on_progress=self.on_progress,
                                         cancel_event=self.cancel_event)
                         write_result = dw.run()
-                    # 3. Verify — hash-injects the deferred first block so
-                    #    the comparison matches the source SHA256 even
-                    #    though the MBR region is NOT on disk yet.
+                    # PrepareForSequentialRead: FlushFileBuffers commits any
+                    # in-flight writes; SCSI SYNCHRONIZE_CACHE pushes the USB
+                    # bridge's firmware cache to flash. (file_operations_windows
+                    # .cpp:1027 + downloadthread.cpp _verify.)
+                    dev.flush()
+                    self._sync_cache(dev)
+
+                    # 3. Verify on the SAME handle. MBR still absent on disk;
+                    #    verify_readback injects the deferred first block in
+                    #    memory and reads [first_block_len, length) back via
+                    #    aligned NO_BUFFERING reads.
                     if not self.skip_verify and not self.cancel_event.is_set():
                         verify_readback(dev,
                                         expected_sha256=write_result.source_sha256,
@@ -174,11 +182,42 @@ class FlashJob:
                                         on_progress=self.on_progress,
                                         cancel_event=self.cancel_event,
                                         first_block=write_result.first_block_data)
-                    # 3.5 Write the deferred first block back to offset 0.
-                    # With Mount-Manager letter removed (lock_and_dismount
-                    # called DeleteVolumeMountPointW), Windows cannot
-                    # auto-mount even after the MBR appears — until step
-                    # 4 explicitly re-attaches a letter.
+
+                    # 4. Userspace-FAT customize — runs while the deferred first
+                    #    block (the MBR) is STILL ABSENT from the disk. With no
+                    #    partition table, Windows cannot discover the FAT32
+                    #    partition to auto-mount it: no drive letter, no
+                    #    Explorer, no "Format K:?" pop-up. The bundle physically
+                    #    cannot reach C: — there is no letter involved.
+                    if not self.skip_customize and not self.cancel_event.is_set():
+                        self.on_progress(DiskWriterProgress(
+                            phase="customizing", bytes_done=0, bytes_total=0,
+                            throughput_bps=0.0,
+                        ))
+                        mbr = (write_result.first_block_data[:512]
+                               if write_result.first_block_data is not None
+                               else dev.read(0, 512))
+                        bp = _bootpartition_open(
+                            self.platform_io,
+                            self.target.physical_drive_id,
+                            mbr,
+                        )
+                        if bp is not None:
+                            try:
+                                if (
+                                    self.linux_account is not None
+                                    and not self.cancel_event.is_set()
+                                ):
+                                    self._run_rootfs_personalization(mbr, bp)
+                                if not self.cancel_event.is_set():
+                                    FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
+                                        bp, self.role)
+                            finally:
+                                bp.close()
+
+                    # 5. Write the deferred first block (the MBR) LAST. Only now
+                    #    does the partition table appear on disk, so any Windows
+                    #    auto-mount happens AFTER customize — harmless, post-hoc.
                     if (write_result.first_block_data is not None
                             and not self.cancel_event.is_set()):
                         n = dev.write(0, write_result.first_block_data)
@@ -189,62 +228,7 @@ class FlashJob:
                                 f"{n}/{len(write_result.first_block_data)}"
                             )
                         dev.flush()
-                    # 4. Rootfs personalization + boot partition customize
-                    if not self.skip_customize and not self.cancel_event.is_set():
-                        # Surface the customization phase to the UI — otherwise the
-                        # progress bar sits at 100% for 2-5 s while FAT32 writes happen,
-                        # which operators perceive as a freeze.
-                        self.on_progress(DiskWriterProgress(
-                            phase="customizing",
-                            bytes_done=0,
-                            bytes_total=0,
-                            throughput_bps=0.0,
-                        ))
-                        self.platform_io.update_disk_properties(getattr(dev, "_h", 0))
-                        # Take the MBR from the deferred-write buffer when
-                        # available (no disk round-trip); fall back to a
-                        # raw read when the source was too small to defer
-                        # a first block.
-                        mbr = (write_result.first_block_data[:512]
-                               if write_result.first_block_data is not None
-                               else dev.read(0, 512))
-                        # Re-attach our original drive letter to the freshly
-                        # written volume. lock_and_dismount removed the
-                        # letter via DeleteVolumeMountPointW so verify could
-                        # run without Windows interference; now we put the
-                        # letter back so DriveLetterBootPartition can write
-                        # the AstromechOS bundle via normal Win32 file I/O.
-                        target_letter = (self.target.drive_letters[0]
-                                         if self.target.drive_letters else None)
-                        if target_letter is not None:
-                            attach = getattr(
-                                self.platform_io,
-                                "attach_letter_to_unmounted_volume",
-                                None,
-                            )
-                            if attach is not None:
-                                attach(target_letter, self.target.physical_drive_id)
-                        bp = _bootpartition_open(
-                            raw_device_path=self.target.device_path,
-                            mbr_bytes=mbr,
-                            known_letters_before=known_letters_before,
-                            preferred_letter=target_letter,
-                        )
-                        if bp is not None:
-                            try:
-                                self._assert_bp_targets_our_drive(bp)
-                                # 4a. Rootfs personalization (if linux_account provided)
-                                if (
-                                    self.linux_account is not None
-                                    and not self.cancel_event.is_set()
-                                ):
-                                    self._run_rootfs_personalization(mbr, bp)
-                                # 4b. Firstboot bundle (boot partition)
-                                if not self.cancel_event.is_set():
-                                    FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
-                                        bp, self.role)
-                            finally:
-                                bp.close()
+                        self._sync_cache(dev)
                 finally:
                     dev.close()
                 return FlashJobResult(ok=True,
@@ -263,8 +247,30 @@ class FlashJob:
                 # used to escape the FlashJobResult contract and crash the
                 # worker thread. Wrap unexpected exceptions in a generic
                 # FlashError so callers still get a result.
+                #
+                # Format manually so the surfaced UI message is English-only
+                # — ``{e!r}`` on an OSError expands to the OS-localized
+                # ``strerror`` text ("Le système ne peut pas trouver le
+                # fichier spécifié" on French Windows etc.). CLAUDE.md
+                # forbids French in shipped artefacts. We keep the
+                # actionable diagnostics (errno, winerror, filename) and
+                # drop the localised prose.
                 from astromechos_imager.core.errors import FlashError
-                wrapped = FlashError(f"unexpected error during flash: {e!r}")
+                exc_type = type(e).__name__
+                if isinstance(e, OSError):
+                    parts = [f"errno={e.errno}"]
+                    winerr = getattr(e, "winerror", None)
+                    if winerr is not None:
+                        parts.append(f"winerror={winerr}")
+                    if e.filename:
+                        parts.append(f"filename={e.filename!r}")
+                    detail = f"{exc_type}({', '.join(parts)})"
+                else:
+                    # Strip embedded newlines / non-ASCII from the message so
+                    # the UI dialog stays a single readable line.
+                    msg = (str(e) or "<no message>").encode("ascii", "replace").decode("ascii")
+                    detail = f"{exc_type}: {msg}"
+                wrapped = FlashError(f"unexpected error during flash: {detail}")
                 wrapped.__cause__ = e
                 return FlashJobResult(
                     ok=False,
@@ -280,63 +286,24 @@ class FlashJob:
                 except Exception:
                     pass  # best-effort; we're already in a finally
 
-    def _assert_bp_targets_our_drive(self, bp: object) -> None:
-        """Hard safety check — refuse to customize unless ``bp`` lives on the target.
+    def _sync_cache(self, dev: object) -> None:
+        """Best-effort flush of the USB-bridge firmware write cache.
 
-        Prevents Bug #1 in the E2E audit (orchestrator silently wrote the
-        AstromechOS bundle to ``C:\\`` because the α fallback picked the
-        alphabetically-first present drive letter).
-
-        Only applies when ``bp`` is a ``DriveLetterBootPartition`` (the α
-        path); the β pyfatfs path writes through the raw device handle
-        opened from ``\\\\.\\PHYSICALDRIVEn``, which by construction
-        targets our drive.
-
-        Re-enumerates removable drives via ``platform_io`` to discover
-        which drive letters currently map to the target's physical drive.
-        If ``bp``'s root letter is not in that set — ABORT with
-        ``CustomizeTargetMismatchError``. The raw image is already on
-        disk, so the SD state is ``BOOTABLE_NO_FIRSTBOOT`` (operator can
-        safely re-flash).
+        Calls ``platform_io.sync_cache(handle)`` (SCSI SYNCHRONIZE_CACHE,
+        falling back to FlushFileBuffers). No-op when the platform doesn't
+        expose it (tests / non-Windows) or the device handle isn't a Win32
+        HANDLE. Never raises — cache sync is an optimisation, not a gate.
         """
-        from astromechos_imager.core.bootpartition import DriveLetterBootPartition  # noqa: PLC0415
-        from astromechos_imager.core.errors import CustomizeTargetMismatchError  # noqa: PLC0415
-
-        if not isinstance(bp, DriveLetterBootPartition):
-            return  # β path — writes via raw device handle, no letter to check
-        bp_root = getattr(bp, "_root", None)
-        if bp_root is None:
+        sync = getattr(self.platform_io, "sync_cache", None)
+        if sync is None:
             return
-        actual_letter = str(bp_root.drive).rstrip(":\\")
-        if not actual_letter:
-            raise CustomizeTargetMismatchError(
-                "Refusing to customize: boot partition has no resolvable "
-                "drive letter — aborting before any write to prevent "
-                "spilling AstromechOS bundle files onto an unknown volume."
-            )
-        # Discover which letters currently map to OUR physical drive.
-        target_letters: set[str] = set()
+        handle = getattr(dev, "_h", None)
+        if handle is None:
+            return
         try:
-            drives = list(self.platform_io.enumerate_removable_drives())
-        except Exception as exc:  # noqa: BLE001
-            raise CustomizeTargetMismatchError(
-                f"Refusing to customize: cannot re-enumerate removable "
-                f"drives to verify {actual_letter}: maps to the target "
-                f"physical drive {self.target.physical_drive_id}: {exc!r}"
-            ) from exc
-        for d in drives:
-            if d.physical_drive_id == self.target.physical_drive_id:
-                target_letters.update(d.drive_letters)
-        if actual_letter not in target_letters:
-            raise CustomizeTargetMismatchError(
-                f"SAFETY BLOCK: boot partition resolved to "
-                f"'{actual_letter}:' but the target physical drive "
-                f"{self.target.physical_drive_id} currently maps to "
-                f"{sorted(target_letters) or '(none — drive disconnected?)'}. "
-                f"ABORT to prevent writing the AstromechOS bundle to a "
-                f"non-target volume (would have leaked to the system drive "
-                f"or another removable medium)."
-            )
+            sync(handle)
+        except Exception:
+            pass
 
     def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
         """Open the ext4 rootfs partition and apply RootfsPersonalizer.

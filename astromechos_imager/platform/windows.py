@@ -678,7 +678,10 @@ def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> b
         f"select disk {physical_drive_id}",
         "clean",
         "create partition primary",
-        "format fs=exfat quick label=ASTROMECH",
+        # "NO NAME" = the neutral, factory-fresh label generic SD cards ship
+        # with — so a cancelled flash leaves the card looking like a blank
+        # card, not one branded by this tool.
+        'format fs=exfat quick label="NO NAME"',
         "assign",
         "exit",
         "",

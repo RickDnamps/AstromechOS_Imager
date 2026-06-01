@@ -317,6 +317,16 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    # uac_admin=True is the RELIABLE way to make PyInstaller stamp the
+    # bootloader's manifest with requestedExecutionLevel=requireAdministrator.
+    # Passing only `manifest=<file>` did NOT take effect — the built exe ended
+    # up with the default `asInvoker` level, so on a normal double-click the
+    # app ran UN-elevated and every privileged Win32 call (CreateFileW on
+    # \\.\PHYSICALDRIVEn for write, DeleteVolumeMountPointW, FSCTL_*) failed
+    # with ERROR_ACCESS_DENIED (errno 5) — the SD never got written. With
+    # uac_admin the OS shows the UAC prompt at launch and the process is
+    # elevated, so raw-disk access is permitted.
+    uac_admin=True,
     manifest=str(MANIFEST_PATH) if MANIFEST_PATH.is_file() else None,
     icon=str(ICON_PATH) if ICON_PATH.is_file() else None,
 )

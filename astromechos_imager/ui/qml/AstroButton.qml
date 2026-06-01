@@ -69,7 +69,11 @@ Button {
 
     readonly property color _fgIdle:
         variant === "primary"   ? theme.colors.colorTextOnAccent
-      : variant === "danger"    ? theme.colors.colorTextPrimary
+      // Danger = filled RED background → text must be WHITE in BOTH themes.
+      // (Was colorTextPrimary, which is dark in the light theme → black text
+      // on red, unreadable. The red fill is saturated/dark enough that white
+      // reads cleanly in dark AND light.)
+      : variant === "danger"    ? "#FFFFFF"
       : selected                ? theme.colors.colorAccent
       :                            theme.colors.colorAccent
 

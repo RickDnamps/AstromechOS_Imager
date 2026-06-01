@@ -132,12 +132,19 @@ Rectangle {
         // ── Header ────────────────────────────────────────────────────
         ColumnLayout {
             spacing: 4
+            // Role tag — UPPERCASE, baked directly into the title so the
+            // operator can never miss which card is being acted on.
+            // Reads as "FLASHING MASTER — DO NOT UNPLUG" / "VERIFYING
+            // SLAVE IMAGE INTEGRITY…" / "MASTER FLASH COMPLETE" etc.
             Text {
-                text: isVerifying ? "VERIFYING IMAGE INTEGRITY…"
-                    : isFlashing  ? "FLASHING — DO NOT UNPLUG"
-                    : isError     ? "FLASH FAILED"
-                    : isDone      ? "FLASH COMPLETE"
-                    :               "CONFIRM AND FLASH"
+                property string roleTag: needMaster ? "MASTER"
+                                        : needSlave  ? "SLAVE"
+                                        :              ""
+                text: isVerifying ? "VERIFYING " + roleTag + " IMAGE INTEGRITY…"
+                    : isFlashing  ? "FLASHING " + roleTag + " — DO NOT UNPLUG"
+                    : isError     ? roleTag + " FLASH FAILED"
+                    : isDone      ? roleTag + " FLASH COMPLETE"
+                    :               "CONFIRM AND FLASH " + roleTag
                 color: isError     ? theme.colors.colorBorderError
                      : isDone      ? theme.colors.colorAccent
                      : isVerifying ? theme.colors.colorAccent

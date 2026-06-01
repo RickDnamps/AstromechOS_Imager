@@ -71,12 +71,15 @@ Rectangle {
 
         property alias text: input.text
         property alias placeholder: input.placeholderText
-        property alias echoMode: input.echoMode
         property string label: ""
         property string helper: ""
         property bool ok: false
         // Optional fields stay neutral (no red ✗) when empty.
         property bool optional: false
+        // Password fields set revealable: true → masked by default with a
+        // 👁 toggle to reveal the text (so the operator can check for typos).
+        property bool revealable: false
+        property bool revealed: false
         signal edited()
 
         RowLayout {
@@ -123,7 +126,7 @@ Rectangle {
                 id: input
                 anchors.fill: parent
                 anchors.leftMargin: 12
-                anchors.rightMargin: 12
+                anchors.rightMargin: field.revealable ? 38 : 12
                 font.family: Theme.fontBody  // Orbitron — see feedback-orbitron memory
                 font.pixelSize: 12
                 color: theme.colors.colorTextPrimary
@@ -132,7 +135,32 @@ Rectangle {
                 selectedTextColor: theme.colors.colorTextPrimary
                 background: Item {}
                 verticalAlignment: TextInput.AlignVCenter
+                // Masked when revealable & not revealed; plain text otherwise.
+                echoMode: (field.revealable && !field.revealed)
+                          ? TextInput.Password : TextInput.Normal
                 onTextEdited: field.edited()
+            }
+
+            // 👁 reveal/hide toggle — only on password (revealable) fields.
+            Text {
+                visible: field.revealable
+                anchors.right: parent.right
+                anchors.rightMargin: 11
+                anchors.verticalCenter: parent.verticalCenter
+                text: field.revealed ? "🙈" : "👁"
+                font.pixelSize: 15
+                color: field.revealed ? theme.colors.colorAccent
+                                      : theme.colors.colorTextTertiary
+                opacity: eyeMouse.containsMouse ? 1.0 : 0.85
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
+                MouseArea {
+                    id: eyeMouse
+                    anchors.fill: parent
+                    anchors.margins: -6      // bigger hit target
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: field.revealed = !field.revealed
+                }
             }
         }
 
@@ -274,7 +302,7 @@ Rectangle {
                         label: "PASSWORD"
                         placeholder: "astropass"
                         ok: installPasswordOk
-                        echoMode: TextInput.Password
+                        revealable: true
                         onEdited: _flush()
                     }
                 }
@@ -298,7 +326,7 @@ Rectangle {
                     label: "PRIVATE ROBOT HOTSPOT PASSWORD"
                     placeholder: "astropass"
                     ok: hotspotPasswordOk
-                    echoMode: TextInput.Password
+                    revealable: true
                     onEdited: _flush()
                 }
             }
@@ -330,7 +358,7 @@ Rectangle {
                         placeholder: "(leave empty to skip)"
                         ok: wifiPskOk
                         optional: true
-                        echoMode: TextInput.Password
+                        revealable: true
                         onEdited: _flush()
                     }
                 }

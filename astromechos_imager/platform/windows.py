@@ -682,7 +682,10 @@ def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> b
         # with — so a cancelled flash leaves the card looking like a blank
         # card, not one branded by this tool.
         'format fs=exfat quick label="NO NAME"',
-        "assign",
+        # NOTE: no "assign". Windows auto-mounts the removable exFAT volume
+        # and picks a free letter on its own — forcing one here just adds to
+        # the drive-letter creep (each format = new volume GUID = Mount
+        # Manager hands out the next free letter and remembers the old one).
         "exit",
         "",
     ])

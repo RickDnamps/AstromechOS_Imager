@@ -381,10 +381,10 @@ class FlashJob:
         # from vendor/ (via the same resolver the rest of the app uses) —
         # NOT the old ``/usr/sbin/debugfs`` WSL/dev fallback, which simply
         # does not exist on a Windows host and crashed the customize step
-        # with a raw FileNotFoundError (WinError 2). If the bundled tool is
-        # missing, vendored_binaries raises a clear English error naming the
-        # expected path — the UID-1000 cold surgery is a hard invariant, so
-        # we surface that rather than silently skipping it.
+        # with a raw FileNotFoundError (WinError 2). If the tool is genuinely
+        # missing, the subprocess raises FileNotFoundError and the outer
+        # try/except below SKIPS the cold surgery with a loud warning instead
+        # of failing the whole flash.
         if debugfs is None or e2fsck is None:
             import sys  # noqa: PLC0415
             if sys.platform == "win32":
@@ -405,18 +405,33 @@ class FlashJob:
                 # POSIX dev/test host — system e2fsprogs.
                 debugfs = debugfs or Path("/usr/sbin/debugfs")
                 e2fsck = e2fsck or Path("/usr/sbin/e2fsck")
-        rp = _open_rootfs_partition(
-            raw_device_path=self.target.device_path,
-            mbr_bytes=mbr_bytes,
-            debugfs_exe=debugfs,
-            e2fsck_exe=e2fsck,
-        )
-        if rp is None:
-            return  # no Linux partition → skip
         try:
-            RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
-        finally:
-            rp.close()
+            rp = _open_rootfs_partition(
+                raw_device_path=self.target.device_path,
+                mbr_bytes=mbr_bytes,
+                debugfs_exe=debugfs,
+                e2fsck_exe=e2fsck,
+            )
+            if rp is None:
+                return  # no Linux partition → skip
+            try:
+                RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
+            finally:
+                rp.close()
+        except FileNotFoundError as exc:
+            # The e2fsprogs executable itself is missing (subprocess.run on a
+            # non-existent debugfs.exe / e2fsck.exe raises FileNotFoundError /
+            # WinError 2). Do NOT crash the whole flash — the image write,
+            # verify, and userspace-FAT firstboot bundle have all succeeded.
+            # Skip the UID-1000 cold surgery with a loud warning so the
+            # operator knows the credentials were NOT renamed on this card
+            # (populate vendor/ per vendor/README.md to enable it).
+            _log.warning(
+                "rootfs UID-1000 surgery SKIPPED — e2fsprogs tool missing "
+                "(%s: %s). debugfs=%s e2fsck=%s. The card's default UID-1000 "
+                "account is UNCHANGED; populate vendor/ to enable cold surgery.",
+                type(exc).__name__, exc, debugfs, e2fsck,
+            )
 
 
 @dataclass(frozen=True)

@@ -804,24 +804,28 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
 
         linux_account = generate_linux_account(install_user, install_password)
 
-        # Resolve the bundled e2fsprogs tools NOW (at job-build time, before
-        # the destructive write) so a missing debugfs.exe / e2fsck.exe fails
-        # the WRITE button with a clear message instead of crashing the
-        # customize step AFTER a multi-GB write. The UID-1000 cold rootfs
-        # surgery is a hard invariant — these tools are mandatory on Windows.
-        #
-        # Gate on the REAL WindowsPlatformIO: unit tests inject a fake
-        # platform_io on a Windows host and must not be forced to ship
-        # debugfs.exe just to exercise the field-defaulting logic. The real
-        # app always passes a WindowsPlatformIO, so production still gets the
-        # early, clear "debugfs.exe not found" error.
+        # Resolve the bundled e2fsprogs tools if present, but NON-FATALLY:
+        # a missing debugfs.exe / e2fsck.exe must NOT block the WRITE button
+        # or the pre-flash source validation. When they're absent the rootfs
+        # UID-1000 cold surgery is skipped (with a loud warning logged by the
+        # orchestrator); the rest of the flash — image write, verify,
+        # userspace-FAT firstboot bundle, MBR — still runs. Operators who
+        # need the cold surgery populate vendor/ per vendor/README.md.
         ext4_debugfs = ext4_e2fsck = None
         if sys.platform == "win32" and type(platform_io).__name__ == "WindowsPlatformIO":
-            from astromechos_imager.core.vendored_binaries import (
-                debugfs_exe, e2fsck_exe,
-            )
-            ext4_debugfs = debugfs_exe()   # raises a clear error if absent
-            ext4_e2fsck = e2fsck_exe()
+            try:
+                from astromechos_imager.core.vendored_binaries import (
+                    debugfs_exe, e2fsck_exe,
+                )
+                ext4_debugfs = debugfs_exe()
+                ext4_e2fsck = e2fsck_exe()
+            except Exception as exc:  # noqa: BLE001
+                import logging
+                logging.getLogger(__name__).warning(
+                    "e2fsprogs tools not available (%s) — rootfs UID-1000 "
+                    "surgery will be skipped this flash", exc,
+                )
+                ext4_debugfs = ext4_e2fsck = None
 
         # SSID is session-scoped — generated ONCE by startSession() on
         # Screen 01. The SAME hotspot creds are baked into both master

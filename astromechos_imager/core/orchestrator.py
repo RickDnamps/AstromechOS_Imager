@@ -43,6 +43,32 @@ def _bootpartition_open(
     )
 
 
+def _physicaldrive_to_cygwin(win_path: str) -> str:
+    """Map a Win32 ``\\\\.\\PHYSICALDRIVEn`` path to Cygwin's ``/dev/sd<letter>``.
+
+    The bundled e2fsprogs (``debugfs.exe`` / ``e2fsck.exe``) are **Cygwin**
+    builds. Cygwin's libext2fs cannot open a Win32 device namespace path like
+    ``\\\\.\\PHYSICALDRIVE1`` — that yields ERROR_NOT_READY (errno 21). Cygwin
+    instead exposes physical drives as ``/dev/sda`` (PHYSICALDRIVE0),
+    ``/dev/sdb`` (PHYSICALDRIVE1), … i.e. drive *n* → ``/dev/sd`` + chr('a'+n).
+    This mapping is deterministic in Cygwin (derived from the physical drive
+    number), so it targets the same disk the rest of the flash uses.
+
+    Safety: even if the mapping were wrong, debugfs opens at the ext4
+    ``?offset=`` and refuses to operate without a valid ext4 superblock there,
+    so a mis-mapped device fails cleanly (caught + skipped) rather than
+    corrupting another disk.
+
+    Returns the input unchanged if it doesn't match the PHYSICALDRIVE pattern
+    (non-Windows paths, already-translated paths, test fakes).
+    """
+    import re  # noqa: PLC0415
+    m = re.match(r"^\\\\[.?]\\PHYSICALDRIVE(\d+)$", win_path, re.IGNORECASE)
+    if not m:
+        return win_path
+    return "/dev/sd" + chr(ord("a") + int(m.group(1)))
+
+
 def _open_rootfs_partition(
     raw_device_path: str,
     mbr_bytes: bytes,
@@ -56,9 +82,12 @@ def _open_rootfs_partition(
     This is the single monkeypatching point for tests.
 
     On Windows production: ``raw_device_path`` is a Win32 device path
-    (``\\\\.\\PHYSICALDRIVEn``). The ext4 backend constructs a device arg of
-    the form ``\\\\.\\PHYSICALDRIVEn?offset=N`` which e2fsprogs on WSL
-    interprets via the standard ``?offset=N`` syntax.
+    (``\\\\.\\PHYSICALDRIVEn``). The bundled e2fsprogs are **Cygwin** builds,
+    which cannot open a Win32 device path, so we translate it to Cygwin's
+    ``/dev/sd<letter>`` form (see :func:`_physicaldrive_to_cygwin`); the ext4
+    backend then constructs ``/dev/sd<letter>?offset=N`` (standard libext2fs
+    ``?offset=`` syntax). When an explicit ``invoker`` is given (e.g. WSL dev
+    mode) the path is passed through unchanged.
 
     On test machines: monkeypatched to return a FakeRootfsPartition directly.
     """
@@ -68,8 +97,12 @@ def _open_rootfs_partition(
         layout = find_rootfs_partition(mbr_bytes)
     except BootPartitionMountError:
         return None
+    # Native Cygwin (no explicit invoker): translate the Win32 device path.
+    image_path = raw_device_path
+    if not invoker:
+        image_path = _physicaldrive_to_cygwin(raw_device_path)
     return Ext4DebugfsBackend(
-        image_path=raw_device_path,
+        image_path=image_path,
         offset_bytes=layout.offset,
         debugfs_exe=debugfs_exe,
         e2fsck_exe=e2fsck_exe,
@@ -486,19 +519,40 @@ class FlashJob:
                 RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
             finally:
                 rp.close()
-        except FileNotFoundError as exc:
-            # The e2fsprogs executable itself is missing (subprocess.run on a
-            # non-existent debugfs.exe / e2fsck.exe raises FileNotFoundError /
-            # WinError 2). Do NOT crash the whole flash — the image write,
-            # verify, and userspace-FAT firstboot bundle have all succeeded.
-            # Skip the UID-1000 cold surgery with a loud warning so the
-            # operator knows the credentials were NOT renamed on this card
-            # (populate vendor/ per vendor/README.md to enable it).
+        except Exception as exc:  # noqa: BLE001
+            # Cold surgery is STRICTLY best-effort — it must NEVER abort the
+            # flash. The image write, verify, mandatory rootfs auto-resize
+            # (decoupled, already applied), and userspace-FAT firstboot bundle
+            # have all succeeded; the deferred MBR is about to be written. If
+            # we let an error escape here the flash aborts BEFORE the MBR write
+            # → the card is left RAW → Windows nags "Format?" and the operator
+            # thinks the flash bricked the card.
+            #
+            # Failure modes we swallow (log loudly, skip the UID-1000 rename,
+            # keep the golden image's default account):
+            #   * FileNotFoundError / WinError 2 — debugfs.exe / e2fsck.exe
+            #     missing (vendor/ not populated).
+            #   * OSError errno 21 (ERROR_NOT_READY) / sharing violations —
+            #     the Cygwin e2fsprogs could not open the raw device at the
+            #     ext4 offset.
+            #   * RootfsModError / CalledProcessError — debugfs ran but a
+            #     rename/fsck step failed (e.g. no valid ext4 superblock at
+            #     the resolved device path).
+            # debugfs only ever writes via a valid ext4 superblock, so a
+            # failed open/parse cannot corrupt the card or any other disk.
+            errno_part = ""
+            if isinstance(exc, OSError) and exc.errno is not None:
+                errno_part = f" errno={exc.errno}"
+                winerr = getattr(exc, "winerror", None)
+                if winerr is not None:
+                    errno_part += f" winerror={winerr}"
             _log.warning(
-                "rootfs UID-1000 surgery SKIPPED — e2fsprogs tool missing "
-                "(%s: %s). debugfs=%s e2fsck=%s. The card's default UID-1000 "
-                "account is UNCHANGED; populate vendor/ to enable cold surgery.",
-                type(exc).__name__, exc, debugfs, e2fsck,
+                "rootfs UID-1000 cold surgery SKIPPED (non-fatal): %s: %s%s. "
+                "debugfs=%s e2fsck=%s. The card keeps the golden image's "
+                "DEFAULT UID-1000 account; the flash + auto-resize still "
+                "completed normally.",
+                type(exc).__name__, exc, errno_part, debugfs, e2fsck,
+                exc_info=True,
             )
 
 

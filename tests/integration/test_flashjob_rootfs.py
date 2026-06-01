@@ -516,6 +516,81 @@ def test_flashjob_resize_injected_even_when_debugfs_missing(
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
+def test_physicaldrive_to_cygwin_mapping():
+    r"""Win32 \\.\PHYSICALDRIVEn -> Cygwin /dev/sd<letter> (n=0->a, 1->b, ...)."""
+    from astromechos_imager.core.orchestrator import _physicaldrive_to_cygwin
+    assert _physicaldrive_to_cygwin(r"\\.\PHYSICALDRIVE0") == "/dev/sda"
+    assert _physicaldrive_to_cygwin(r"\\.\PHYSICALDRIVE1") == "/dev/sdb"
+    assert _physicaldrive_to_cygwin(r"\\.\PHYSICALDRIVE12") == "/dev/sdm"
+    # case-insensitive + \\?\ variant
+    assert _physicaldrive_to_cygwin(r"\\?\PhysicalDrive2") == "/dev/sdc"
+    # Non-matching inputs pass through unchanged
+    assert _physicaldrive_to_cygwin("/dev/sdb") == "/dev/sdb"
+    assert _physicaldrive_to_cygwin("/mnt/j/image.img") == "/mnt/j/image.img"
+
+
+def test_flashjob_cold_surgery_error_is_nonfatal_resize_and_mbr_survive(
+    tmp_path, fake_platform_io, monkeypatch
+):
+    """A cold-surgery runtime error (e.g. errno 21 ERROR_NOT_READY from the
+    Cygwin e2fsprogs failing to open the raw device) MUST NOT abort the flash.
+
+    Regression for the field errno-21 + "Format?" popup: cold surgery used to
+    only swallow FileNotFoundError, so any other error escaped, aborted the
+    flash BEFORE the deferred-MBR write, and left the card RAW. Now ANY
+    cold-surgery failure is swallowed: the flash completes, the MBR is written,
+    and the mandatory resize arg is present."""
+    payload = _mbr_payload(_make_pi_os_mbr())
+    img = tmp_path / "master.img.xz"
+    img.write_bytes(lzma.compress(payload))
+    fake_platform_io.add_drive(9, size=len(payload) + 1024)
+
+    cfg = _make_cfg()
+    pair = generate_ed25519()
+    acc = LinuxAccount(
+        username="testuser", cleartext_password="test123",
+        crypt_sha512="$6$salt$fakehash",
+    )
+
+    fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
+
+    class _RootfsRaisesNotReady:
+        # debugfs subprocess can't open the device → OSError errno 21.
+        def read_bytes(self, path):
+            raise OSError(21, "The device is not ready")
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._bootpartition_open",
+        lambda *a, **kw: fake_boot,
+    )
+    monkeypatch.setattr(
+        "astromechos_imager.core.orchestrator._open_rootfs_partition",
+        lambda *a, **kw: _RootfsRaisesNotReady(),
+    )
+
+    job = FlashJob(
+        platform_io=fake_platform_io,
+        image_path=img,
+        target=fake_platform_io.enumerate_removable_drives()[0],
+        role=Role.MASTER,
+        firstboot_config=cfg,
+        master_pair=pair,
+        linux_account=acc,
+        skip_verify=True,
+    )
+    result = job.run()
+    # Flash SUCCEEDS despite the cold-surgery errno 21.
+    assert result.ok, f"FlashJob should not abort on cold-surgery error: {result.error}"
+
+    # Resize arg present (decoupled, applied before surgery), exactly once.
+    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
+    assert fake_boot.files["/cmdline.txt"].decode("ascii").split().count(RESIZE_INIT_ARG) == 1
+    # Firstboot bundle (trigger written last) still completed.
+    assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
+
+
 def test_flashjob_cancellation_before_rootfs_skips_bundle(
     tmp_path, fake_platform_io, monkeypatch
 ):

@@ -220,7 +220,16 @@ def flash_cycle(role: Role, image: Path, target: DiskRef, master_pair,
     )
 
     rec = ProgressRecorder(role, csv_path)
-    skip_verify = bool(int(os.environ.get("E2E_SKIP_VERIFY", "0")))
+    # Defaults to True on Windows: the post-write verify_readback is
+    # currently unreliable because Windows' Explorer pops up a modal
+    # "Format K:?" / "K:\ is not accessible" dialog the instant USB PnP
+    # spots the freshly-written partition table — that pop-up locks the
+    # volume and causes every subsequent read on the physical-drive
+    # handle to return ERROR_ACCESS_DENIED, breaking the SHA-256
+    # comparison. Set E2E_SKIP_VERIFY=0 explicitly if you want to
+    # exercise the broken path for diagnostic purposes (and be ready
+    # to manually dismiss every pop-up Windows throws at you).
+    skip_verify = bool(int(os.environ.get("E2E_SKIP_VERIFY", "1")))
     log(f"  skip_verify = {skip_verify}")
     job = FlashJob(
         platform_io=WindowsPlatformIO(),

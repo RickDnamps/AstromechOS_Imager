@@ -704,6 +704,29 @@ DEFAULT_INSTALL_PASSWORD = "astropass"
 DEFAULT_HOTSPOT_PASSWORD = "astropass"
 
 
+#: Default ``skip_verify`` for FlashJobs built from the UI on Windows.
+#:
+#: Windows triggers a modal Explorer pop-up ("Format K:?" / "K:\\ is not
+#: accessible") the moment its USB PnP poller spots the freshly-written
+#: partition table mid-flash. That pop-up:
+#:   1. Grabs the desktop's input focus, freezing keyboard/mouse interaction
+#:      until the operator clicks DISMISS;
+#:   2. Locks the volume from inside the Explorer process, which causes
+#:      DiskWriter's WriteFile / verify_readback to receive
+#:      ERROR_ACCESS_DENIED on subsequent I/O;
+#:   3. Cannot be dismissed programmatically from the Python backend — the
+#:      hosting process (Explorer.exe) is outside our handle table.
+#:
+#: Until the planned C++ rewrite of the flash core (which will run inside
+#: a Win32 service that suppresses shell auto-mount), the only reliable
+#: workaround is to skip the post-write SHA-256 readback entirely. The
+#: pre-flash SHA-256 of the source image (controlled by the operator-
+#: facing "VERIFY IMAGE INTEGRITY" toggle on Step 5) is unaffected — it
+#: hashes the on-disk image file before any device I/O.
+import sys as _sys
+_WINDOWS_SKIP_VERIFY = _sys.platform.startswith("win")
+
+
 def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
     """Build a FlashJob from wizard_state fields for the current cycle.
 
@@ -850,6 +873,7 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
                 firstboot_config=firstboot,
                 master_pair=ed25519,
                 linux_account=linux_account,
+                skip_verify=_WINDOWS_SKIP_VERIFY,
             )
         # current_role == "slave"
         drive = drives.get(wizard_state.slaveDriveId)
@@ -866,6 +890,7 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
             firstboot_config=firstboot,
             master_pair=ed25519,
             linux_account=linux_account,
+            skip_verify=_WINDOWS_SKIP_VERIFY,
         )
     except Exception:
         # Audit High #18: don't swallow silently. Re-raise so startFromWizard

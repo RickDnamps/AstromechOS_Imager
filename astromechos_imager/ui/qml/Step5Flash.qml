@@ -41,7 +41,7 @@ Rectangle {
         if (s2Active) {
             s2 = "active"
             s2det = p === "preparing" ? "preparing…" : Math.round(prog * 100) + " %"
-        } else if (s2Done)                                       { s2 = "done" }
+        } else if (s2Done)                                       { s2 = "done"; s2det = "✓ OK" }
         else if (isError && (s1 === "done" || s1 === "skipped")) { s2 = "failed" }
         // Stage 3: Verifying integrity (readback)
         var s3 = "pending", s3det = ""

@@ -271,6 +271,7 @@ Rectangle {
             mode: _globalMode()
             label: _globalLabel()
             monotonic: true
+            throughputBps: flashViewModel ? flashViewModel.masterThroughputBps : 0
         }
     }
 

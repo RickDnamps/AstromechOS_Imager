@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from typing import Callable
 
@@ -122,6 +123,15 @@ class DiskWriter:
         def consumer():
             offset = 0
             saw_first = False
+            # Rolling-window throughput sampler. We snapshot (wall_clock,
+            # bytes_done) at consumer entry, then recompute the rate every
+            # ``_THROUGHPUT_WINDOW_S`` seconds. Reporting the instantaneous
+            # bytes/sec of each 1 MB chunk would alias on USB stalls and
+            # make the UI badge jitter; a 1 s window smooths that.
+            _THROUGHPUT_WINDOW_S = 1.0
+            window_t0 = time.monotonic()
+            window_b0 = 0
+            last_throughput_bps = 0.0
             try:
                 while True:
                     if self.cancel.is_set():
@@ -137,6 +147,12 @@ class DiskWriter:
                         offset += len(chunk)
                         consumer_total[0] = offset
                         saw_first = True
+                        # Reset the throughput window now that we've
+                        # absorbed the deferred first block — its 1 MB
+                        # didn't actually hit the device so it would
+                        # massively inflate the first sample.
+                        window_t0 = time.monotonic()
+                        window_b0 = offset
                         self.on_progress(DiskWriterProgress(
                             phase="decompress_write",
                             bytes_done=offset,
@@ -149,11 +165,19 @@ class DiskWriter:
                         raise WriteError(f"short write at {offset}: {written}/{len(chunk)}")
                     offset += written
                     consumer_total[0] = offset
+                    now = time.monotonic()
+                    elapsed = now - window_t0
+                    if elapsed >= _THROUGHPUT_WINDOW_S:
+                        delta_bytes = offset - window_b0
+                        if elapsed > 0 and delta_bytes >= 0:
+                            last_throughput_bps = delta_bytes / elapsed
+                        window_t0 = now
+                        window_b0 = offset
                     self.on_progress(DiskWriterProgress(
                         phase="decompress_write",
                         bytes_done=offset,
                         bytes_total=self.source.uncompressed_size,
-                        throughput_bps=0.0,
+                        throughput_bps=last_throughput_bps,
                     ))
             except BaseException as e:
                 self._exc = e
@@ -203,6 +227,12 @@ def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
     hasher = hashlib.sha256()
     chunk_size = 1 << 20
 
+    # Rolling-window throughput sampler (see DiskWriter.run consumer for
+    # the rationale — instantaneous bytes/sec jitters too much on USB
+    # stalls; a 1 s averaging window gives the UI a stable badge value).
+    _THROUGHPUT_WINDOW_S = 1.0
+    last_throughput_bps = 0.0
+
     if first_block is not None:
         # Hash-inject the deferred first block — its bytes ARE part of
         # the source image's SHA256, but they are NOT on disk yet.
@@ -214,6 +244,9 @@ def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
     else:
         offset = 0
 
+    window_t0 = time.monotonic()
+    window_b0 = offset
+
     while offset < length:
         if cancel.is_set():
             return
@@ -223,8 +256,17 @@ def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
             raise WriteError(f"readback short at offset {offset}: {len(data)}/{n}")
         hasher.update(data)
         offset += n
+        now = time.monotonic()
+        elapsed = now - window_t0
+        if elapsed >= _THROUGHPUT_WINDOW_S:
+            delta_bytes = offset - window_b0
+            if elapsed > 0 and delta_bytes >= 0:
+                last_throughput_bps = delta_bytes / elapsed
+            window_t0 = now
+            window_b0 = offset
         on_progress(DiskWriterProgress(
-            phase="verify", bytes_done=offset, bytes_total=length, throughput_bps=0.0,
+            phase="verify", bytes_done=offset, bytes_total=length,
+            throughput_bps=last_throughput_bps,
         ))
     if hasher.hexdigest() != expected_sha256:
         # Approximate: report 0 since we didn't track a per-block hash. UI shows

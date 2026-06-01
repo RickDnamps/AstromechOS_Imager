@@ -27,8 +27,14 @@ from astromechos_imager.core.models import HotspotBootstrap, Role
 
 class _FlashWorker(QObject):
     """Lives in a QThread; runs job.run() then emits 'finished'."""
-    progressMaster = Signal(float, str)   # fraction, phase
-    progressSlave = Signal(float, str)
+    # 3-arg form: (fraction 0..1, phase str, throughput_bps float).
+    # ``throughput_bps`` is 0.0 for events that don't reflect actual
+    # bandwidth (phase-entry pings, the deferred-first-block chunk, the
+    # synthetic "preparing" emit at worker start). The QML
+    # GlobalProgressBar hides the "Mo/s" badge when the value is 0 so
+    # those phases don't display a misleading speed.
+    progressMaster = Signal(float, str, float)
+    progressSlave = Signal(float, str, float)
     finished = Signal(bool, str)          # ok, error_msg
     phaseChanged = Signal(str, str)       # role_value, phase_str
 
@@ -47,10 +53,10 @@ class _FlashWorker(QObject):
         # ping, Step5Flash.qml can render "Preparing target drive…" with an
         # indeterminate spinner until DiskWriter starts firing real chunks.
         if self._is_pair:
-            self.progressMaster.emit(0.0, "preparing")
-            self.progressSlave.emit(0.0, "preparing")
+            self.progressMaster.emit(0.0, "preparing", 0.0)
+            self.progressSlave.emit(0.0, "preparing", 0.0)
         else:
-            self.progressMaster.emit(0.0, "preparing")
+            self.progressMaster.emit(0.0, "preparing", 0.0)
 
         try:
             if self._is_pair:
@@ -74,13 +80,13 @@ class _FlashWorker(QObject):
     def _on_pair_progress(self, role: Role, p: DiskWriterProgress) -> None:
         frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
         if role is Role.MASTER:
-            self.progressMaster.emit(frac, p.phase)
+            self.progressMaster.emit(frac, p.phase, p.throughput_bps)
         else:
-            self.progressSlave.emit(frac, p.phase)
+            self.progressSlave.emit(frac, p.phase, p.throughput_bps)
 
     def _on_single_progress(self, p: DiskWriterProgress) -> None:
         frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
-        self.progressMaster.emit(frac, p.phase)
+        self.progressMaster.emit(frac, p.phase, p.throughput_bps)
 
 
 class _HashWorker(QObject):
@@ -141,8 +147,10 @@ class FlashViewModel(QObject):
     statusChanged = Signal()
     masterProgressChanged = Signal()
     masterPhaseChanged = Signal()
+    masterThroughputBpsChanged = Signal()
     slaveProgressChanged = Signal()
     slavePhaseChanged = Signal()
+    slaveThroughputBpsChanged = Signal()
     errorMessageChanged = Signal()
     # Integrity verification (pre-flash hash phase)
     masterHashProgressChanged = Signal()
@@ -163,8 +171,10 @@ class FlashViewModel(QObject):
         self._status = "idle"               # idle | verifying | flashing | done | error
         self._master_progress = 0.0
         self._master_phase = ""
+        self._master_throughput_bps = 0.0
         self._slave_progress = 0.0
         self._slave_phase = ""
+        self._slave_throughput_bps = 0.0
         self._error_message = ""
         self._thread: QThread | None = None
         self._worker: _FlashWorker | None = None
@@ -205,6 +215,17 @@ class FlashViewModel(QObject):
     def masterPhase(self) -> str:
         return self._master_phase
 
+    @Property(float, notify=masterThroughputBpsChanged)
+    def masterThroughputBps(self) -> float:
+        """Live write/verify throughput for the master card in bytes/sec.
+
+        Reset to 0.0 between phases (verify entry, post-flash). QML
+        ``GlobalProgressBar`` hides its "Mo/s" badge when this is 0 so
+        non-bandwidth phases (preparing / customizing / hash verify)
+        don't display a misleading speed.
+        """
+        return self._master_throughput_bps
+
     @Property(float, notify=slaveProgressChanged)
     def slaveProgress(self) -> float:
         return self._slave_progress
@@ -212,6 +233,11 @@ class FlashViewModel(QObject):
     @Property(str, notify=slavePhaseChanged)
     def slavePhase(self) -> str:
         return self._slave_phase
+
+    @Property(float, notify=slaveThroughputBpsChanged)
+    def slaveThroughputBps(self) -> float:
+        """Live write/verify throughput for the slave card in bytes/sec."""
+        return self._slave_throughput_bps
 
     @Property(str, notify=errorMessageChanged)
     def errorMessage(self) -> str:
@@ -381,6 +407,14 @@ class FlashViewModel(QObject):
         self._slave_hash = ""
         self._master_hash_sidecar_match = None
         self._slave_hash_sidecar_match = None
+        # Reset live throughput so the GlobalProgressBar's "Mo/s" badge
+        # disappears across a verify-phase transition. Without this the
+        # last-known flash speed would briefly leak into the hash phase
+        # before DiskWriter starts re-sampling.
+        self._master_throughput_bps = 0.0
+        self._slave_throughput_bps = 0.0
+        self.masterThroughputBpsChanged.emit()
+        self.slaveThroughputBpsChanged.emit()
         self.statusChanged.emit()
         self.errorMessageChanged.emit()
         for sig in (
@@ -586,17 +620,21 @@ class FlashViewModel(QObject):
         self._status = "cancelling"
         self.statusChanged.emit()
 
-    def _update_master(self, frac, phase):
+    def _update_master(self, frac, phase, throughput_bps=0.0):
         self._master_progress = frac
         self._master_phase = phase
+        self._master_throughput_bps = float(throughput_bps)
         self.masterProgressChanged.emit()
         self.masterPhaseChanged.emit()
+        self.masterThroughputBpsChanged.emit()
 
-    def _update_slave(self, frac, phase):
+    def _update_slave(self, frac, phase, throughput_bps=0.0):
         self._slave_progress = frac
         self._slave_phase = phase
+        self._slave_throughput_bps = float(throughput_bps)
         self.slaveProgressChanged.emit()
         self.slavePhaseChanged.emit()
+        self.slaveThroughputBpsChanged.emit()
 
     def _on_finished(self, ok, err):
         # Audit High #14: detect cancel-by-operator and route to a clean

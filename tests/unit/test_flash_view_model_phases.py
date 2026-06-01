@@ -141,14 +141,23 @@ def _start_worker_and_collect(job, is_pair: bool, qtbot, settle_ms: int = 200):
     from PySide6.QtCore import QThread
     from astromechos_imager.ui.flash_view_model import _FlashWorker
 
-    master_events: list[tuple[float, str]] = []
-    slave_events: list[tuple[float, str]] = []
+    # 3-tuple (fraction, phase, throughput_bps) since the throughput
+    # indicator landed end-to-end (DiskWriter → FlashViewModel → QML).
+    # ``preparing`` and the deferred-first-block emit always carry
+    # throughput_bps == 0.0; real write chunks carry a smoothed
+    # bytes/sec sample.
+    master_events: list[tuple[float, str, float]] = []
+    slave_events: list[tuple[float, str, float]] = []
 
     thread = QThread()
     worker = _FlashWorker(job, is_pair)
     worker.moveToThread(thread)
-    worker.progressMaster.connect(lambda f, p: master_events.append((f, p)))
-    worker.progressSlave.connect(lambda f, p: slave_events.append((f, p)))
+    worker.progressMaster.connect(
+        lambda f, p, t: master_events.append((f, p, t))
+    )
+    worker.progressSlave.connect(
+        lambda f, p, t: slave_events.append((f, p, t))
+    )
     thread.started.connect(worker.run)
     thread.start()
 
@@ -174,14 +183,19 @@ def test_flash_worker_emits_preparing_phase_immediately_pair(qtbot):
     )
 
     # job.run() is still blocked, yet we must already have a preparing
-    # ping on both channels.
-    assert any(p == "preparing" and f == 0.0 for f, p in master_events), (
-        f"expected (0.0, 'preparing') in master events before job.run() "
-        f"returned; got {master_events!r}"
+    # ping on both channels. throughput must be 0.0 — no real bytes
+    # have flowed through DiskWriter yet at preparing-phase entry.
+    assert any(
+        p == "preparing" and f == 0.0 and t == 0.0 for f, p, t in master_events
+    ), (
+        f"expected (0.0, 'preparing', 0.0) in master events before "
+        f"job.run() returned; got {master_events!r}"
     )
-    assert any(p == "preparing" and f == 0.0 for f, p in slave_events), (
-        f"expected (0.0, 'preparing') in slave events before job.run() "
-        f"returned; got {slave_events!r}"
+    assert any(
+        p == "preparing" and f == 0.0 and t == 0.0 for f, p, t in slave_events
+    ), (
+        f"expected (0.0, 'preparing', 0.0) in slave events before "
+        f"job.run() returned; got {slave_events!r}"
     )
 
     # Cleanup — let the job finish so the thread quits.
@@ -201,9 +215,11 @@ def test_flash_worker_emits_preparing_phase_immediately_single(qtbot):
         job, is_pair=False, qtbot=qtbot
     )
 
-    assert any(p == "preparing" and f == 0.0 for f, p in master_events), (
-        f"expected (0.0, 'preparing') in master events before job.run() "
-        f"returned; got {master_events!r}"
+    assert any(
+        p == "preparing" and f == 0.0 and t == 0.0 for f, p, t in master_events
+    ), (
+        f"expected (0.0, 'preparing', 0.0) in master events before "
+        f"job.run() returned; got {master_events!r}"
     )
     assert slave_events == [], (
         f"single-target flow must NOT emit on the slave channel; "
@@ -231,18 +247,21 @@ def test_flash_worker_preparing_then_write_phase_sequence(qtbot):
 
     assert master_events, "no master events captured at all"
     first = master_events[0]
-    assert first == (0.0, "preparing"), (
+    assert first == (0.0, "preparing", 0.0), (
         f"first master event must be the preparing ping; got {first!r}"
     )
 
     write_events = [
-        (f, p) for f, p in master_events if p == "decompress_write"
+        (f, p, t) for f, p, t in master_events if p == "decompress_write"
     ]
     assert write_events, (
         f"expected a decompress_write follow-up after preparing; "
         f"got {master_events!r}"
     )
-    # 100 / 1000 = 0.1 fraction (subject to float).
-    frac, phase = write_events[0]
+    # 100 / 1000 = 0.1 fraction (subject to float). _OneChunkPairJob
+    # fires a DiskWriterProgress with throughput_bps=0.0 so we don't
+    # pin a real number here — the throughput plumbing is exercised
+    # in test_flash_view_model_throughput.py.
+    frac, phase, _t = write_events[0]
     assert phase == "decompress_write"
     assert abs(frac - 0.1) < 1e-6, f"expected 0.1 fraction, got {frac}"

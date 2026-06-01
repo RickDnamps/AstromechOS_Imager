@@ -350,22 +350,41 @@ class FlashJob:
 
         debugfs = self.ext4_debugfs_exe
         e2fsck = self.ext4_e2fsck_exe
-        # If exe paths not provided, skip (defensive: shouldn't reach here if
-        # linux_account was set without exe paths, but guard for safety)
+        # Resolve the e2fsprogs tools when the job didn't carry explicit
+        # paths. On Windows that means the BUNDLED debugfs.exe / e2fsck.exe
+        # from vendor/ (via the same resolver the rest of the app uses) —
+        # NOT the old ``/usr/sbin/debugfs`` WSL/dev fallback, which simply
+        # does not exist on a Windows host and crashed the customize step
+        # with a raw FileNotFoundError (WinError 2). If the bundled tool is
+        # missing, vendored_binaries raises a clear English error naming the
+        # expected path — the UID-1000 cold surgery is a hard invariant, so
+        # we surface that rather than silently skipping it.
         if debugfs is None or e2fsck is None:
-            rp = _open_rootfs_partition(
-                raw_device_path=self.target.device_path,
-                mbr_bytes=mbr_bytes,
-                debugfs_exe=Path("/usr/sbin/debugfs"),
-                e2fsck_exe=Path("/usr/sbin/e2fsck"),
-            )
-        else:
-            rp = _open_rootfs_partition(
-                raw_device_path=self.target.device_path,
-                mbr_bytes=mbr_bytes,
-                debugfs_exe=debugfs,
-                e2fsck_exe=e2fsck,
-            )
+            import sys  # noqa: PLC0415
+            if sys.platform == "win32":
+                # Default to the BUNDLED tools in vendor/ (NOT the old
+                # ``/usr/sbin/debugfs`` WSL fallback, which doesn't exist on
+                # Windows and crashed customize with WinError 2). Use the
+                # path directly without an existence check so the
+                # ``_open_rootfs_partition`` seam stays monkeypatchable in
+                # tests; a genuinely missing tool surfaces as a subprocess
+                # FileNotFoundError naming the correct vendor path. The UI
+                # path (_build_flash_job) resolves these eagerly with a clear
+                # pre-write error, so this branch is the test / direct-job
+                # fallback.
+                from astromechos_imager.core.vendored_binaries import vendor_root  # noqa: PLC0415
+                debugfs = debugfs or (vendor_root() / "debugfs.exe")
+                e2fsck = e2fsck or (vendor_root() / "e2fsck.exe")
+            else:
+                # POSIX dev/test host — system e2fsprogs.
+                debugfs = debugfs or Path("/usr/sbin/debugfs")
+                e2fsck = e2fsck or Path("/usr/sbin/e2fsck")
+        rp = _open_rootfs_partition(
+            raw_device_path=self.target.device_path,
+            mbr_bytes=mbr_bytes,
+            debugfs_exe=debugfs,
+            e2fsck_exe=e2fsck,
+        )
         if rp is None:
             return  # no Linux partition → skip
         try:

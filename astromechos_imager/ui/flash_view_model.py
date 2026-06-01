@@ -804,6 +804,25 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
 
         linux_account = generate_linux_account(install_user, install_password)
 
+        # Resolve the bundled e2fsprogs tools NOW (at job-build time, before
+        # the destructive write) so a missing debugfs.exe / e2fsck.exe fails
+        # the WRITE button with a clear message instead of crashing the
+        # customize step AFTER a multi-GB write. The UID-1000 cold rootfs
+        # surgery is a hard invariant — these tools are mandatory on Windows.
+        #
+        # Gate on the REAL WindowsPlatformIO: unit tests inject a fake
+        # platform_io on a Windows host and must not be forced to ship
+        # debugfs.exe just to exercise the field-defaulting logic. The real
+        # app always passes a WindowsPlatformIO, so production still gets the
+        # early, clear "debugfs.exe not found" error.
+        ext4_debugfs = ext4_e2fsck = None
+        if sys.platform == "win32" and type(platform_io).__name__ == "WindowsPlatformIO":
+            from astromechos_imager.core.vendored_binaries import (
+                debugfs_exe, e2fsck_exe,
+            )
+            ext4_debugfs = debugfs_exe()   # raises a clear error if absent
+            ext4_e2fsck = e2fsck_exe()
+
         # SSID is session-scoped — generated ONCE by startSession() on
         # Screen 01. The SAME hotspot creds are baked into both master
         # and slave's /boot/astromech_init.cfg so the runtime master-
@@ -882,6 +901,8 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
                 firstboot_config=firstboot,
                 master_pair=ed25519,
                 linux_account=linux_account,
+                ext4_debugfs_exe=ext4_debugfs,
+                ext4_e2fsck_exe=ext4_e2fsck,
                 skip_verify=_WINDOWS_SKIP_VERIFY,
             )
         # current_role == "slave"
@@ -899,6 +920,8 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
             firstboot_config=firstboot,
             master_pair=ed25519,
             linux_account=linux_account,
+            ext4_debugfs_exe=ext4_debugfs,
+            ext4_e2fsck_exe=ext4_e2fsck,
             skip_verify=_WINDOWS_SKIP_VERIFY,
         )
     except Exception:

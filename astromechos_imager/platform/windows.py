@@ -240,14 +240,18 @@ def lock_and_dismount(letters: tuple[str, ...],
     the mount point either — the held lock is the whole mechanism, and the
     letter comes back cleanly when we close the handle at the end.
 
-    Volumes are discovered both by drive letter AND, when
-    ``physical_drive_id`` is given, by GUID for any letterless volume on the
-    target drive (a freshly-inserted or previously-letter-stripped SD), so
-    the lock is held even when Windows assigned no letter.
+    Volume discovery: when ``physical_drive_id`` is given we lock by VOLUME
+    GUID only (``_list_volumes`` enumerates every volume on the drive,
+    lettered or not). We deliberately do NOT also lock by drive letter in
+    that case: ``\\.\K:`` and ``\\?\Volume{guid}`` name the SAME volume, and
+    a second FSCTL_LOCK_VOLUME on an already-locked volume fails — which used
+    to abort the whole flash with a DriveLockError on any card Windows had
+    auto-mounted under a letter. Locking by GUID covers the lettered case
+    too (the lock is on the volume, not the letter). The ``letters`` list is
+    only used as a fallback when ``physical_drive_id`` is None (tests /
+    legacy callers that don't pass the drive id).
     """
     open_paths: list[str] = []
-    for letter in letters:
-        open_paths.append(f"\\\\.\\{letter}:")
     if physical_drive_id is not None:
         try:
             for vol in _list_volumes():           # \\?\Volume{guid}\
@@ -255,7 +259,13 @@ def lock_and_dismount(letters: tuple[str, ...],
                     open_paths.append(vol.rstrip("\\"))
         except Exception as exc:  # noqa: BLE001
             _log.info("volume enumeration for lock failed (%s) — "
-                      "locking by letter only", exc)
+                      "falling back to locking by letter", exc)
+    if not open_paths:
+        # No drive id, or enumeration failed — lock by letter instead.
+        for letter in letters:
+            open_paths.append(f"\\\\.\\{letter}:")
+    _log.info("lock_and_dismount: phys_id=%s letters=%s -> %d volume(s) to lock: %s",
+              physical_drive_id, letters, len(open_paths), open_paths)
 
     held: list[int] = []
     seen: set[str] = set()
@@ -290,7 +300,9 @@ def lock_and_dismount(letters: tuple[str, ...],
         except OSError:
             pass   # best-effort; the held lock already blocks remount
         held.append(h)   # KEEP open + locked for the whole flash
-        _log.info("  locked + dismounted %s (held)", open_path)
+        _log.info("  locked + dismounted %s -> handle 0x%X (held)", open_path, h)
+    _log.info("lock_and_dismount: holding %d locked handle(s): %s",
+              len(held), [hex(x) for x in held])
     return held
 
 
@@ -321,6 +333,7 @@ def open_raw_device(physical_drive_id: int) -> int:
     if h == INVALID_HANDLE_VALUE:
         err = ctypes.get_last_error()
         raise OSError(err, f"CreateFileW({path}) failed")
+    _log.info("open_raw_device(%s) -> handle 0x%X", path, h)
     # FSCTL_ALLOW_EXTENDED_DASD_IO lets us write any sector of the raw
     # device. NOTE: we deliberately do NOT call IOCTL_DISK_DELETE_DRIVE_LAYOUT
     # / IOCTL_DISK_UPDATE_PROPERTIES here. Those wipe the partition table and
@@ -602,7 +615,11 @@ def close_handle(h: int | None) -> None:
     """
     if h is None or h == INVALID_HANDLE_VALUE or h == 0:
         return
-    kernel32().CloseHandle(h)
+    ok = kernel32().CloseHandle(h)
+    if not ok:
+        _log.warning("CloseHandle(0x%X) failed err=%s", h, ctypes.get_last_error())
+    else:
+        _log.debug("CloseHandle(0x%X) ok", h)
 
 
 def update_disk_properties(h: int) -> None:
@@ -698,6 +715,8 @@ class _Win32RawDevice:
         )
         if not ok:
             err = ctypes.get_last_error()
+            _log.error("WriteFile FAILED: handle=0x%X offset=%d len=%d err=%d",
+                       h, offset, len(data), err)
             raise OSError(err, f"WriteFile failed at offset {offset}")
         return written.value
 
@@ -717,6 +736,8 @@ class _Win32RawDevice:
         ok = kernel32().ReadFile(h, buf, length, ctypes.byref(got), None)
         if not ok:
             err = ctypes.get_last_error()
+            _log.error("ReadFile FAILED: handle=0x%X offset=%d len=%d err=%d",
+                       h, offset, length, err)
             raise OSError(err, f"ReadFile failed at offset {offset}")
         return bytes(buf.raw[: got.value])
 
@@ -820,6 +841,8 @@ def _seek(h: int, offset: int) -> None:
     ok = kernel32().SetFilePointerEx(h, offset, ctypes.byref(new_pos), 0)  # FILE_BEGIN
     if not ok:
         err = ctypes.get_last_error()
+        _log.error("SetFilePointerEx FAILED: handle=0x%X offset=%d err=%d",
+                   h, offset, err)
         raise OSError(err, f"SetFilePointerEx({offset}) failed")
 
 

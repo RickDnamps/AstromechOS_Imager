@@ -22,25 +22,16 @@ Rectangle {
         width: 560
 
         // ── Splash / logo area ───────────────────────────────────────
+        // The app title is already baked INTO the image, so we don't repeat
+        // it as a Text below — the image is the hero, shown large (4:3).
         Image {
             source: splashImageUrl
             Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 180
-            Layout.preferredHeight: 180
+            Layout.preferredWidth: 460
+            Layout.preferredHeight: 345
             fillMode: Image.PreserveAspectFit
             smooth: true
             asynchronous: true
-        }
-
-        Text {
-            text: "ASTROMECHOS IMAGER"
-            color: theme.colors.colorTextPrimary
-            font.family: Theme.fontTitle
-            font.pixelSize: 22
-            font.bold: true
-            font.letterSpacing: 2.0
-            Layout.alignment: Qt.AlignHCenter
-            horizontalAlignment: Text.AlignHCenter
         }
 
         Text {

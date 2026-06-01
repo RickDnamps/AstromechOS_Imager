@@ -179,6 +179,15 @@ class FlashViewModel(QObject):
         self._thread: QThread | None = None
         self._worker: _FlashWorker | None = None
         self._cancel_event = threading.Event()
+        # Distinguishes "user clicked CANCEL" from "DiskWriter consumer
+        # died and set cancel_event as a thread-coordination side-effect"
+        # (diskwriter.py::run consumer ``except BaseException`` branch).
+        # Without this flag, ``_on_finished`` mis-routes real write
+        # failures to status="cancelled" — the QML has no dedicated
+        # rendering for that status so it falls through to the idle
+        # screen, the WRITE button re-appears, and the operator never
+        # sees the actual error.
+        self._user_cancelled = False
         # Pre-flash hashing state
         self._master_hash_progress = 0.0
         self._slave_hash_progress = 0.0
@@ -331,6 +340,7 @@ class FlashViewModel(QObject):
         if self._status == "flashing":
             return
         self._cancel_event.clear()
+        self._user_cancelled = False
         # Audit High #9: route the view-model's cancel event into the job so
         # cancel() flips the same flag that DiskWriter / verify_readback
         # consult. Without this, the job has its own internal Event that
@@ -433,6 +443,7 @@ class FlashViewModel(QObject):
         self._pending_verify_job = job
         self._pending_verify_roles = queue
         self._cancel_event.clear()
+        self._user_cancelled = False
         self._spawn_next_hash_worker()
 
     def _spawn_next_hash_worker(self) -> None:
@@ -611,6 +622,7 @@ class FlashViewModel(QObject):
         """
         if self._status not in ("verifying", "flashing"):
             return  # nothing to cancel
+        self._user_cancelled = True
         self._cancel_event.set()
         if self._worker is not None and hasattr(self._worker._job, "cancel_event"):
             try:
@@ -640,7 +652,16 @@ class FlashViewModel(QObject):
         # Audit High #14: detect cancel-by-operator and route to a clean
         # "cancelled" state rather than "error" — the operator clicked
         # CANCEL themselves and shouldn't see an error message about it.
-        if self._cancel_event.is_set():
+        #
+        # We key off ``self._user_cancelled`` (set ONLY by ``cancel()``)
+        # rather than ``cancel_event.is_set()``. The cancel event doubles
+        # as a thread-coordination signal — DiskWriter's consumer thread
+        # sets it on its own when it dies (diskwriter.py::run consumer
+        # ``except BaseException`` branch) so the producer unblocks. Keying
+        # the routing decision off that event would mis-classify every
+        # real write failure as "cancelled" — UI then reverts to idle
+        # (status="cancelled" has no QML rendering) and hides the error.
+        if self._user_cancelled:
             self._status = "cancelled"
             self._error_message = ""
         else:

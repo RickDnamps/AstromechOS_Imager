@@ -125,3 +125,50 @@ def test_slave_progress_updated(qtbot):
         qtbot.wait(50)
     assert vm.slaveProgress == 1.0
     assert vm.slavePhase == "decompress_write"
+
+
+class _RaisingJob:
+    """Job whose run() raises mid-flash AND sets cancel_event before raising.
+
+    Mirrors what DiskWriter's consumer thread does in
+    ``diskwriter.py::run`` when a write fails: the consumer's
+    ``except BaseException`` branch sets the shared cancel event before
+    propagating the exception so the producer can unblock. Without the
+    ``_user_cancelled`` flag this looks identical to a user cancel to
+    ``_on_finished`` — a regression there used to silently route real
+    failures to status="cancelled" (no QML rendering ⇒ UI reverts to
+    idle, WRITE button reappears, operator never sees the error).
+    """
+
+    def __init__(self):
+        self.master_target = "fake-m"  # PairJob duck
+        self.slave_target = "fake-s"
+        self.on_progress = None
+        self.cancel_event = threading.Event()
+
+    def run(self):
+        self.cancel_event.set()  # ← what DiskWriter does on consumer crash
+        raise RuntimeError("simulated mid-flash WriteFile failure")
+
+
+def test_write_failure_does_not_masquerade_as_cancel(qtbot):
+    """Regression: real flash failure must surface as 'error', not 'cancelled'.
+
+    The cancel event is shared between the user's cancel() path and
+    DiskWriter's thread-coordination signal. Routing by event alone
+    would hide every write error behind the cancelled-state idle UI.
+    The fix keys the routing off an explicit ``_user_cancelled`` flag
+    set ONLY by ``cancel()``.
+    """
+    vm = _make_vm(qtbot)
+    job = _RaisingJob()
+    vm.startWithJob(job)
+    deadline = time.time() + 5
+    while vm.status in ("flashing",) and time.time() < deadline:
+        qtbot.wait(50)
+    assert vm.status == "error", (
+        f"expected status=error after a failing flash; got {vm.status!r}. "
+        "If this is 'cancelled', _on_finished is back to keying off "
+        "cancel_event.is_set() instead of _user_cancelled."
+    )
+    assert "WriteFile" in vm.errorMessage or "RuntimeError" in vm.errorMessage

@@ -2,6 +2,7 @@
 """High-level flash orchestration. Per design spec §3, §5, §6.4."""
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -93,6 +94,8 @@ from astromechos_imager.core.models import (  # noqa: E402
 )
 from astromechos_imager.core.platform_io import PlatformIO  # noqa: E402
 
+_log = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class FlashJobResult:
@@ -167,11 +170,21 @@ class FlashJob:
                 #    post-write read-back reads the device truth on the first
                 #    pass instead of stale bridge-cached bytes.
                 dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
+                _log.info("FlashJob START role=%s phys_id=%s image=%s skip_verify=%s "
+                          "skip_customize=%s linux_account=%s",
+                          getattr(self.role, "value", self.role),
+                          self.target.physical_drive_id, self.image_path.name,
+                          self.skip_verify, self.skip_customize,
+                          "set" if self.linux_account else "none")
                 try:
+                    _log.info("PHASE streaming-write: starting")
                     with open_image(self.image_path) as src:
                         dw = DiskWriter(src, dev, on_progress=self.on_progress,
                                         cancel_event=self.cancel_event)
                         write_result = dw.run()
+                    _log.info("PHASE streaming-write: done — %d bytes, sha256=%s",
+                              write_result.bytes_written,
+                              write_result.source_sha256[:16])
                     # PrepareForSequentialRead: FlushFileBuffers commits any
                     # in-flight writes; SCSI SYNCHRONIZE_CACHE pushes the USB
                     # bridge's firmware cache to flash. (file_operations_windows
@@ -184,12 +197,14 @@ class FlashJob:
                     #    memory and reads [first_block_len, length) back via
                     #    aligned NO_BUFFERING reads.
                     if not self.skip_verify and not self.cancel_event.is_set():
+                        _log.info("PHASE verify-readback: starting")
                         verify_readback(dev,
                                         expected_sha256=write_result.source_sha256,
                                         length=write_result.bytes_written,
                                         on_progress=self.on_progress,
                                         cancel_event=self.cancel_event,
                                         first_block=write_result.first_block_data)
+                        _log.info("PHASE verify-readback: PASSED")
 
                     # 4. Userspace-FAT customize — runs while the deferred first
                     #    block (the MBR) is STILL ABSENT from the disk. With no
@@ -198,6 +213,7 @@ class FlashJob:
                     #    Explorer, no "Format K:?" pop-up. The bundle physically
                     #    cannot reach C: — there is no letter involved.
                     if not self.skip_customize and not self.cancel_event.is_set():
+                        _log.info("PHASE customize: starting (userspace FAT)")
                         self.on_progress(DiskWriterProgress(
                             phase="customizing", bytes_done=0, bytes_total=0,
                             throughput_bps=0.0,
@@ -216,18 +232,22 @@ class FlashJob:
                                     self.linux_account is not None
                                     and not self.cancel_event.is_set()
                                 ):
+                                    _log.info("PHASE customize: rootfs personalization")
                                     self._run_rootfs_personalization(mbr, bp)
                                 if not self.cancel_event.is_set():
+                                    _log.info("PHASE customize: firstboot bundle")
                                     FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
                                         bp, self.role)
                             finally:
                                 bp.close()
+                        _log.info("PHASE customize: done")
 
                     # 5. Write the deferred first block (the MBR) LAST. Only now
                     #    does the partition table appear on disk, so any Windows
                     #    auto-mount happens AFTER customize — harmless, post-hoc.
                     if (write_result.first_block_data is not None
                             and not self.cancel_event.is_set()):
+                        _log.info("PHASE deferred-MBR write")
                         n = dev.write(0, write_result.first_block_data)
                         if n != len(write_result.first_block_data):
                             from astromechos_imager.core.errors import WriteError  # noqa: PLC0415
@@ -251,6 +271,8 @@ class FlashJob:
                                       source_sha256=write_result.source_sha256)
             except ImagerError as e:
                 # Domain error already carries SDState — propagate as-is.
+                _log.error("FlashJob FAILED (domain error): %s: %s",
+                           type(e).__name__, e, exc_info=True)
                 return FlashJobResult(
                     ok=False,
                     bytes_written=write_result.bytes_written if write_result else 0,
@@ -287,6 +309,10 @@ class FlashJob:
                     detail = f"{exc_type}: {msg}"
                 wrapped = FlashError(f"unexpected error during flash: {detail}")
                 wrapped.__cause__ = e
+                # Log the FULL traceback to the session log — without this the
+                # only record of a flash failure was the one-line UI message,
+                # which made field Errno 5/6 reports impossible to localize.
+                _log.error("FlashJob FAILED (unexpected): %s", detail, exc_info=True)
                 return FlashJobResult(
                     ok=False,
                     bytes_written=write_result.bytes_written if write_result else 0,

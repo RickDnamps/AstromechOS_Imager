@@ -16,11 +16,13 @@ The **AstromechOS Imager** is the dedicated, opinionated flashing utility used t
 
 ## 📸 Interface & Walkthrough
 
-The wizard is a **frameless, dark/light dual-themed** flow with custom Orbitron typography and an R2-style cobalt-blue accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart — the screenshots below show the **Light** variant (now the default theme on launch).
+The wizard is a **frameless, dark/light dual-themed** flow with hybrid typography (Orbitron for titles / buttons / labels, Segoe UI for body copy so longer text stays readable) and an R2-style cobalt-blue accent that matches the AstromechOS piloting UI. A sun/moon toggle in the header switches themes live without any restart — the screenshots below show the **Light** variant (now the default theme on launch).
 
 ### Step 0 — Splash
 
-The startup splash auto-advances to Step 1 after ~1.5 s. The dark navy chrome stays constant across both themes for visual continuity with the rest of the AstromechOS toolchain.
+An old-school standalone splash: the window is sized to the splash artwork's aspect ratio so the **image fills it edge-to-edge with no chrome and no borders** (the app header/footer are hidden, and the PNG's baked-in black bars are cropped at render). A faux **module-loader progress bar** ("Loading drive enumerator", "Mounting image codecs", "Arming flash engine"…) animates across ~4 s in the artwork's lower band, then the window grows into the wizard.
+
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=16)
 
 ![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=16)
 

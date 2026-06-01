@@ -6,8 +6,12 @@ import "Theme.js" as Theme
 
 ApplicationWindow {
     id: root
-    width: 920
-    height: 640
+    // Old-school splash: while the splash shows (displayedStepIdx === -1)
+    // the window is sized to the 800×600 (4:3) splash art so the image
+    // fills it EXACTLY — no letterbox borders, no crop. It grows to the
+    // wizard size the moment the first step appears.
+    width:  displayedStepIdx >= 0 ? 920 : 800
+    height: displayedStepIdx >= 0 ? 640 : 600
     minimumWidth: 760
     minimumHeight: 560
     visible: true
@@ -283,10 +287,11 @@ ApplicationWindow {
                 }
             }
 
-            // Animate the bar across (almost) the whole splash window.
+            // Animate the bar across the splash — slow enough to actually
+            // read the module names tick by (≈ 4 s, ~0.66 s per module).
             NumberAnimation on progress {
                 from: 0; to: 1
-                duration: 2500
+                duration: 4000
                 running: true
                 easing.type: Easing.InOutCubic
             }
@@ -339,9 +344,9 @@ ApplicationWindow {
     }
 
     // Auto-advance splash → current wizard step after the fake module
-    // loader finishes (2500 ms animation + a short beat to read "Ready").
+    // loader finishes (4000 ms animation + a short beat to read "Ready").
     Timer {
-        interval: 2800
+        interval: 4300
         running: true
         repeat: false
         onTriggered: {

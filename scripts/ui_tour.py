@@ -55,7 +55,7 @@ def main() -> int:
     # in dark mode, then re-walk in light mode.
     # 4th element = optional action to run after navigating, before capture.
     base_plan = [
-        ("00-splash",        None,   200, None),   # captured during the splash
+        ("00-splash",        None,  1500, None),   # mid-loader (bar ~60%)
         ("01-mode",          None,  1800, None),   # let the splash timer fire
         ("02-images",           2,   700, None),
         ("03-storage",          3,   700, None),

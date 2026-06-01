@@ -36,6 +36,11 @@ ApplicationWindow {
     header: Rectangle {
         id: headerBar
         height: 60
+        // Hidden during the splash so the splash screen is JUST the image
+        // (old-school standalone splash, no app chrome). Appears once the
+        // wizard starts (displayedStepIdx leaves -1). ApplicationWindow
+        // reclaims the space for the content while hidden.
+        visible: root.displayedStepIdx >= 0
         color: theme.colors.colorHeader
 
         // Hairline bottom border
@@ -179,6 +184,7 @@ ApplicationWindow {
     // ── Custom footer ────────────────────────────────────────────────
     footer: Rectangle {
         height: 28
+        visible: root.displayedStepIdx >= 0   // hidden during splash (see header)
         color: theme.colors.colorHeader
         Rectangle {
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
@@ -208,11 +214,82 @@ ApplicationWindow {
 
     // ── Wizard step components ───────────────────────────────────────
     Component { id: splashComponent
-        Image {
-            source: splashImageUrl
-            fillMode: Image.PreserveAspectFit
-            smooth: true
-            asynchronous: true
+        Item {
+            id: splashRoot
+            // 0 → 1 over the splash window; drives the fake module loader.
+            property real progress: 0
+            readonly property var modules: [
+                "Initializing core subsystems",
+                "Loading drive enumerator",
+                "Mounting image codecs (xz / gz / zip)",
+                "Arming flash engine",
+                "Verifying vendor tools",
+                "Ready",
+            ]
+
+            Image {
+                anchors.fill: parent
+                source: splashImageUrl
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                asynchronous: true
+            }
+
+            // ── Fake "loading modules" progress (old-school splash) ──────
+            ColumnLayout {
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 54
+                width: Math.min(parent.width * 0.62, 540)
+                spacing: 9
+
+                Text {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    // Step the module label across the bar's progress.
+                    text: splashRoot.modules[Math.min(
+                              splashRoot.modules.length - 1,
+                              Math.floor(splashRoot.progress * splashRoot.modules.length))]
+                          + (splashRoot.progress < 1 ? " …" : "")
+                    color: theme.colors.colorTextSecondary
+                    font.family: Theme.fontMono   // boot-log / console vibe
+                    font.pixelSize: 11
+                    font.letterSpacing: 0.5
+                    elide: Text.ElideRight
+                }
+
+                // Progress track + fill
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 4
+                    radius: 2
+                    color: Qt.rgba(theme.colors.colorTextTertiary.r,
+                                   theme.colors.colorTextTertiary.g,
+                                   theme.colors.colorTextTertiary.b, 0.25)
+                    Rectangle {
+                        height: parent.height
+                        radius: parent.radius
+                        width: parent.width * splashRoot.progress
+                        color: theme.colors.colorAccent
+                    }
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: Math.round(splashRoot.progress * 100) + " %"
+                    color: theme.colors.colorTextTertiary
+                    font.family: Theme.fontMono
+                    font.pixelSize: 10
+                }
+            }
+
+            // Animate the bar across (almost) the whole splash window.
+            NumberAnimation on progress {
+                from: 0; to: 1
+                duration: 2500
+                running: true
+                easing.type: Easing.InOutCubic
+            }
         }
     }
     // Sequential Deployment Assistant — 7-step wizard. Component
@@ -261,9 +338,10 @@ ApplicationWindow {
         pushExit:  Transition { NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.durFast } }
     }
 
-    // Auto-advance splash → current wizard step after 1500 ms
+    // Auto-advance splash → current wizard step after the fake module
+    // loader finishes (2500 ms animation + a short beat to read "Ready").
     Timer {
-        interval: 1500
+        interval: 2800
         running: true
         repeat: false
         onTriggered: {

@@ -152,30 +152,28 @@ class FlashJob:
         dev = None
         try:
             try:
-                # 1. Open the raw physical-drive handle FIRST (NO_BUFFERING |
-                #    WRITE_THROUGH | SEQUENTIAL_SCAN), used for write, verify
-                #    AND the final MBR write. This is the Win32DiskImager /
-                #    rpi-imager order: open the PHYSICAL DRIVE *before* taking
-                #    the volume locks. Opening it after a held FSCTL_LOCK_VOLUME
-                #    can fail with a sharing/access error on some systems
-                #    (observed in the field: CreateFileW returned
-                #    INVALID_HANDLE_VALUE → the first SetFilePointerEx hit
-                #    ERROR_INVALID_HANDLE / errno 6 before any byte was
-                #    written). Opening first is harmless to the pop-up fix:
-                #    opening writes nothing, and the locks are still taken and
-                #    held BEFORE the streaming write begins.
-                dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
-                # 2. Lock + dismount every volume on this physical drive
-                #    (lettered AND letterless, found by GUID) and KEEP the
-                #    locks held for the whole flash. Passing the physical
-                #    drive id lets us lock a volume even when Windows assigned
-                #    no drive letter.
+                # 1. Dismount every volume on this physical drive (lettered
+                #    AND letterless, found by GUID) and remove the drive
+                #    letter from Mount Manager — BEFORE opening the physical
+                #    drive. This is the proven baseline order. lock_and_dismount
+                #    releases its lock and returns [] (no held handle): the
+                #    write is authorised by the dismount + the
+                #    IOCTL_DISK_DELETE_DRIVE_LAYOUT inside open_raw_device, NOT
+                #    by a held lock. Opening the physical drive while a lock
+                #    was HELD, or with the partition layout intact, is what
+                #    denied the in-partition write in the field (errno 5/6).
                 locked_handles = list(
                     self.platform_io.lock_and_dismount(
                         self.target.drive_letters,
                         self.target.physical_drive_id,
                     ) or []
                 )
+                # 2. Open ONE raw device handle (NO_BUFFERING | WRITE_THROUGH |
+                #    SEQUENTIAL_SCAN), used for write, verify AND the final MBR
+                #    write. open_raw_device wipes the in-memory partition layout
+                #    (IOCTL_DISK_DELETE_DRIVE_LAYOUT) so PARTMGR stops policing
+                #    in-partition writes.
+                dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
                 _log.info("FlashJob START role=%s phys_id=%s image=%s skip_verify=%s "
                           "skip_customize=%s linux_account=%s",
                           getattr(self.role, "value", self.role),
@@ -326,23 +324,15 @@ class FlashJob:
                     error=wrapped,
                 )
         finally:
-            # STICKY LOCK release — this is the ONLY place the held
-            # FSCTL_LOCK_VOLUME handles are closed, and it runs strictly
-            # LAST: after the inner `finally` closed the raw `dev` handle and
-            # after write + verify + customize + deferred-MBR all completed
-            # (or after a failure). Closing a locked volume handle releases
-            # its lock and lets Windows remount the freshly-written card, so
-            # releasing any earlier would let PARTMGR reprotect the partition
-            # mid-flash and deny in-partition writes (ERROR_ACCESS_DENIED).
-            #
-            # Dedupe on the numeric value and drop each handle as we go so a
-            # value can never be passed to CloseHandle twice (recycle-safe);
-            # close_handle is itself idempotent as belt-and-suspenders.
-            # Close the raw device handle too — covers the path where
-            # lock_and_dismount raised AFTER open_raw_device succeeded (the
-            # inner try/finally that normally closes dev was never entered).
-            # _Win32RawDevice.close is idempotent, so a redundant close after
-            # the normal inner-finally close is harmless.
+            # Cleanup. lock_and_dismount now RELEASES its lock internally and
+            # returns [] (the baseline contract), so locked_handles is empty
+            # and the close loop below is a harmless no-op — kept only for the
+            # PlatformIO Protocol shape and any platform that DOES hand back
+            # handles. The real cleanup here is closing the raw device handle,
+            # which also covers the path where open_raw_device or
+            # lock_and_dismount raised before the inner try/finally that
+            # normally closes dev. _Win32RawDevice.close is idempotent, so a
+            # redundant close after the inner-finally close is harmless.
             if dev is not None:
                 try:
                     dev.close()

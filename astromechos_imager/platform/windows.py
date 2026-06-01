@@ -221,35 +221,32 @@ def _open_volume_handle(open_path: str) -> int:
 
 def lock_and_dismount(letters: tuple[str, ...],
                       physical_drive_id: int | None = None) -> list[int]:
-    r"""Lock + dismount every volume on the target and HOLD the locks open.
+    r"""Dismount every volume on the target, then RELEASE — return ``[]``.
 
-    This is the Win32DiskImager / rpi-imager approach. The caller MUST keep
-    the returned handles open for the ENTIRE write + verify + customize, and
-    close them only at the very end (closing a handle releases its
-    FSCTL_LOCK_VOLUME, letting Windows remount the freshly-written card).
+    This restores the proven baseline recipe (commit 67138da) after the
+    held-lock experiment regressed real flashes into ERROR_ACCESS_DENIED.
+    The write authorisation does NOT come from a held FSCTL_LOCK_VOLUME — it
+    comes from (a) DISMOUNTING the volume so the shell drops it, (b)
+    DeleteVolumeMountPointW removing the drive letter from Mount Manager, and
+    (c) IOCTL_DISK_DELETE_DRIVE_LAYOUT in ``open_raw_device`` wiping the
+    in-memory partition table so PARTMGR no longer polices in-partition
+    writes. The orchestrator calls this BEFORE ``open_raw_device``.
 
-    Holding the lock for the whole flash is what:
-      * stops Windows re-mounting the volume mid-write and re-protecting its
-        sectors — the ERROR_ACCESS_DENIED we saw at the FAT32 offset once
-        IOCTL_DISK_DELETE_DRIVE_LAYOUT was removed; and
-      * stops the "Format K:?" / "not accessible" pop-up — a locked volume
-        cannot be mounted by the shell.
+    Per volume: FSCTL_LOCK_VOLUME (retries) → FSCTL_DISMOUNT_VOLUME →
+    FSCTL_UNLOCK_VOLUME → CloseHandle. We do NOT keep the lock: holding it
+    while the physical drive is opened/written denies the in-partition write
+    on real hardware. The lock here is only the standard "flush + invalidate
+    open handles" step before dismount.
 
-    We do NOT clear the partition table (DELETE_DRIVE_LAYOUT) — that forced
-    Windows to see the disk go RAW and fired the pop-up. We do NOT delete
-    the mount point either — the held lock is the whole mechanism, and the
-    letter comes back cleanly when we close the handle at the end.
+    No pop-up: DeleteVolumeMountPointW removes the letter the shell would
+    fire "Format K:?" against, the deferred-MBR design keeps the partition
+    table off-disk for the whole write/verify/customize window, and
+    native_shell_quiet fires SHChangeNotify(MEDIA/DRIVE REMOVED).
 
-    Volume discovery: when ``physical_drive_id`` is given we lock by VOLUME
-    GUID only (``_list_volumes`` enumerates every volume on the drive,
-    lettered or not). We deliberately do NOT also lock by drive letter in
-    that case: ``\\.\K:`` and ``\\?\Volume{guid}`` name the SAME volume, and
-    a second FSCTL_LOCK_VOLUME on an already-locked volume fails — which used
-    to abort the whole flash with a DriveLockError on any card Windows had
-    auto-mounted under a letter. Locking by GUID covers the lettered case
-    too (the lock is on the volume, not the letter). The ``letters`` list is
-    only used as a fallback when ``physical_drive_id`` is None (tests /
-    legacy callers that don't pass the drive id).
+    Volume discovery: by VOLUME GUID when ``physical_drive_id`` is given
+    (``_list_volumes`` covers lettered AND letterless volumes), else by the
+    ``letters`` fallback. Returns ``[]`` — no handle for the caller to manage
+    (API shape preserved for the PlatformIO Protocol + FlashJob cleanup).
     """
     open_paths: list[str] = []
     if physical_drive_id is not None:
@@ -258,16 +255,14 @@ def lock_and_dismount(letters: tuple[str, ...],
                 if physical_drive_id in _volume_disk_extents(vol):
                     open_paths.append(vol.rstrip("\\"))
         except Exception as exc:  # noqa: BLE001
-            _log.info("volume enumeration for lock failed (%s) — "
-                      "falling back to locking by letter", exc)
+            _log.info("volume enumeration for dismount failed (%s) — "
+                      "falling back to drive letters", exc)
     if not open_paths:
-        # No drive id, or enumeration failed — lock by letter instead.
         for letter in letters:
             open_paths.append(f"\\\\.\\{letter}:")
-    _log.info("lock_and_dismount: phys_id=%s letters=%s -> %d volume(s) to lock: %s",
+    _log.info("lock_and_dismount: phys_id=%s letters=%s -> %d volume(s): %s",
               physical_drive_id, letters, len(open_paths), open_paths)
 
-    held: list[int] = []
     seen: set[str] = set()
     for open_path in open_paths:
         if open_path in seen:
@@ -276,9 +271,9 @@ def lock_and_dismount(letters: tuple[str, ...],
         h = _open_volume_handle(open_path)
         if h == INVALID_HANDLE_VALUE:
             continue   # volume vanished / no media — skip
-        locked = False
         last_err = None
-        for _attempt in range(8):     # geometric-ish backoff, ~ rpi-imager
+        locked = False
+        for _attempt in range(8):
             try:
                 _ctl(h, FSCTL_LOCK_VOLUME)
                 locked = True
@@ -287,23 +282,43 @@ def lock_and_dismount(letters: tuple[str, ...],
                 last_err = e
                 time.sleep(0.25)
         if not locked:
-            # Could not get exclusive access (Explorer / AV / indexer).
-            kernel32().CloseHandle(h)
-            for prev in held:
-                kernel32().CloseHandle(prev)
-            raise DriveLockError(
-                f"FSCTL_LOCK_VOLUME failed for {open_path} after retries "
-                f"(close Explorer / antivirus and retry). Last err: {last_err}"
-            )
+            _log.info("  FSCTL_LOCK_VOLUME failed for %s (%s) — dismounting "
+                      "anyway (best-effort)", open_path, last_err)
         try:
             _ctl(h, FSCTL_DISMOUNT_VOLUME)
+        except OSError as e:
+            _log.info("  FSCTL_DISMOUNT_VOLUME failed for %s (%s)", open_path, e)
+        # Release the lock + close the handle — we do NOT hold it.
+        try:
+            _ctl(h, FSCTL_UNLOCK_VOLUME)
         except OSError:
-            pass   # best-effort; the held lock already blocks remount
-        held.append(h)   # KEEP open + locked for the whole flash
-        _log.info("  locked + dismounted %s -> handle 0x%X (held)", open_path, h)
-    _log.info("lock_and_dismount: holding %d locked handle(s): %s",
-              len(held), [hex(x) for x in held])
-    return held
+            pass
+        kernel32().CloseHandle(h)
+        _log.info("  dismounted + released %s", open_path)
+
+    # Remove the drive letter(s) from Mount Manager so the shell has no
+    # letter to render "Format K:?" against (baseline pop-up suppression).
+    for letter in letters:
+        try:
+            _delete_mount_point(letter)
+        except Exception as exc:  # noqa: BLE001
+            _log.info("  _delete_mount_point(%s) failed (%s)", letter, exc)
+
+    # Native shell-quiet: SHChangeNotify(MEDIAREMOVED | DRIVEREMOVED) so
+    # Explorer stops polling the device and never renders the modal dialog.
+    try:
+        from astromechos_imager.platform import native_shell_quiet
+        if native_shell_quiet.available() and letters:
+            native_shell_quiet.lock_and_quiet(letters)
+    except Exception as exc:  # noqa: BLE001
+        _log.info("native shell-quiet unavailable (%s) — continuing", exc)
+
+    # Mount-Manager + Volume Snapshot Service settle. Without it the next
+    # CreateFileW on \\.\PHYSICALDRIVEn can land in a transitional state and
+    # in-partition writes return ERROR_ACCESS_DENIED (matches rpi-imager's
+    # QThread::msleep between volumes in diskpart_util.cpp).
+    time.sleep(1.0)
+    return []
 
 
 def open_raw_device(physical_drive_id: int) -> int:
@@ -334,20 +349,8 @@ def open_raw_device(physical_drive_id: int) -> int:
         err = ctypes.get_last_error()
         raise OSError(err, f"CreateFileW({path}) failed")
     _log.info("open_raw_device(%s) -> handle 0x%X", path, h)
-    # FSCTL_ALLOW_EXTENDED_DASD_IO lets us write any sector of the raw
-    # device. NOTE: we deliberately do NOT call IOCTL_DISK_DELETE_DRIVE_LAYOUT
-    # / IOCTL_DISK_UPDATE_PROPERTIES here. Those wipe the partition table and
-    # force Windows to re-scan — which makes the shell see the disk go RAW
-    # and fire the "Format K:?" / "K:\\ is not accessible" pop-up. They are
-    # also unnecessary: what authorises raw in-partition writes is the
-    # FSCTL_LOCK_VOLUME that lock_and_dismount now HOLDS for the whole flash
-    # (the Win32DiskImager model). While we own that lock the partition
-    # manager permits writes inside the locked volume AND cannot re-mount it
-    # mid-flash, so no pop-up and no ERROR_ACCESS_DENIED. (The earlier
-    # "write at 8 MB succeeds without the lock" probe was a false negative —
-    # it ran on a card with NO drive letter, where the volume was already
-    # un-mounted; a card whose FAT32 Windows still recognises needs the held
-    # lock.) The deferred-MBR write happens at offset 0 via the orchestrator.
+    # FSCTL_ALLOW_EXTENDED_DASD_IO lets us address any sector of the raw
+    # device.
     try:
         _ctl(h, FSCTL_ALLOW_EXTENDED_DASD_IO)
         _log.info("  FSCTL_ALLOW_EXTENDED_DASD_IO OK on %s", path)
@@ -356,6 +359,28 @@ def open_raw_device(physical_drive_id: int) -> int:
             "  FSCTL_ALLOW_EXTENDED_DASD_IO failed for %s (%s) — continuing",
             path, exc,
         )
+    # IOCTL_DISK_DELETE_DRIVE_LAYOUT wipes the in-memory partition table so
+    # PARTMGR no longer policies writes as "inside a recognised partition" —
+    # this is what AUTHORISES the FAT32-offset write that otherwise returns
+    # ERROR_ACCESS_DENIED (errno 5). IOCTL_DISK_UPDATE_PROPERTIES forces
+    # Windows to re-enumerate the now-empty layout. This is the proven
+    # baseline mechanism (67138da); it does NOT reintroduce the "Format K:?"
+    # pop-up because lock_and_dismount already removed the drive letter
+    # (DeleteVolumeMountPointW) and the real MBR is written LAST (deferred
+    # first block) — there is no recognised partition for the shell to react
+    # to during the write/verify/customize window. Best-effort: some bridges
+    # reject these, in which case we log and continue.
+    try:
+        _ctl(h, IOCTL_DISK_DELETE_DRIVE_LAYOUT)
+        _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT OK on %s", path)
+    except OSError as exc:
+        _log.info("  IOCTL_DISK_DELETE_DRIVE_LAYOUT failed for %s (%s) — "
+                  "continuing", path, exc)
+    try:
+        _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
+    except OSError as exc:
+        _log.info("  IOCTL_DISK_UPDATE_PROPERTIES failed for %s (%s) — "
+                  "continuing", path, exc)
     return h
 
 

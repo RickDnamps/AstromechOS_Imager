@@ -69,6 +69,7 @@ def fake_platform_io(tmp_path):
             self._path = path
             self.size_bytes = size
             self._fh = open(path, "r+b")
+            self._h = 0xF000  # mimic _Win32RawDevice's handle attr (eject/sync probe it)
 
         def write(self, offset, data):
             self._fh.seek(offset)
@@ -123,6 +124,9 @@ def fake_platform_io(tmp_path):
             pass
 
         def eject_media(self, h):
+            pass
+
+        def finalize_eject(self, physical_drive_id):
             pass
 
     return _Fake()

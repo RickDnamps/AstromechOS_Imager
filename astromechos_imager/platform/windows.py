@@ -767,6 +767,35 @@ def eject_media(h: int) -> None:
     _ctl(h, IOCTL_STORAGE_EJECT_MEDIA)
 
 
+def finalize_eject(physical_drive_id: int) -> bool:
+    r"""Best-effort eject of \\.\PHYSICALDRIVEn on a FRESH minimal handle.
+
+    Called AFTER the write handle is closed, so nothing pins the device — this
+    tells Windows the media is gone and it drops the freshly-written volumes
+    instead of prompting "Format?" for the unreadable ext4 rootfs partition.
+    Many USB SD-card bridges don't support eject; returns False (logged) and
+    never raises.
+    """
+    k = kernel32()
+    path = f"\\\\.\\PHYSICALDRIVE{physical_drive_id}"
+    h = k.CreateFileW(
+        path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, None,
+        OPEN_EXISTING, 0, None,
+    )
+    if h == INVALID_HANDLE_VALUE:
+        _log.info("finalize_eject: open %s failed (err %d)", path, ctypes.get_last_error())
+        return False
+    try:
+        _ctl(h, IOCTL_STORAGE_EJECT_MEDIA)
+        _log.info("finalize_eject: %s media ejected", path)
+        return True
+    except OSError as exc:
+        _log.info("finalize_eject: %s eject unsupported/failed (%s) — ignored", path, exc)
+        return False
+    finally:
+        close_handle(h)
+
+
 # ── _Win32RawDevice + helpers ──────────────────────────────────────────────
 
 from astromechos_imager.core.platform_io import RawDevice  # noqa: E402 (Protocol, no runtime dep)
@@ -1016,6 +1045,10 @@ class WindowsPlatformIO:
 
     def eject_media(self, handle):
         eject_media(handle)
+
+    def finalize_eject(self, physical_drive_id):
+        """Best-effort eject on a fresh handle after the write handle closed."""
+        return finalize_eject(physical_drive_id)
 
     def attach_letter_to_unmounted_volume(
         self, letter: str, physical_drive_id: int, timeout_s: float = 15.0,

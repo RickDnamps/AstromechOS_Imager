@@ -225,10 +225,33 @@ def test_preflight_failure_aborts_before_touching_card(tmp_path, fake_platform_i
     assert touched == [], f"preflight failure still touched the device: {touched}"
 
 
-def test_cancellation_skips_bundle(tmp_path, fake_platform_io, monkeypatch):
+def test_success_ejects_media(tmp_path, fake_platform_io, monkeypatch):
+    """On a successful flash the media is ejected so Windows drops the freshly
+    written volumes (no "Format?" pop-up for the unreadable ext4 partition)."""
+    fake_platform_io.add_drive(6, size=512 * 1024 + 1024)
+    fake_boot = FakeBootPartitionForFlash()
+    _patch_boot(monkeypatch, fake_boot)
+    ejects: list[int] = []
+    monkeypatch.setattr(fake_platform_io, "finalize_eject", lambda pid: ejects.append(pid))
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=fake_platform_io.enumerate_removable_drives()[0], role=Role.MASTER,
+        firstboot_config=_make_cfg(), master_pair=generate_ed25519(),
+        linux_account=ACC, skip_verify=True,
+    )
+    assert job.run().ok
+    assert ejects == [6], f"expected exactly one eject of drive 6 on success, got {ejects}"
+
+
+def test_cancellation_skips_bundle_and_eject(tmp_path, fake_platform_io, monkeypatch):
+    """Cancelled flash: no firstboot trigger written and no eject (the card is
+    restored to exFAT instead)."""
     fake_platform_io.add_drive(5, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
+    ejects: list[int] = []
+    monkeypatch.setattr(fake_platform_io, "finalize_eject", lambda pid: ejects.append(pid))
     cancel = threading.Event()
     cancel.set()
 
@@ -240,3 +263,4 @@ def test_cancellation_skips_bundle(tmp_path, fake_platform_io, monkeypatch):
     )
     job.run()
     assert not fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
+    assert ejects == [], "must not eject a cancelled (non-mbr_written) flash"

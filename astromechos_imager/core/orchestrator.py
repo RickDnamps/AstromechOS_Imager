@@ -218,14 +218,21 @@ class FlashJob:
                         # card carries the image's own MBR — it's valid.
                         mbr_written = True
                 finally:
-                    # Safe to close now: DiskWriter.run() unconditionally
-                    # joins its producer + consumer threads before it
-                    # returns OR raises (t_p.join(); t_c.join() precede both
-                    # paths), and verify_readback runs synchronously on this
-                    # thread — so no background reader/writer can still touch
-                    # this handle. close() is idempotent (swap-then-close),
-                    # so a redundant close on an error path is harmless.
+                    # DiskWriter joins its threads and verify runs synchronously
+                    # before this point, so no background I/O can touch the
+                    # handle. close() is idempotent.
                     dev.close()
+                # Eject on success, on a FRESH handle (ours is now closed so it
+                # can't pin the device). Windows drops the freshly-written
+                # volumes instead of prompting "Format?" for the unreadable ext4
+                # rootfs. Best-effort — never affects the result.
+                if mbr_written and not self.cancel_event.is_set():
+                    finalize = getattr(self.platform_io, "finalize_eject", None)
+                    if finalize is not None:
+                        try:
+                            finalize(self.target.physical_drive_id)
+                        except Exception:
+                            pass
                 return FlashJobResult(ok=True,
                                       bytes_written=write_result.bytes_written,
                                       source_sha256=write_result.source_sha256)

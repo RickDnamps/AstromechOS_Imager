@@ -266,8 +266,8 @@ Rectangle {
         anchors.fill: parent
         anchors.leftMargin: 28
         anchors.rightMargin: 28
-        anchors.topMargin: 16
-        anchors.bottomMargin: 64
+        anchors.topMargin: 14
+        anchors.bottomMargin: 60
         contentWidth: width
         contentHeight: form.implicitHeight
         clip: true
@@ -276,7 +276,7 @@ Rectangle {
         ColumnLayout {
             id: form
             width: scroll.width
-            spacing: 8
+            spacing: 10
 
             // ── Page title ────────────────────────────────────────────
             Text {
@@ -296,7 +296,7 @@ Rectangle {
             // is unchanged.
             SectionCard {
                 title: "LINUX ACCOUNT"
-                subtitle: "Account used to log into the robot. The username is fixed (astromech); set a password, or leave it blank to use the safe default."
+                subtitle: "Robot login. Username is fixed (astromech); set a password or leave blank for the default."
                 warningText: "Username and password grant SSH plus sudo access on the robot. " +
                              "If you change them and forget the new values, you will be locked " +
                              "out of the robot entirely — no remote SSH, no service restart, " +

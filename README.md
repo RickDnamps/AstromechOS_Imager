@@ -24,8 +24,6 @@ An old-school standalone splash: the window is sized to the splash artwork's asp
 
 ![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=18)
 
-![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=18)
-
 ### Step 1 — Landing
 
 The entry screen of the **Sequential Deployment Assistant**: flash one card at a time, configure once, then deploy Master and Slave with a single shared hotspot SSID. That `Astromech-XXXX` bootstrap SSID is minted **once at launch** (shown read-only in Step 2 and baked into both cards so the wlan0 rendezvous works). `START DEPLOYMENT →` advances to the configuration step.

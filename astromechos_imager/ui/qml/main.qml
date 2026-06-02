@@ -13,8 +13,8 @@ ApplicationWindow {
     // those at render (sourceClipRect below) leaving 800×456 (≈1.754), so
     // the splash window is sized 982×560 (same ratio). It grows to the
     // wizard size the moment the first step appears.
-    width:  displayedStepIdx >= 0 ? 920 : 982
-    height: displayedStepIdx >= 0 ? 640 : 560
+    width:  displayedStepIdx >= 0 ? 960 : 982
+    height: displayedStepIdx >= 0 ? 688 : 560
     minimumWidth: 760
     minimumHeight: 560
     visible: true

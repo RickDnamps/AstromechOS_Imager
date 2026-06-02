@@ -74,6 +74,10 @@ Item {
         anchors.right: parent.right
         anchors.bottom: track.top
         anchors.bottomMargin: 4
+        // Determinate % gets a fixed width + right-align so the digit count
+        // changing never reflows the speed badge anchored to its left edge.
+        width: mode === "indeterminate" ? implicitWidth : 46
+        horizontalAlignment: Text.AlignRight
         text: mode === "indeterminate"
               ? label
               : Math.round(_floor * 100) + " %"

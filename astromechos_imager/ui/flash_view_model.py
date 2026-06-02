@@ -17,6 +17,7 @@ When no sidecar exists the digest is exposed via ``masterHash`` /
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, Property, Signal, Slot
@@ -25,14 +26,18 @@ from astromechos_imager.core.diskwriter import DiskWriterProgress
 from astromechos_imager.core.models import HotspotBootstrap, Role
 
 
+#: UI progress is rate-gated to this period per channel. The flash worker can
+#: fire progress per buffer (hundreds/sec); the GUI only needs ~12 Hz, and a
+#: tighter cadence just floods the render thread (jank while dragging).
+_PROGRESS_MIN_INTERVAL_S = 1.0 / 12.0
+
+
 class _FlashWorker(QObject):
-    """Lives in a QThread; runs job.run() then emits 'finished'."""
-    # 3-arg form: (fraction 0..1, phase str, throughput_bps float).
-    # ``throughput_bps`` is 0.0 for events that don't reflect actual
-    # bandwidth (phase-entry pings, the deferred-first-block chunk, the
-    # synthetic "preparing" emit at worker start). The QML
-    # GlobalProgressBar hides the "Mo/s" badge when the value is 0 so
-    # those phases don't display a misleading speed.
+    """Lives in a QThread; runs job.run() then emits 'finished'.
+
+    progress* signals are (fraction 0..1, phase, throughput_bps); throughput is
+    0.0 for non-bandwidth events so the bar hides the speed badge.
+    """
     progressMaster = Signal(float, str, float)
     progressSlave = Signal(float, str, float)
     finished = Signal(bool, str)          # ok, error_msg
@@ -42,16 +47,15 @@ class _FlashWorker(QObject):
         super().__init__()
         self._job = job
         self._is_pair = is_pair
+        # Per-channel rate-gate state, pre-seeded so updates only ever mutate
+        # existing keys (concurrent master/slave writes stay GIL-safe).
+        self._last_emit = {"m": 0.0, "s": 0.0}
+        self._last_phase = {"m": "", "s": ""}
 
     @Slot()
     def run(self) -> None:
-        # Fire a "preparing" phase ping immediately when the worker thread
-        # starts, BEFORE job.run() blocks for ~1-3 s on lock_and_dismount /
-        # open_raw_device / open_image. Without this, the UI sits at
-        # status="flashing" + progress 0% + empty phase label for the entire
-        # silent window — indistinguishable from "Not Responding". With this
-        # ping, Step5Flash.qml can render "Preparing target drive…" with an
-        # indeterminate spinner until DiskWriter starts firing real chunks.
+        # Show activity immediately during the ~1-3 s silent window before
+        # DiskWriter starts firing chunks.
         if self._is_pair:
             self.progressMaster.emit(0.0, "preparing", 0.0)
             self.progressSlave.emit(0.0, "preparing", 0.0)
@@ -73,18 +77,33 @@ class _FlashWorker(QObject):
             else:
                 ok = bool(result.ok)
                 err = "" if ok else str(getattr(result, "error", "")) or "flash failed"
+            # finished is never gated — completion always reaches the UI (which
+            # then forces the bar to 100% via the done state).
             self.finished.emit(ok, err)
         except Exception as e:
             self.finished.emit(False, f"{type(e).__name__}: {e}")
 
+    def _gate(self, key: str, phase: str) -> bool:
+        """True if this update should reach the UI: always on a phase change,
+        else at most once per _PROGRESS_MIN_INTERVAL_S."""
+        now = time.monotonic()
+        if phase != self._last_phase[key] or (now - self._last_emit[key]) >= _PROGRESS_MIN_INTERVAL_S:
+            self._last_phase[key] = phase
+            self._last_emit[key] = now
+            return True
+        return False
+
     def _on_pair_progress(self, role: Role, p: DiskWriterProgress) -> None:
+        key = "m" if role is Role.MASTER else "s"
+        if not self._gate(key, p.phase):
+            return
         frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
-        if role is Role.MASTER:
-            self.progressMaster.emit(frac, p.phase, p.throughput_bps)
-        else:
-            self.progressSlave.emit(frac, p.phase, p.throughput_bps)
+        sig = self.progressMaster if role is Role.MASTER else self.progressSlave
+        sig.emit(frac, p.phase, p.throughput_bps)
 
     def _on_single_progress(self, p: DiskWriterProgress) -> None:
+        if not self._gate("m", p.phase):
+            return
         frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
         self.progressMaster.emit(frac, p.phase, p.throughput_bps)
 
@@ -688,35 +707,33 @@ class FlashViewModel(QObject):
         self.slaveThroughputBpsChanged.emit()
 
     def _on_finished(self, ok, err):
-        # Audit High #14: detect cancel-by-operator and route to a clean
-        # "cancelled" state rather than "error" — the operator clicked
-        # CANCEL themselves and shouldn't see an error message about it.
-        #
-        # We key off ``self._user_cancelled`` (set ONLY by ``cancel()``)
-        # rather than ``cancel_event.is_set()``. The cancel event doubles
-        # as a thread-coordination signal — DiskWriter's consumer thread
-        # sets it on its own when it dies (diskwriter.py::run consumer
-        # ``except BaseException`` branch) so the producer unblocks. Keying
-        # the routing decision off that event would mis-classify every
-        # real write failure as "cancelled" — UI then reverts to idle
-        # (status="cancelled" has no QML rendering) and hides the error.
+        # Route an operator CANCEL (self._user_cancelled, set only by cancel())
+        # to a clean "cancelled" state. We can't key off cancel_event here — it
+        # also doubles as a thread-coordination signal, so a real write failure
+        # would be mis-classified as a cancel.
         if self._user_cancelled:
             self._status = "cancelled"
             self._error_message = ""
         else:
             self._status = "done" if ok else "error"
             self._error_message = err
-            # Sequential Deployment Assistant: advance the role state
-            # machine on success ONLY. Idempotent — re-entry is safe.
-            if ok and hasattr(self._wizard_state, "markCurrentRoleCompleted"):
-                try:
-                    self._wizard_state.markCurrentRoleCompleted()
-                except Exception:
-                    import logging
-                    logging.getLogger(__name__).exception(
-                        "markCurrentRoleCompleted() raised; flash succeeded "
-                        "but the sequential state machine did not advance"
-                    )
+            if ok:
+                # Completion flush: the throttle may have skipped the final
+                # tick, so pin the bar(s) to 100% on success.
+                self._master_progress = 1.0
+                self._slave_progress = 1.0
+                self.masterProgressChanged.emit()
+                self.slaveProgressChanged.emit()
+                # Advance the sequential role state machine (idempotent).
+                if hasattr(self._wizard_state, "markCurrentRoleCompleted"):
+                    try:
+                        self._wizard_state.markCurrentRoleCompleted()
+                    except Exception:
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "markCurrentRoleCompleted() raised; flash succeeded "
+                            "but the sequential state machine did not advance"
+                        )
         self.statusChanged.emit()
         self.errorMessageChanged.emit()
         if self._thread is not None:

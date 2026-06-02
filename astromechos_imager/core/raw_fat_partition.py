@@ -19,6 +19,7 @@ rpi-imager ordering: image → userspace-FAT customize → MBR last).
 from __future__ import annotations
 
 import datetime
+import posixpath
 import sys
 
 
@@ -95,17 +96,41 @@ class RawFatBootPartition:
         self._closed = False
 
     # ── BootPartition Protocol ────────────────────────────────────────
+    def _resolve(self, path: str) -> str | None:
+        """Return the actually-stored path for ``path`` matching case-
+        insensitively, or None. FAT is case-insensitive, but pyfatfs lookups
+        are case-sensitive and it returns short 8.3 names uppercased
+        (e.g. Pi OS ``cmdline.txt`` lists as ``CMDLINE.TXT``)."""
+        if self._pfs.exists(path):
+            return path
+        parent = posixpath.dirname(path) or "/"
+        name = posixpath.basename(path).lower()
+        try:
+            if not self._pfs.exists(parent):
+                return None
+            for entry in self._pfs.listdir(parent):
+                if entry.lower() == name:
+                    return posixpath.join(parent, entry)
+        except Exception:
+            pass
+        return None
+
     def write_bytes(self, path: str, data: bytes) -> None:
-        self._pfs.writebytes(path, data)
+        # Overwrite an existing entry under its stored name; create new files
+        # under the requested path.
+        self._pfs.writebytes(self._resolve(path) or path, data)
 
     def read_bytes(self, path: str) -> bytes:
-        return self._pfs.readbytes(path)  # type: ignore[no-any-return]
+        resolved = self._resolve(path)
+        if resolved is None:
+            raise FileNotFoundError(f"{path} not found on FAT boot partition")
+        return self._pfs.readbytes(resolved)  # type: ignore[no-any-return]
 
     def mkdir(self, path: str) -> None:
         self._pfs.makedirs(path, recreate=True)
 
     def exists(self, path: str) -> bool:
-        return self._pfs.exists(path)  # type: ignore[no-any-return]
+        return self._resolve(path) is not None
 
     def close(self) -> None:
         # Strictly idempotent: a second close() (orchestrator finally racing

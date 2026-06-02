@@ -23,9 +23,10 @@ def test_firstrun_contains_user_password_and_self_destruct():
     # the target user + hash both appear (single-quoted)
     assert "'astromech'" in sh
     assert "'" + HASH + "'" in sh
-    # self-destruct, exactly like the official tool
-    assert "rm -f /boot/firstrun.sh" in sh
-    assert "sed -i 's| systemd.run.*||g' /boot/cmdline.txt" in sh
+    # self-destruct — cleans both /boot and /boot/firmware (Trixie FAT mount)
+    assert "rm -f /boot/firstrun.sh /boot/firmware/firstrun.sh" in sh
+    assert "sed -i 's| systemd.run.*||g'" in sh
+    assert "/boot/firmware/cmdline.txt" in sh
 
 
 def test_firstrun_is_lf_only_and_utf8():

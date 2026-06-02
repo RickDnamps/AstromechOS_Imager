@@ -60,8 +60,11 @@ def generate_firstrun_sh(username: str, crypt_password_hash: str) -> bytes:
     """
     u = _shell_squote(username)
     h = _shell_squote(crypt_password_hash)
-    # NOTE: keep the literal /boot/... paths and structure identical to the
-    # official tool — verified compatible with Raspberry Pi OS Trixie.
+    # Mirrors the official rpi-imager generateSystemdScript user/password block.
+    # On Raspberry Pi OS the userconf-pi branch is taken and does everything
+    # (rename + password + autologin fixups); the else branch is the generic
+    # fallback. Self-destruct cleans BOTH /boot and /boot/firmware so a stale
+    # trigger can never re-arm (Trixie mounts the FAT at /boot/firmware).
     lines = [
         "#!/bin/sh",
         "",
@@ -78,14 +81,22 @@ def generate_firstrun_sh(username: str, crypt_password_hash: str) -> bytes:
         f"      usermod -l {u} \"$FIRSTUSER\"",
         f"      usermod -m -d /home/{username} {u}",
         f"      groupmod -n {u} \"$FIRSTUSER\"",
+        "      if grep -q \"^autologin-user=\" /etc/lightdm/lightdm.conf 2>/dev/null; then",
+        f"         sed -i \"s/^autologin-user=.*/autologin-user={username}/\" /etc/lightdm/lightdm.conf",
+        "      fi",
+        "      if [ -f /etc/systemd/system/getty@tty1.service.d/autologin.conf ]; then",
+        f"         sed -i \"s/$FIRSTUSER/{username}/\" /etc/systemd/system/getty@tty1.service.d/autologin.conf",
+        "      fi",
         "      if [ -f /etc/sudoers.d/010_pi-nopasswd ]; then",
         f"         sed -i \"s/^$FIRSTUSER /{username} /\" /etc/sudoers.d/010_pi-nopasswd",
         "      fi",
         "   fi",
         "fi",
         "",
-        "rm -f /boot/firstrun.sh",
-        "sed -i 's| systemd.run.*||g' /boot/cmdline.txt",
+        "rm -f /boot/firstrun.sh /boot/firmware/firstrun.sh",
+        "for _c in /boot/cmdline.txt /boot/firmware/cmdline.txt; do",
+        "   [ -f \"$_c\" ] && sed -i 's| systemd.run.*||g' \"$_c\"",
+        "done",
         "exit 0",
         "",
     ]

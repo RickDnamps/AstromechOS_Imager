@@ -178,7 +178,7 @@ class FlashJob:
                                     if inject_resize_arg(bp):
                                         _log.info("PHASE customize: rootfs auto-resize arg injected")
                                     else:
-                                        _log.info("PHASE customize: rootfs auto-resize arg already present")
+                                        _log.info("PHASE customize: rootfs auto-resize arg already present (init= present, not duplicated)")
                                 # Set the UID-1000 user + password at first boot
                                 # via /firstrun.sh (FAT). Skipped with no account.
                                 if (

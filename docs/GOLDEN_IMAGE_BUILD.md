@@ -18,7 +18,7 @@ Produire deux fichiers compressés flashables :
 
 Ces fichiers sont consommés par l'**AstroMechOS_Imager** qui fait :
 - Cold rootfs surgery (rename UID-1000 user, change role marker, regen secrets)
-- Injection du resize trigger dans `cmdline.txt` (`init=/usr/lib/raspberrypi-sys-mod/init_resize.sh`)
+- Injection du resize trigger dans `cmdline.txt` (`init=/usr/lib/raspi-config/init_resize.sh`)
 - Flash vers les nouvelles SD du fleet
 
 ---
@@ -208,9 +208,9 @@ PiShrink par défaut crée `/etc/rc.local` dans la rootfs qui contient un script
 2. Fallback `fdisk` + `resize2fs` + reboot
 3. Restore `/etc/rc.local.bak`
 
-**Mais l'AstroMechOS_Imager fait sa propre injection** via `astromechos_imager/core/rootfs_personalizer.py` :
+**Mais l'AstroMechOS_Imager fait sa propre injection** via `astromechos_imager/core/cmdline_resize.py` :
 ```python
-RESIZE_INIT_ARG = "init=/usr/lib/raspberrypi-sys-mod/init_resize.sh"
+RESIZE_INIT_ARG = "init=/usr/lib/raspi-config/init_resize.sh"
 ```
 
 Il patche `/cmdline.txt` (sur la FAT32 boot) avec cet argument kernel. Au boot du Pi flashé, le kernel exécute `init_resize.sh` **comme PID 1, avant systemd** — le script natif Pi OS qui resize la partition + ext4 puis se retire de cmdline.txt. C'est la méthode officielle Pi OS, beaucoup plus propre que le hack rc.local de pishrink.

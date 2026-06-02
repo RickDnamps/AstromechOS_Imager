@@ -64,6 +64,48 @@ def test_inject_writes_once_then_noop():
     assert inject_resize_arg(boot) is False
 
 
+def _count_init(cmdline: bytes) -> int:
+    return sum(1 for t in cmdline.split() if t.startswith(b"init="))
+
+
+def test_foreign_init_is_respected_not_doubled():
+    """A cmdline that already has a (different) init= must not gain a second
+    one — the kernel would have two PID-1 candidates. We defer to the existing
+    directive. Mirrors a card flashed by the old buggy tool."""
+    old = (b"console=tty1 root=PARTUUID=aa-02 rootwait "
+           b"init=/usr/lib/raspberrypi-sys-mod/init_resize.sh\n")
+    out = ensure_resize_init_in_cmdline(old)
+    assert out == old                              # byte-identical, deferred
+    assert _count_init(out) == 1                   # never two init= tokens
+    assert RESIZE_INIT_ARG.encode() not in out     # ours was NOT appended
+
+
+def test_bare_golden_cmdline_gets_exactly_one_init():
+    """The real Golden-image cmdline (bare, no init=) gains exactly one init=."""
+    bare = (b"console=tty1 root=PARTUUID=d89b055c-02 rootfstype=ext4 "
+            b"fsck.repair=yes rootwait cfg80211.ieee80211_regdom=CA\n")
+    out = ensure_resize_init_in_cmdline(bare)
+    assert _count_init(out) == 1
+    assert RESIZE_INIT_ARG.encode() in out
+
+
+def test_resize_path_is_real_and_init_resize_strip_preserves_firstrun():
+    """The resize init= path must be the one Pi OS execs as PID 1, and
+    init_resize.sh's self-strip (it removes only its own token) must leave the
+    systemd.run firstrun trigger intact for the next boot."""
+    from astromechos_imager.core.firstrun_generator import FIRSTRUN_CMDLINE_TRIGGER
+
+    # Verified present on the golden image (wrong path => kernel panic at PID 1).
+    assert RESIZE_INIT_ARG == "init=/usr/lib/raspi-config/init_resize.sh"
+
+    cmd = (b"console=tty1 root=PARTUUID=aa-02 rootwait "
+           + RESIZE_INIT_ARG.encode() + FIRSTRUN_CMDLINE_TRIGGER.encode() + b"\n")
+    # init_resize.sh:206 — `sed -i 's| init=/usr/lib/raspi-config/init_resize\\.sh||'`
+    stripped = cmd.replace(b" " + RESIZE_INIT_ARG.encode(), b"")
+    assert RESIZE_INIT_ARG.encode() not in stripped
+    assert b"systemd.run=/boot/firstrun.sh" in stripped  # firstrun survives to boot 2
+
+
 def test_inject_read_failure_raises():
     boot = _FakeBoot()
     boot.read_raises = OSError("disk error")

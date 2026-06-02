@@ -297,11 +297,12 @@ Rectangle {
             SectionCard {
                 title: "LINUX ACCOUNT"
                 subtitle: "Robot login. Username is fixed (astromech); set a password or leave blank for the default."
-                warningText: "Username and password grant SSH plus sudo access on the robot. " +
-                             "If you change them and forget the new values, you will be locked " +
-                             "out of the robot entirely — no remote SSH, no service restart, " +
-                             "no recovery. Re-flashing the SD card with this Imager is the " +
-                             "only way back. Use a password you can store safely."
+                warningText: "The fixed 'astromech' account has SSH + sudo access on the robot. " +
+                             "The username can't change, but if you set a custom PASSWORD and " +
+                             "forget it, you will be locked out entirely — no remote SSH, no " +
+                             "service restart, no recovery. Re-flashing the SD card with this " +
+                             "Imager is the only way back. Use a password you can store safely " +
+                             "(or leave it blank for the known default)."
 
                 RowLayout {
                     Layout.fillWidth: true

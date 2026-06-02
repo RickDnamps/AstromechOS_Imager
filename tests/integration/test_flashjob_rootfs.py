@@ -211,21 +211,23 @@ def test_flashjob_with_linux_account_touches_rootfs_and_boot(
     result = job.run()
     assert result.ok, f"FlashJob failed: {result.error}"
 
-    # Rootfs was personalized
-    assert b"testuser:x:1000" in fake_rootfs.files["/etc/passwd"]
-    assert b"pi:x:1000" not in fake_rootfs.files["/etc/passwd"]
+    # Account customization is now done at FIRST BOOT via /firstrun.sh on the
+    # FAT boot partition (the official Raspberry Pi Imager method) — 100% FAT,
+    # no ext4/debugfs. The ext4 rootfs is NOT touched offline.
+    assert fake_boot.exists("/firstrun.sh")
+    fr = fake_boot.files["/firstrun.sh"].decode("utf-8")
+    assert "testuser" in fr                      # target username
+    assert "userconf" in fr and "chpasswd -e" in fr
+    assert "rm -f /boot/firstrun.sh" in fr       # self-destruct
 
-    # /cmdline.txt got the resize init arg — exactly once. SD-fill safety
-    # invariant: Pi OS first-boot rootfs auto-resize MUST be wired for the
-    # Master card too, not just the Slave. Without it, the Master's rootfs
-    # stays pinned at the Golden Image's ~3 GB and runs out of disk within
-    # days. Idempotent: re-running apply() must not duplicate the arg.
+    # /cmdline.txt carries the resize arg (exactly once) AND the firstrun trigger.
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
     cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
     assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1, (
         f"resize arg appears {cmdline_text.split().count(RESIZE_INIT_ARG)} times "
         f"in MASTER cmdline.txt — must be exactly 1"
     )
+    assert "systemd.run=/boot/firstrun.sh" in cmdline_text
 
     # Firstboot bundle was written (trigger marker is last)
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
@@ -279,14 +281,16 @@ def test_flashjob_slave_role_also_injects_resize_arg(
     result = job.run()
     assert result.ok, f"FlashJob (SLAVE) failed: {result.error}"
 
-    # Rootfs personalization ran for slave too
-    assert b"testuser:x:1000" in fake_rootfs.files["/etc/passwd"]
+    # firstrun.sh account setup ran for the slave too (FAT, first-boot)
+    assert fake_boot.exists("/firstrun.sh")
+    assert "testuser" in fake_boot.files["/firstrun.sh"].decode("utf-8")
 
     # /cmdline.txt got the resize init arg — the critical lockdown
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
-    # And exactly once (idempotent), even though apply() always touches it
+    # And exactly once (idempotent)
     cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
     assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
+    assert "systemd.run=/boot/firstrun.sh" in cmdline_text
 
 
 def test_pair_flash_resize_arg_injected_on_both_cards(
@@ -364,11 +368,11 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
         f"slave={result.slave.error!r}"
     )
 
-    # ── BOTH rootfs partitions personalized ──────────────────────────
-    assert b"testuser:x:1000" in fake_rootfs_master.files["/etc/passwd"]
-    assert b"testuser:x:1000" in fake_rootfs_slave.files["/etc/passwd"]
+    # ── BOTH cards got firstrun.sh account setup (FAT, first-boot) ────
+    assert fake_boot_master.exists("/firstrun.sh")
+    assert fake_boot_slave.exists("/firstrun.sh")
 
-    # ── BOTH cmdline.txt files got the resize arg, exactly once each ─
+    # ── BOTH cmdline.txt files got the resize arg (once) + firstrun trigger ─
     for role, fake_boot in (("MASTER", fake_boot_master), ("SLAVE", fake_boot_slave)):
         cmdline_bytes = fake_boot.files["/cmdline.txt"]
         assert RESIZE_INIT_ARG.encode("ascii") in cmdline_bytes, (
@@ -376,6 +380,9 @@ def test_pair_flash_resize_arg_injected_on_both_cards(
         )
         count = cmdline_bytes.decode("ascii").split().count(RESIZE_INIT_ARG)
         assert count == 1, f"{role}: resize arg appears {count} times — must be exactly 1"
+        assert "systemd.run=/boot/firstrun.sh" in cmdline_bytes.decode("ascii"), (
+            f"{role}: firstrun trigger missing from cmdline.txt"
+        )
 
     # ── BOTH cards have the trigger marker (write order honoured) ────
     assert fake_boot_master.exists("/ASTROMECH_FIRSTBOOT_READY")
@@ -435,81 +442,22 @@ def test_flashjob_without_linux_account_skips_rootfs(
     result = job.run()
     assert result.ok, f"FlashJob failed: {result.error}"
 
-    # Rootfs NOT opened (no ext4 cold surgery without an account)
+    # The ext4 rootfs partition is never opened (account customization is now
+    # FAT firstrun.sh; there is no ext4 cold surgery anymore).
     assert open_rootfs_calls == []
 
-    # Original passwd file untouched (pi still there)
-    assert b"pi:x:1000" in fake_rootfs.files["/etc/passwd"]
+    # No account → NO firstrun.sh and NO systemd.run trigger.
+    assert not fake_boot.exists("/firstrun.sh")
+    assert "systemd.run=/boot/firstrun.sh" not in fake_boot.files["/cmdline.txt"].decode("ascii")
 
     # /cmdline.txt STILL gets the resize arg — exactly once. The resize is
-    # decoupled from cold surgery and mandatory for every card (invariant #5).
+    # decoupled and mandatory for every card (invariant #5).
     assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
     cmdline_text = fake_boot.files["/cmdline.txt"].decode("ascii")
     assert cmdline_text.split().count(RESIZE_INIT_ARG) == 1
 
     # Bundle still written
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
-
-
-def test_flashjob_cold_surgery_error_propagates_no_silent_skip(
-    tmp_path, fake_platform_io, monkeypatch
-):
-    """A cold-surgery failure at customize time PROPAGATES (flash fails) —
-    it is NOT silently swallowed.
-
-    Operator decision 2026-06-01: cold-surgery readiness is validated up front
-    by _preflight; if surgery still fails after that, the operator must be told
-    (no card that quietly kept the golden account while reporting success).
-    Here _open_rootfs_partition raises (simulating debugfs failure) and we
-    assert the flash reports ok=False. The decoupled resize ran BEFORE the
-    surgery, so the (about-to-be-restored) cmdline already carries the arg, and
-    the firstboot trigger — written AFTER surgery — is absent."""
-    payload = _mbr_payload(_make_pi_os_mbr())
-    img = tmp_path / "master.img.xz"
-    img.write_bytes(lzma.compress(payload))
-    fake_platform_io.add_drive(7, size=len(payload) + 1024)
-
-    cfg = _make_cfg()
-    pair = generate_ed25519()
-    acc = LinuxAccount(
-        username="testuser",
-        cleartext_password="test123",
-        crypt_sha512="$6$salt$fakehash",
-    )
-
-    fake_boot = FakeBootPartitionForFlash(STOCK_CMDLINE)
-
-    def _raise_debugfs_error(*a, **kw):
-        raise FileNotFoundError(2, "The system cannot find the file specified", "debugfs.exe")
-
-    monkeypatch.setattr(
-        "astromechos_imager.core.orchestrator._bootpartition_open",
-        lambda *a, **kw: fake_boot,
-    )
-    monkeypatch.setattr(
-        "astromechos_imager.core.orchestrator._open_rootfs_partition",
-        _raise_debugfs_error,
-    )
-
-    job = FlashJob(
-        platform_io=fake_platform_io,
-        image_path=img,
-        target=fake_platform_io.enumerate_removable_drives()[0],
-        role=Role.MASTER,
-        firstboot_config=cfg,
-        master_pair=pair,
-        linux_account=acc,
-        skip_verify=True,
-    )
-    result = job.run()
-    # NO silent skip — the error propagates, flash reports failure.
-    assert not result.ok, "cold-surgery error must NOT be silently swallowed"
-    assert result.error is not None
-
-    # Decoupled resize ran BEFORE surgery, so the arg was already written...
-    assert RESIZE_INIT_ARG.encode("ascii") in fake_boot.files["/cmdline.txt"]
-    # ...but the trigger (written AFTER surgery) never landed.
-    assert not fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
 def test_physicaldrive_to_cygwin_mapping():

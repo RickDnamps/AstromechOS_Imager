@@ -792,29 +792,17 @@ _WINDOWS_SKIP_VERIFY = False
 
 
 def ext4_tools_available() -> bool:
-    """Return True when the vendored e2fsprogs tools (debugfs + e2fsck) are
-    present so the rootfs UID-1000 cold surgery (username/password rename)
-    can run.
+    """Always True — account customization no longer needs ext4 tools.
 
-    On non-Windows dev/test hosts the surgery uses the system e2fsprogs and
-    is assumed available. On Windows it requires the bundled ``vendor/``
-    binaries (``debugfs.exe`` / ``e2fsck.exe`` + their runtime DLL). When
-    they're missing, the flash still succeeds but the card keeps the golden
-    image's default UID-1000 account — so the UI surfaces a clear warning
-    instead of letting the operator discover it only after boot.
+    The UID-1000 username + password are now set at FIRST BOOT via the
+    official Raspberry Pi Imager mechanism (``/firstrun.sh`` on the FAT boot
+    partition + ``systemd.run`` in cmdline.txt — see
+    ``core/firstrun_generator.py``). That is 100% FAT-partition work, so there
+    is no debugfs/e2fsprogs dependency and nothing to warn the operator about.
+    Kept as a stable hook for the ``coldSurgeryAvailable`` QML property (which
+    therefore stays True and the missing-tools banner never shows).
     """
-    import sys  # noqa: PLC0415
-    if sys.platform != "win32":
-        return True
-    try:
-        from astromechos_imager.core.vendored_binaries import (  # noqa: PLC0415
-            debugfs_exe, e2fsck_exe,
-        )
-        debugfs_exe()
-        e2fsck_exe()
-        return True
-    except Exception:  # noqa: BLE001 — any resolution failure == unavailable
-        return False
+    return True
 
 
 def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):

@@ -310,8 +310,17 @@ class FlashJob:
                                     self.linux_account is not None
                                     and not self.cancel_event.is_set()
                                 ):
-                                    _log.info("PHASE customize: rootfs personalization")
-                                    self._run_rootfs_personalization(mbr, bp)
+                                    # UID-1000 username + password are set at
+                                    # FIRST BOOT via the official Raspberry Pi
+                                    # Imager mechanism: write /firstrun.sh to the
+                                    # FAT boot partition + add `systemd.run=...`
+                                    # to cmdline.txt. This is 100% FAT — no
+                                    # ext4/debugfs/e2fsprogs — and is the exact
+                                    # method the official tool uses on Pi OS
+                                    # (incl. Trixie). firstrun.sh self-destructs
+                                    # after it runs.
+                                    _log.info("PHASE customize: firstrun.sh account setup")
+                                    self._write_firstrun(bp)
                                 if not self.cancel_event.is_set():
                                     _log.info("PHASE customize: firstboot bundle")
                                     FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
@@ -513,97 +522,45 @@ class FlashJob:
         Cold-surgery checks (tool load + device-open probe) run ONLY on the
         real Windows backend — test fakes skip them.
         """
-        from astromechos_imager.core.errors import (  # noqa: PLC0415
-            ColdSurgeryUnavailableError, DriveNotFoundError,
-        )
-        # 1. Source image present (cheap, always).
+        from astromechos_imager.core.errors import DriveNotFoundError  # noqa: PLC0415
+        # Source image present (cheap, always). Account customization now
+        # happens at FIRST BOOT via /firstrun.sh on the FAT partition (the
+        # official Raspberry Pi Imager method) — 100% FAT, no ext4/debugfs/
+        # e2fsprogs — so there are no e2fsprogs tools to validate here.
         if not self.image_path.is_file():
             raise DriveNotFoundError(f"image file not found: {self.image_path}")
 
-        # 2. Cold-surgery readiness — only when an account rename is requested,
-        #    and only on the real Windows backend.
-        if self.linux_account is None or not self._on_real_windows():
-            return
-        import subprocess  # noqa: PLC0415
-        debugfs, e2fsck = self._resolve_ext4_tools()
-        # 2a. Tools exist and actually LOAD (catches a missing .exe or a
-        #     missing Cygwin runtime DLL — they'd otherwise blow up mid-flash).
-        for label, exe in (("debugfs", debugfs), ("e2fsck", e2fsck)):
-            try:
-                subprocess.run([str(exe), "-V"], capture_output=True,
-                               text=True, timeout=20)
-            except FileNotFoundError as e:
-                raise ColdSurgeryUnavailableError(
-                    f"{label} not found at {exe}"
-                ) from e
-            except OSError as e:
-                raise ColdSurgeryUnavailableError(
-                    f"{label} could not launch ({exe}): errno={e.errno}"
-                ) from e
-        # 2b. Can the e2fsprogs OPEN the target raw device? This is what threw
-        #     errno 21 (ERROR_NOT_READY) mid-flash — catch it here, before any
-        #     write, so the card is never touched on failure.
-        self._probe_device_open(debugfs)
+    def _write_firstrun(self, boot: object) -> None:
+        """Write the official-style ``firstrun.sh`` to the FAT boot partition and
+        wire the ``systemd.run=/boot/firstrun.sh ...`` trigger into
+        ``cmdline.txt``.
 
-    def _probe_device_open(self, debugfs: "Path") -> None:
-        """Non-destructive read-only probe: can the Cygwin e2fsprogs OPEN the
-        target raw device? Reads the superblock location and quits (no ``-w``,
-        no offset). Raises ColdSurgeryUnavailableError if the device is
-        unreachable (the errno-21 / Cygwin device-path family).
-
-        Discriminator (e2fsprogs emits stable English):
-          * "Bad magic number in super-block" — debugfs READ the device but
-            found no ext4 there (expected on a not-yet-flashed card) → the
-            device is accessible → OK.
-          * returncode 0 — opened an actual ext4 → OK.
-          * anything else (open failure / not ready / no medium) → abort.
+        This is the exact Raspberry Pi Imager mechanism for setting the
+        UID-1000 username + password at first boot — 100% FAT-partition work
+        (no ext4 / debugfs / e2fsprogs). ``firstrun.sh`` self-destructs after it
+        runs (rm itself + strip ``systemd.run`` from cmdline.txt).
         """
-        import subprocess  # noqa: PLC0415
-        cyg = _physicaldrive_to_cygwin(self.target.device_path)
-        try:
-            proc = subprocess.run([str(debugfs), "-R", "quit", cyg],
-                                  capture_output=True, text=True, timeout=30)
-        except OSError as e:
-            from astromechos_imager.core.errors import ColdSurgeryUnavailableError  # noqa: PLC0415
-            raise ColdSurgeryUnavailableError(
-                f"could not run debugfs to probe {cyg}: errno={getattr(e, 'errno', None)}"
-            ) from e
-        out = ((proc.stderr or "") + (proc.stdout or "")).lower()
-        if "super-block" in out or "bad magic" in out or proc.returncode == 0:
-            _log.info("PREFLIGHT cold-surgery: e2fsprogs opened device %s OK", cyg)
-            return
-        from astromechos_imager.core.errors import ColdSurgeryUnavailableError  # noqa: PLC0415
-        raise ColdSurgeryUnavailableError(
-            f"the bundled ext4 tools cannot open the target drive ({cyg}) — "
-            f"cold surgery would fail. debugfs said: "
-            f"{(proc.stderr or proc.stdout or '<no output>').strip()[:300]}"
+        from astromechos_imager.core.firstrun_generator import (  # noqa: PLC0415
+            append_firstrun_trigger,
+            generate_firstrun_sh,
         )
-
-    def _run_rootfs_personalization(self, mbr_bytes: bytes, boot: object) -> None:
-        """Open the ext4 rootfs partition and apply RootfsPersonalizer.
-
-        Errors PROPAGATE — no silent skip. Cold-surgery readiness (tools load +
-        device openable) is validated up front by :meth:`_preflight` before any
-        device mutation, so reaching here means it should succeed. If apply()
-        still fails it is a genuine fault: let it bubble up so the flash reports
-        the error (run()'s finally then restores the card to a clean exFAT).
-        The operator is NEVER left believing a personalized card succeeded when
-        it did not.
-        """
-        from astromechos_imager.core.rootfs_personalizer import RootfsPersonalizer  # noqa: PLC0415
-        debugfs, e2fsck = self._resolve_ext4_tools()
-        rp = _open_rootfs_partition(
-            raw_device_path=self.target.device_path,
-            mbr_bytes=mbr_bytes,
-            debugfs_exe=debugfs,
-            e2fsck_exe=e2fsck,
-        )
-        if rp is None:
-            return  # no Linux partition → nothing to personalize
-        try:
-            RootfsPersonalizer(self.linux_account, rp, boot).apply()  # type: ignore[arg-type]
-        finally:
-            rp.close()
+        acc = self.linux_account
+        script = generate_firstrun_sh(acc.username, acc.crypt_sha512)  # type: ignore[union-attr]
+        boot.write_bytes("/firstrun.sh", script)  # type: ignore[attr-defined]
+        cmdline = boot.read_bytes("/cmdline.txt")  # type: ignore[attr-defined]
+        new_cmdline = append_firstrun_trigger(cmdline)
+        if new_cmdline != cmdline:
+            boot.write_bytes("/cmdline.txt", new_cmdline)  # type: ignore[attr-defined]
+            _log.info(
+                "PHASE customize: firstrun.sh written + systemd.run trigger "
+                "added to cmdline.txt (user=%s)",
+                acc.username,  # type: ignore[union-attr]
+            )
+        else:
+            _log.info(
+                "PHASE customize: firstrun.sh written; systemd.run trigger "
+                "already present in cmdline.txt"
+            )
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,7 @@ No `dd` gymnastics. No *"wait, which card was the Master?"*. No bricked droid on
 - 🛡️ **Wrong‑image hard block** — every image is mounted **in memory** and checked against a cryptographic role marker *before the write button even lights up*. Drop a Slave image into the Master slot and it's blocked cold — with a plain‑English fix, not a cryptic error.
 - 🤝 **Zero‑touch droid handshake** — generates an `ed25519` keypair and bakes it into both cards so the dome and body trust each other at first boot. No `ssh-copy-id`, no key shuffling, ever.
 - ☁️ **Provisioned like the pros** — user, password, Wi‑Fi and rootfs auto‑resize via **native cloud‑init**, the exact mechanism the official Pi Imager uses on Raspberry Pi OS **Trixie**. The base image is never hacked or surgically edited.
-- ✅ **Trust, then write** — SHA‑256 the source *before* flashing, read‑back‑verify the card *after*. Elevated, **pop‑up‑free** raw writes; a cancelled flash leaves a clean, usable card — never a *"Format this disk?"* nag.
+- ✅ **Trust, then write** — runs elevated, SHA‑256‑checks the source *before* flashing and read‑back‑verifies the card *after*, and a cancelled flash leaves a clean, usable card — not a RAW one.
 - 🎚️ **A UI that doesn't feel like a script** — a frameless, dual‑theme Qt Quick wizard with live drive detection and per‑role progress.
 
 ---
@@ -89,7 +89,7 @@ Four engineering pillars do the heavy lifting:
 - 🤝 **The Handshake** — one `ed25519` keypair, baked into both cards, validated before the card is finalized. The droid comes up married; you reach the body *through* the dome as an SSH bastion.
 - 🛡️ **Hard‑blocked validation** — images are virtually mounted in memory and checked against a strict role marker; a mismatch disables `NEXT` with a plain‑English recovery hint.
 - ☁️ **cloud‑init provisioning** — the official Raspberry Pi OS Trixie mechanism (`user-data` + `meta-data` + a per‑flash instance‑id) sets the password and resizes the rootfs without ever touching the base image.
-- ✅ **Bulletproof Windows writes** — elevated, dismount‑then‑write, userspace FAT customize (no mount → no pop‑ups), deferred partition table, post‑write read‑back verify, and auto‑recovery to a clean exFAT card on cancel/failure — all in pure Python.
+- ✅ **Hardened Windows writes** — elevated, dismount‑then‑write, userspace FAT customize without mounting the card, deferred partition table, post‑write read‑back verify, and auto‑recovery to a clean exFAT card on cancel/failure — all in pure Python.
 
 📖 **Full technical deep‑dive → [`ARCHITECTURE.md`](ARCHITECTURE.md)** (mechanisms, schemas, the SSH cascade, the Windows flash path, the stack & build chain).
 
@@ -113,6 +113,13 @@ AstromechOS-slave-<version>.img.xz    (+ .sha256)
 ```
 
 They pass the hard‑block validator instantly and expand to fill any ≥ 8 GB card on first boot.
+
+---
+
+## 🚦 Good to know
+
+- **It runs as Administrator.** Writing raw sectors to an SD card is a privileged operation — just accept the UAC prompt at launch (the installer wires this up automatically).
+- ⚠️ **If Windows pops a *"You need to format the disk"* / *"Format this disk?"* dialog while you're flashing (or right after) — close it, and never click *Format*.** Your card is written and verified correctly; Windows simply can't read a freshly‑written Linux card and assumes it's blank. This is a **Windows limitation** — the official Raspberry Pi Imager behaves exactly the same way. Just dismiss the window and carry on.
 
 ---
 

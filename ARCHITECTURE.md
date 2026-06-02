@@ -2,8 +2,8 @@
 
 The deep-dive companion to the [README](README.md). This document covers the
 engineering behind the four pillars: the Master↔Slave handshake, hard-blocked
-image validation, cloud-init provisioning, and the elevated pop-up-free Windows
-flash path — plus the app stack and build chain.
+image validation, cloud-init provisioning, and the elevated Windows flash path
+— plus the app stack and build chain.
 
 ---
 
@@ -139,11 +139,14 @@ pass; a filename that contradicts the marker still hard-blocks.
 
 ---
 
-## The Windows flash path — elevated, pop-up-free, verified
+## The Windows flash path — elevated, no-mount, verified
 
 Writing raw sectors on Windows is a minefield of permission errors and *"Format
-this disk?"* pop-ups. Everything below is pure Python — no C++ helper, no
-background service.
+this disk?"* pop-ups. This whole path is modeled on the official
+**[Raspberry Pi Imager](https://github.com/raspberrypi/rpi-imager)** — the
+userspace device-wrapper model, the dismount dance, the deferred partition
+table — and, like it, is implemented entirely in pure Python (no C++ helper, no
+background service).
 
 ### Runs as Administrator (required)
 
@@ -176,6 +179,14 @@ runs elevated. Without elevation, `CreateFileW(\\.\PHYSICALDRIVEn, …)`,
    **last**, after verify and customize. While the MBR is absent Windows can't
    discover a partition to auto-mount, so nothing pops up during the
    write/verify/customize window.
+
+> **About the occasional *"Format this disk?"* prompt.** The steps above
+> suppress the pop-ups during the write window, but Windows can still raise a
+> *"Format this disk?"* prompt now and then — typically on the post-write
+> re-scan or eject of some USB-SD bridges. It is **harmless**: the card is
+> written and verified correctly; just dismiss it. The official Raspberry Pi
+> Imager shows the same prompt on the same hardware — there is no clean
+> software fix for it, and chasing it is not worth the regression risk.
 
 ### Post-write readback
 

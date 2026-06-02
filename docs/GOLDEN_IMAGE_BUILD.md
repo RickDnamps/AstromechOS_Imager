@@ -18,7 +18,7 @@ Produire deux fichiers compressés flashables :
 
 Ces fichiers sont consommés par l'**AstroMechOS_Imager** qui fait :
 - Cold rootfs surgery (rename UID-1000 user, change role marker, regen secrets)
-- Injection du resize trigger dans `cmdline.txt` (`init=/usr/lib/raspi-config/init_resize.sh`)
+- Injection du resize trigger natif dans `cmdline.txt` (token `resize` + `ds=nocloud;i=…`)
 - Flash vers les nouvelles SD du fleet
 
 ---
@@ -208,12 +208,14 @@ PiShrink par défaut crée `/etc/rc.local` dans la rootfs qui contient un script
 2. Fallback `fdisk` + `resize2fs` + reboot
 3. Restore `/etc/rc.local.bak`
 
-**Mais l'AstroMechOS_Imager fait sa propre injection** via `astromechos_imager/core/cmdline_resize.py` :
+**Mais l'AstroMechOS_Imager fait sa propre injection** via `astromechos_imager/core/cloud_init_generator.py` — la méthode native Trixie observée sur une vraie carte officielle rpi-imager :
 ```python
-RESIZE_INIT_ARG = "init=/usr/lib/raspi-config/init_resize.sh"
+# build_cmdline() ajoute ces deux tokens dans /cmdline.txt :
+"resize"                       # → hook initramfs resize_early : resize la PARTITION (parted)
+"ds=nocloud;i=rpi-imager-<ms>" # → active cloud-init : cc_resizefs resize le FILESYSTEM
 ```
 
-Il patche `/cmdline.txt` (sur la FAT32 boot) avec cet argument kernel. Au boot du Pi flashé, le kernel exécute `init_resize.sh` **comme PID 1, avant systemd** — le script natif Pi OS qui resize la partition + ext4 puis se retire de cmdline.txt. C'est la méthode officielle Pi OS, beaucoup plus propre que le hack rc.local de pishrink.
+Il patche `/cmdline.txt` (sur la FAT32 boot). Au boot du Pi flashé : le hook initramfs `scripts/local-premount/resize_early` voit ` resize` dans `/proc/cmdline` et agrandit la partition, puis cloud-init (`cc_resizefs`) agrandit l'ext4. **Aucun `init=`** (le vieux hack PID 1 qui bricke si le chemin est faux est abandonné). Un token `resize` inconnu est simplement ignoré par le kernel → zéro risque de panic.
 
 **Conflit potentiel** si on a les deux mécanismes :
 - Heureusement, sur Debian Trixie moderne, `rc-local.service` est **disabled** par défaut → le `/etc/rc.local` de pishrink ne s'exécuterait pas de toute façon

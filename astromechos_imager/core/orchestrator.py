@@ -169,24 +169,15 @@ class FlashJob:
                         )
                         if bp is not None:
                             try:
-                                # Wire the first-boot rootfs auto-resize into
-                                # cmdline.txt (FAT-only, idempotent).
+                                # cloud-init NoCloud, the official rpi-imager
+                                # Trixie way: drop user-data + meta-data on the
+                                # FAT and rewrite cmdline.txt with the `resize`
+                                # token (native partition grow) +
+                                # ds=nocloud;i=<unique> (activates cloud-init and
+                                # forces a per-flash re-provision). NO init= (dead
+                                # PID-1 hack), NO firstrun.sh. Golden untouched.
                                 if not self.cancel_event.is_set():
-                                    from astromechos_imager.core.cmdline_resize import (  # noqa: PLC0415
-                                        inject_resize_arg,
-                                    )
-                                    if inject_resize_arg(bp):
-                                        _log.info("PHASE customize: rootfs auto-resize arg injected")
-                                    else:
-                                        _log.info("PHASE customize: rootfs auto-resize arg already present (init= present, not duplicated)")
-                                # Set the UID-1000 user + password at first boot
-                                # via /firstrun.sh (FAT). Skipped with no account.
-                                if (
-                                    self.linux_account is not None
-                                    and not self.cancel_event.is_set()
-                                ):
-                                    _log.info("PHASE customize: firstrun.sh account setup")
-                                    self._write_firstrun(bp)
+                                    self._write_cloud_init(bp)
                                 if not self.cancel_event.is_set():
                                     _log.info("PHASE customize: firstboot bundle")
                                     FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
@@ -359,33 +350,46 @@ class FlashJob:
         if not self.image_path.is_file():
             raise DriveNotFoundError(f"image file not found: {self.image_path}")
 
-    def _write_firstrun(self, boot: object) -> None:
-        """Set the UID-1000 user + password at first boot the way the official
-        Raspberry Pi Imager does: write /firstrun.sh to the FAT boot partition
-        and add the systemd.run trigger to cmdline.txt. firstrun.sh
-        self-destructs after it runs.
+    def _write_cloud_init(self, boot: object) -> None:
+        """Provision the OS via cloud-init NoCloud (official rpi-imager flow).
+
+        Writes ``meta-data`` (unique per-flash instance-id) and ``user-data``
+        (account + password as a #cloud-config, when an account is set) to the
+        FAT boot partition, then rewrites ``cmdline.txt`` with the ``resize``
+        token + ``ds=nocloud;i=<instance_id>``. The Golden Image is never
+        modified; cloud-init applies everything on first boot.
         """
-        from astromechos_imager.core.firstrun_generator import (  # noqa: PLC0415
-            append_firstrun_trigger,
-            generate_firstrun_sh,
+        import time as _time  # noqa: PLC0415
+
+        from astromechos_imager.core.cloud_init_generator import (  # noqa: PLC0415
+            EMPTY_USER_DATA,
+            build_cmdline,
+            generate_instance_id,
+            generate_meta_data,
+            generate_user_data,
         )
+
+        instance_id = generate_instance_id(int(_time.time() * 1000))
+        boot.write_bytes("/meta-data", generate_meta_data(instance_id))  # type: ignore[attr-defined]
         acc = self.linux_account
-        script = generate_firstrun_sh(acc.username, acc.crypt_sha512)  # type: ignore[union-attr]
-        boot.write_bytes("/firstrun.sh", script)  # type: ignore[attr-defined]
+        if acc is not None:
+            boot.write_bytes(  # type: ignore[attr-defined]
+                "/user-data", generate_user_data(acc.username, acc.crypt_sha512)
+            )
+            _log.info("PHASE customize: cloud-init user-data written (user=%s)", acc.username)
+        else:
+            # Still a valid NoCloud seed so cloud-init runs and grows the rootfs.
+            boot.write_bytes("/user-data", EMPTY_USER_DATA)  # type: ignore[attr-defined]
+            _log.info("PHASE customize: cloud-init user-data written (no account)")
+
         cmdline = boot.read_bytes("/cmdline.txt")  # type: ignore[attr-defined]
-        new_cmdline = append_firstrun_trigger(cmdline)
+        new_cmdline = build_cmdline(cmdline, instance_id)
         if new_cmdline != cmdline:
             boot.write_bytes("/cmdline.txt", new_cmdline)  # type: ignore[attr-defined]
-            _log.info(
-                "PHASE customize: firstrun.sh written + systemd.run trigger "
-                "added to cmdline.txt (user=%s)",
-                acc.username,  # type: ignore[union-attr]
-            )
-        else:
-            _log.info(
-                "PHASE customize: firstrun.sh written; systemd.run trigger "
-                "already present in cmdline.txt"
-            )
+        _log.info(
+            "PHASE customize: cmdline rewired — resize token + ds=nocloud;i=%s",
+            instance_id,
+        )
 
 
 @dataclass(frozen=True)

@@ -1,19 +1,21 @@
 """Integration tests for FlashJob's FAT customize phase.
 
 Exercises FlashJob.run() with an in-memory FAT boot partition and asserts the
-first-boot customization: /firstrun.sh (account setup), the systemd.run
-trigger + rootfs auto-resize arg in cmdline.txt, and the firstboot bundle.
+cloud-init NoCloud first-boot customization: user-data (account + password),
+meta-data (unique instance-id), the `resize` + `ds=nocloud;i=...` cmdline
+tokens, and the AstromechOS firstboot bundle.
 """
 from __future__ import annotations
 
 import lzma
+import re
 import struct
 import threading
 from pathlib import Path
 
 import pytest
 
-from astromechos_imager.core.cmdline_resize import RESIZE_INIT_ARG
+from astromechos_imager.core.cloud_init_generator import RESIZE_TOKEN
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, LinuxAccount, Role
 from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
@@ -97,18 +99,31 @@ def _img(tmp_path, name) -> Path:
     return p
 
 
-def _assert_firstrun(fake_boot):
-    assert fake_boot.exists("/firstrun.sh")
-    fr = fake_boot.files["/firstrun.sh"].decode("utf-8")
-    assert "testuser" in fr
-    assert "userconf" in fr and "chpasswd -e" in fr
-    assert "rm -f /boot/firstrun.sh" in fr
-    cmdline = fake_boot.files["/cmdline.txt"].decode("ascii")
-    assert cmdline.split().count(RESIZE_INIT_ARG) == 1
-    assert "systemd.run=/boot/firstrun.sh" in cmdline
+def _assert_cloud_init(fake_boot):
+    # cloud-init seed: meta-data (unique instance-id) + user-data (account).
+    assert fake_boot.exists("/meta-data")
+    md = fake_boot.files["/meta-data"].decode("ascii")
+    m = re.search(r"instance-id:\s*(rpi-imager-\d+)", md)
+    assert m, f"meta-data missing rpi-imager instance-id: {md!r}"
+    instance_id = m.group(1)
+
+    assert fake_boot.exists("/user-data")
+    ud = fake_boot.files["/user-data"].decode("utf-8")
+    assert ud.startswith("#cloud-config")
+    assert "name: 'testuser'" in ud
+    assert "type: hash" in ud and "$6$salt$fakehash" in ud
+
+    # cmdline: native resize token + ds=nocloud pinned to the SAME instance-id,
+    # and NONE of the dead mechanisms (init=, firstrun.sh trigger).
+    toks = fake_boot.files["/cmdline.txt"].decode("ascii").split()
+    assert toks.count(RESIZE_TOKEN) == 1
+    assert f"ds=nocloud;i={instance_id}" in toks
+    assert not any(t.startswith("init=") for t in toks)
+    assert not any(t.startswith("systemd.") for t in toks)
+    assert not fake_boot.exists("/firstrun.sh")
 
 
-def test_master_writes_firstrun_resize_and_bundle(tmp_path, fake_platform_io, monkeypatch):
+def test_master_writes_cloudinit_and_bundle(tmp_path, fake_platform_io, monkeypatch):
     fake_platform_io.add_drive(3, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
@@ -121,13 +136,13 @@ def test_master_writes_firstrun_resize_and_bundle(tmp_path, fake_platform_io, mo
     )
     result = job.run()
     assert result.ok, f"FlashJob failed: {result.error}"
-    _assert_firstrun(fake_boot)
+    _assert_cloud_init(fake_boot)
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
     assert fake_boot.exists("/astromech_secrets/init_config.json")
     assert fake_boot.exists("/astromech_secrets/authorized_keys")
 
 
-def test_slave_also_writes_firstrun_and_resize(tmp_path, fake_platform_io, monkeypatch):
+def test_slave_also_writes_cloudinit(tmp_path, fake_platform_io, monkeypatch):
     fake_platform_io.add_drive(4, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
@@ -140,7 +155,7 @@ def test_slave_also_writes_firstrun_and_resize(tmp_path, fake_platform_io, monke
     )
     result = job.run()
     assert result.ok, f"FlashJob (SLAVE) failed: {result.error}"
-    _assert_firstrun(fake_boot)
+    _assert_cloud_init(fake_boot)
 
 
 def test_pair_customizes_both_cards(tmp_path, fake_platform_io, monkeypatch):
@@ -168,11 +183,11 @@ def test_pair_customizes_both_cards(tmp_path, fake_platform_io, monkeypatch):
         f"PairFlashJob failed: master={result.master.error!r} slave={result.slave.error!r}"
     )
     for fb in (fake_boot_master, fake_boot_slave):
-        _assert_firstrun(fb)
+        _assert_cloud_init(fb)
         assert fb.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
-def test_without_account_no_firstrun_but_resize_present(tmp_path, fake_platform_io, monkeypatch):
+def test_without_account_resize_still_wired(tmp_path, fake_platform_io, monkeypatch):
     fake_platform_io.add_drive(4, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
@@ -186,11 +201,21 @@ def test_without_account_no_firstrun_but_resize_present(tmp_path, fake_platform_
     result = job.run()
     assert result.ok, f"FlashJob failed: {result.error}"
 
-    # No account → no firstrun.sh / no trigger, but resize is still wired.
+    # No account → no user-data account block, but a valid NoCloud seed
+    # (meta-data + #cloud-config) and the resize/ds=nocloud cmdline are still
+    # wired so the rootfs grows on first boot.
     assert not fake_boot.exists("/firstrun.sh")
-    cmdline = fake_boot.files["/cmdline.txt"].decode("ascii")
-    assert "systemd.run=/boot/firstrun.sh" not in cmdline
-    assert cmdline.split().count(RESIZE_INIT_ARG) == 1
+    assert fake_boot.exists("/meta-data")
+    md = fake_boot.files["/meta-data"].decode("ascii")
+    m = re.search(r"instance-id:\s*(rpi-imager-\d+)", md)
+    assert m
+    ud = fake_boot.files["/user-data"].decode("utf-8")
+    assert ud.startswith("#cloud-config")
+    assert "chpasswd" not in ud  # no account → no password block
+    toks = fake_boot.files["/cmdline.txt"].decode("ascii").split()
+    assert toks.count(RESIZE_TOKEN) == 1
+    assert f"ds=nocloud;i={m.group(1)}" in toks
+    assert not any(t.startswith("init=") for t in toks)
     assert fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 

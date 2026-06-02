@@ -95,7 +95,7 @@ A purpose-built Windows desktop wizard (Python 3.12 + **PySide6 / QML**, distrib
 ├───────────────────────────────────────────────────────┤
 │ Core engine                                           │
 │  imagesource · diskwriter · bootpartition (pyfatfs)  │
-│  firstrun_generator · keygen · image_validator       │
+│  cloud_init_generator · keygen · image_validator     │
 ├───────────────────────────────────────────────────────┤
 │ Platform IO (Windows-only)                           │
 │  WindowsPlatformIO · raw disk handles · WMI drives   │
@@ -345,7 +345,7 @@ AstromechOS-slave-<version>.img.xz            ~1.0 GB compressed
 AstromechOS-slave-<version>.img.xz.sha256
 ```
 
-These images ship with the strict `/astromech_role.json` marker pre-installed — the hard-block validator passes them immediately. They are **shrunken** (rootfs trimmed and `init_resize.sh` re-injected) so downloads stay reasonable while still expanding to fill any ≥ 8 GB SD card on first boot.
+These images ship with the strict `/astromech_role.json` marker pre-installed — the hard-block validator passes them immediately. They are **shrunken** (rootfs trimmed; the Imager injects the native Trixie `resize` + `ds=nocloud` cmdline tokens at flash time) so downloads stay reasonable while still expanding to fill any ≥ 8 GB SD card on first boot.
 
 ---
 

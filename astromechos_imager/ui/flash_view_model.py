@@ -827,7 +827,13 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
         # guarantees ``[hotspot]`` and ``[system]`` blocks in
         # ``/boot/astromech_init.cfg`` are always complete and ≥8 chars
         # (no firstboot brick-skip on the Pi).
-        install_user     = (wizard_state.installUser or "").strip()     or DEFAULT_INSTALL_USER
+        # Username is a FIXED system constant — the Golden's standardized
+        # UID-1000 login that AstromechOS is pre-configured for. It is NOT
+        # operator-editable (the wizard field is read-only) and the backend
+        # IGNORES any wizard value, so the flashed account name can never
+        # drift from the name cloud-init's chpasswd must target. Only the
+        # PASSWORD is dynamic.
+        install_user     = DEFAULT_INSTALL_USER
         install_password = (wizard_state.installPassword or "")         or DEFAULT_INSTALL_PASSWORD
         hotspot_psk      = (wizard_state.hotspotPassword or "")         or DEFAULT_HOTSPOT_PASSWORD
 

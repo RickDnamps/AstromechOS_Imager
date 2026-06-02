@@ -56,7 +56,7 @@ Pareil mais :
 
 ## Pourquoi `-s` dans pishrink ?
 
-L'AstroMechOS_Imager injecte le **resize natif Pi OS** (`init=/usr/lib/raspi-config/init_resize.sh`) dans cmdline.txt à la customize via `astromechos_imager/core/cmdline_resize.py`. Sans `-s`, pishrink ajouterait son propre `/etc/rc.local` qui ferait un resize doublon (et pollue la rootfs avec un fichier qui ne servirait jamais sur Debian Trixie où `rc-local.service` est disabled par défaut).
+L'AstroMechOS_Imager injecte le **resize natif Trixie** (token `resize` + `ds=nocloud;i=…` → hook initramfs `resize_early` pour la partition + cloud-init `cc_resizefs` pour l'ext4) dans cmdline.txt à la customize via `astromechos_imager/core/cloud_init_generator.py`. Sans `-s`, pishrink ajouterait son propre `/etc/rc.local` qui ferait un resize doublon (et pollue la rootfs avec un fichier qui ne servirait jamais sur Debian Trixie où `rc-local.service` est disabled par défaut).
 
 **Toujours `-a -s -z` pour produire un Golden propre.**
 

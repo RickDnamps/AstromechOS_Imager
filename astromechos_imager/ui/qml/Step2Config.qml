@@ -1,9 +1,10 @@
 // AstromechOS Imager — Step 4 "Customize".
 //
-// Captures operator inputs for cold rootfs surgery (UID-1000 account)
-// and dual-WLAN provisioning. NON-BLOCKING fallback: empty fields are
-// silently substituted with the module-level DEFAULT_* constants
-// (astromech / astropass / astropass) in
+// Captures operator inputs for the UID-1000 account password (applied by
+// cloud-init on the fixed `astromech` user — the USERNAME field is read-only)
+// and dual-WLAN provisioning. NON-BLOCKING fallback: empty password / hotspot
+// fields are silently substituted with the module-level DEFAULT_* constants
+// (astropass / astropass) in
 // ``flash_view_model._build_flash_job`` — the WRITE button is only
 // gated on the "non-empty AND invalid" case (operator-typed garbage),
 // never on the "empty" case (operator wants the default).
@@ -56,7 +57,9 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        userField.text     = wizardState.installUser
+        // Username is a fixed system constant, shown read-only. The flashed
+        // login is DEFAULT_INSTALL_USER backend-side regardless of this value.
+        userField.text     = "astromech"
         passField.text     = wizardState.installPassword
         wifiSsidField.text = wizardState.wifiSsid
         wifiPskField.text  = wizardState.wifiPsk
@@ -80,6 +83,9 @@ Rectangle {
         // 👁 toggle to reveal the text (so the operator can check for typos).
         property bool revealable: false
         property bool revealed: false
+        // Locked fields are read-only: the value is a fixed system constant
+        // (the standardized UID-1000 username) the operator cannot change.
+        property bool locked: false
         signal edited()
 
         RowLayout {
@@ -126,19 +132,33 @@ Rectangle {
                 id: input
                 anchors.fill: parent
                 anchors.leftMargin: 12
-                anchors.rightMargin: field.revealable ? 38 : 12
+                anchors.rightMargin: (field.revealable || field.locked) ? 38 : 12
                 font.family: Theme.fontBody  // Orbitron — see feedback-orbitron memory
                 font.pixelSize: 12
-                color: theme.colors.colorTextPrimary
+                // Locked (fixed) values render dimmed to read as non-editable.
+                color: field.locked ? theme.colors.colorTextSecondary
+                                     : theme.colors.colorTextPrimary
                 placeholderTextColor: theme.colors.colorTextTertiary
                 selectionColor: theme.colors.colorAccentDim
                 selectedTextColor: theme.colors.colorTextPrimary
                 background: Item {}
                 verticalAlignment: TextInput.AlignVCenter
+                readOnly: field.locked
                 // Masked when revealable & not revealed; plain text otherwise.
                 echoMode: (field.revealable && !field.revealed)
                           ? TextInput.Password : TextInput.Normal
                 onTextEdited: field.edited()
+            }
+
+            // 🔒 fixed-value indicator — only on locked (read-only) fields.
+            Text {
+                visible: field.locked
+                anchors.right: parent.right
+                anchors.rightMargin: 11
+                anchors.verticalCenter: parent.verticalCenter
+                text: "🔒"
+                font.pixelSize: 13
+                color: theme.colors.colorTextTertiary
             }
 
             // 👁 reveal/hide toggle — only on password (revealable) fields.
@@ -276,7 +296,7 @@ Rectangle {
             // is unchanged.
             SectionCard {
                 title: "LINUX ACCOUNT"
-                subtitle: "Account used to log into the robot. Leave fields blank to use the safe defaults."
+                subtitle: "Account used to log into the robot. The username is fixed (astromech); set a password, or leave it blank to use the safe default."
                 warningText: "Username and password grant SSH plus sudo access on the robot. " +
                              "If you change them and forget the new values, you will be locked " +
                              "out of the robot entirely — no remote SSH, no service restart, " +
@@ -291,9 +311,12 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         label: "USERNAME"
-                        placeholder: "astromech"
+                        // Fixed system account — read-only. The flashed login is
+                        // always DEFAULT_INSTALL_USER (backend-authoritative);
+                        // this display is locked to match.
+                        locked: true
+                        helper: "Fixed system account"
                         ok: installUserOk
-                        onEdited: _flush()
                     }
                     AstroField {
                         id: passField

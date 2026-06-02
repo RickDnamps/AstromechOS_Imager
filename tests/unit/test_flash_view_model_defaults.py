@@ -132,10 +132,14 @@ def test_empty_install_user_substitutes_default(tmp_path, monkeypatch):
     assert job.firstboot_config.wifi_psk is None
 
 
-# ── Operator override wins over defaults ──────────────────────────────
+# ── Username is LOCKED; password / hotspot still override ─────────────
 
 
-def test_operator_override_wins_over_default(tmp_path, monkeypatch):
+def test_username_locked_password_and_hotspot_still_override(tmp_path, monkeypatch):
+    """The username is a FIXED system constant — any operator-supplied
+    value is IGNORED so the flashed account name can never drift from the
+    Golden's UID-1000 user that cloud-init's chpasswd targets. The PASSWORD
+    and hotspot PSK remain fully dynamic."""
     img = tmp_path / "img.xz"
     img.write_bytes(b"x")
     for fname in (
@@ -147,7 +151,7 @@ def test_operator_override_wins_over_default(tmp_path, monkeypatch):
         )
 
     wiz = _fake_wizard(
-        install_user="r2d2",
+        install_user="r2d2",            # ignored — username is locked
         install_password="mySecret123",
         hotspot_password="hotspotSecret",
     )
@@ -155,19 +159,19 @@ def test_operator_override_wins_over_default(tmp_path, monkeypatch):
     plat = _FakePlatformIO([_fake_drive(2)])
 
     job = _build_flash_job(wiz, platform_io=plat)
-    assert job.linux_account.username == "r2d2"
-    assert job.linux_account.cleartext_password == "mySecret123"
-    assert job.firstboot_config.install_user == "r2d2"
+    assert job.linux_account.username == DEFAULT_INSTALL_USER          # NOT r2d2
+    assert job.firstboot_config.install_user == DEFAULT_INSTALL_USER   # NOT r2d2
+    assert job.linux_account.cleartext_password == "mySecret123"       # password wins
     assert job.firstboot_config.hotspot_bootstrap.password == "hotspotSecret"
 
 
-# ── Whitespace-only username treated as empty ─────────────────────────
+# ── Username stays fixed regardless of any field content ──────────────
 
 
-def test_whitespace_only_username_substitutes_default(tmp_path, monkeypatch):
-    """Operator who hits SPACE in the field by accident shouldn't get
-    a UID-1000 row named ' ' on the SD card. ``.strip()`` collapses
-    it to empty, then the default substitution kicks in."""
+def test_username_always_fixed_constant(tmp_path, monkeypatch):
+    """Whatever lands in the (now read-only) username field — blank,
+    whitespace, or stray text — the flashed UID-1000 login is always the
+    fixed ``DEFAULT_INSTALL_USER`` constant."""
     img = tmp_path / "img.xz"
     img.write_bytes(b"x")
     for fname in (

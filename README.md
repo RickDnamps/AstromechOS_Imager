@@ -22,49 +22,49 @@ The wizard is a **frameless, dark/light dual-themed** flow with hybrid typograph
 
 An old-school standalone splash: the window is sized to the splash artwork's aspect ratio so the **image fills it edge-to-edge with no chrome and no borders** (the app header/footer are hidden, and the PNG's baked-in black bars are cropped at render). A faux **module-loader progress bar** ("Loading drive enumerator", "Mounting image codecs", "Arming flash engine"…) animates across ~4 s in the artwork's lower band, then the window grows into the wizard.
 
-![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=16)
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=18)
 
-![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=16)
+![Step 0 — Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=18)
 
 ### Step 1 — Landing
 
-The entry screen of the **Sequential Deployment Assistant**: flash one card at a time, configure once, then deploy Master and Slave with a single shared hotspot SSID. `START DEPLOYMENT →` advances to the configuration step.
+The entry screen of the **Sequential Deployment Assistant**: flash one card at a time, configure once, then deploy Master and Slave with a single shared hotspot SSID. That `Astromech-XXXX` bootstrap SSID is minted **once at launch** (shown read-only in Step 2 and baked into both cards so the wlan0 rendezvous works). `START DEPLOYMENT →` advances to the configuration step.
 
-![Step 1 — Landing](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_landing_light.png?v=16)
+![Step 1 — Landing](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_landing_light.png?v=18)
 
 ### Step 2 — Target Drives
 
 Removable drives are enumerated live (system disk is hidden for safety). Each row carries `MASTER` and `SLAVE` assignment buttons that lock the chosen physical device to the chosen role.
 
-![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=16)
+![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=18)
 
 ### Step 3 — Security Validation
 
 Once images are selected, the wizard runs the FAT32 role-marker validation (Strategy D) and the filename pattern check in the background. Each image row gets a colored badge: green = certified, amber = legacy without marker but plausible by filename, red = hard mismatch → `NEXT` disabled.
 
-![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=16)
+![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=18)
 
 ### Step 4 — Customize
 
-Three groups: the **Linux account** (UID-1000 username + password for SSH), the **private robot hotspot** (wlan0 link between Master and Slave), and the optional **home Wi-Fi** (wlan1, also configurable later from the robot's web UI). All fields use a non-blocking fallback — leave any of them blank to ship the safe defaults (`astromech` / `astropass`), or type custom values. A prominent security warning under the Login section reminds the operator that there is no recovery mechanism if a custom password is lost.
+Three groups: the **Linux account**, the **private robot hotspot** (wlan0 link between Master and Slave), and the optional **home Wi-Fi** (wlan1, also configurable later from the robot's web UI). The **username is a fixed system constant** — it renders **read-only** with a 🔒 lock glyph (`astromech`, the account AstromechOS is pre-configured for), so only the **password** is editable; cloud-init applies that password to the existing UID-1000 user on first boot. The bootstrap **hotspot SSID** is likewise shown **read-only** (auto-generated per deployment) directly above its password field, mirroring the locked username. Blank password / hotspot fields fall back to the safe default `astropass`. A prominent security warning reminds the operator there is no recovery mechanism if a custom password is lost.
 
-![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=16)
+![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=18)
 
 ### Step 5 — Confirm & Flash
 
 Final summary with optional SHA-256 integrity toggle. The destructive `⚡ WRITE` button only goes live after the confirmation dialog and (if enabled) a clean checksum verification. The flashing phase shows live progress per role.
 
-![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=16)
+![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=18)
 
 Clicking `⚡ WRITE` does **not** flash immediately — it raises a modal **"ERASE TARGET DRIVE(S)?"** warning with a red 2 px destructive border. The operator must confirm the drive letters match the intended cards and click `⚡ ERASE & WRITE`; `CANCEL` backs out. This is the last guard before the irreversible write.
 
-![Step 5 — WRITE confirmation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_write_confirm_light.png?v=16)
+![Step 5 — WRITE confirmation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_write_confirm_light.png?v=18)
 
 ### Step 6 — Complete
 
 Once both cards have been flashed, verified and personalized, the wizard surfaces the next-step recap and a `FLASH ANOTHER` shortcut.
 
-![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=16)
+![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=18)
 
 > 🗂️ **For maintainers** — production screenshots are captured locally to `J:\R2-D2_Build\AstromechOS_Screenshots\Screenshots_Imager\` and mirrored to the [`AstromechOS_Screenshots`](https://github.com/RickDnamps/AstromechOS_Screenshots) sibling repository so that this README always renders the latest UI from GitHub raw-content URLs.
 
@@ -82,13 +82,23 @@ A purpose-built Windows desktop wizard (Python 3.12 + **PySide6 / QML**, distrib
 | **Master only** | Reuses the persisted keypair from a previous run (or generates a new one on first use), re-flashes just the dome Pi 4B (4 GB). The existing Slave keeps trusting the same Master public key. |
 | **Slave only** | Same idea, body Pi 4B (2 GB). Useful when only the body is being rebuilt. |
 
+### First-boot provisioning — cloud-init NoCloud (no system surgery)
+
+The Imager provisions the OS exactly the way the official Raspberry Pi Imager does on Raspberry Pi OS **Trixie** — 100% on the FAT boot partition, leaving the Golden Image untouched:
+
+- **Account + password** — a `#cloud-config` `user-data` (plus a `meta-data` carrying a **unique per-flash `instance-id`**, `rpi-imager-<epoch-ms>`, also pinned on the kernel cmdline via `ds=nocloud;i=…`) is dropped on the boot partition. cloud-init **reconfigures the existing UID-1000 user in place** — `users: []` creates nothing, and `chpasswd` (`type: hash`) sets the SHA-512 password on the fixed `astromech` account. The fresh instance-id forces cloud-init to re-apply on every flash; we never edit `/etc/passwd` or `/etc/shadow` and never rename.
+- **Rootfs auto-resize** — the bare `resize` cmdline token triggers Trixie's native initramfs hook (partition grow) and cloud-init's `cc_resizefs` (filesystem grow). No `init=` hack (a wrong PID-1 path bricks boot), no `firstrun.sh`, no offline ext4 surgery — all abandoned.
+- **Robot-specific bits stay with the live firstboot** — hostname, dual-WLAN Wi-Fi, the Master↔Slave SSH keypair, the hotspot rendezvous and the role marker are written for `firstboot_setup.sh` (see *The Handshake* below), deliberately **not** in `user-data`, so the two mechanisms never fight.
+
+> The Golden Image's UID-1000 user must be named `astromech` for the password to apply (cloud-init's `chpasswd` targets by name); the base images are standardized on that account.
+
 ### Stack at a glance
 
 ```
 ┌───────────────────────────────────────────────────────┐
 │ QML (Qt Quick 2 / Controls 2)  ── frameless, dual    │
-│  Step1Mode → Step2Images → Step3Storage → Step4Flash │
-│             → Step5Done    (Dark + Light themes)     │
+│  Landing → Config → Images → Role → Ops → Cycle →    │
+│           Complete         (Dark + Light themes)     │
 ├───────────────────────────────────────────────────────┤
 │ PySide6 ViewModels (Python)                          │
 │  WizardState · FlashViewModel · ThemeManager         │
@@ -379,7 +389,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-Currently **437 passing** tests covering: image validator (43), wizard state, flash view model, FAT32 boot partition I/O, ed25519 keypair generation, firstboot bundle self-validation, contract drift vs. the AstromechOS `firstboot_setup.sh` reference, and end-to-end personalization on simulated drives.
+Currently **504 passing** tests covering: image validator (43), wizard state (incl. the early-minted bootstrap SSID lifecycle), flash view model, the cloud-init NoCloud generator (user-data / meta-data / cmdline), FAT32 boot partition I/O, ed25519 keypair generation, firstboot bundle self-validation, contract drift vs. the AstromechOS `firstboot_setup.sh` reference, and end-to-end personalization on simulated drives.
 
 ### Build the installer locally
 

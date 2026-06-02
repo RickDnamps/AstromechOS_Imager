@@ -73,7 +73,7 @@ Rectangle {
 
         // ── Session SSID recap ───────────────────────────────────────
         Rectangle {
-            visible: flashViewModel.sessionSsid !== ""
+            visible: wizardState.hotspotSsid !== ""
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: 360
             implicitHeight: 60
@@ -94,7 +94,7 @@ Rectangle {
                     font.letterSpacing: 1.4
                 }
                 Text {
-                    text: flashViewModel.sessionSsid
+                    text: wizardState.hotspotSsid
                     color: theme.colors.colorTextPrimary
                     font.family: Theme.fontMono
                     font.pixelSize: 12

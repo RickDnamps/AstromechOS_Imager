@@ -58,6 +58,20 @@ def generate_ed25519(comment: str = "astromech-master@imager") -> Ed25519Pair:
 #     fixed/known-public PSK would let a workshop neighbour camp the
 #     final per-robot AP. Operator-supplied keeps the secret out of
 #     git history.
+def generate_hotspot_ssid() -> str:
+    """Return a fresh random bootstrap SSID ``Astromech-<4 decimal digits>``.
+
+    Collision-free per burn (4×10⁴ values) so simultaneously-unboxed pairs in
+    the same workshop don't camp the same wlan0 rendezvous. The SSID is
+    independent of the hotspot PSK — the UI mints it ONCE at wizard-state init
+    (``wizardState.hotspotSsid``) and the same value is baked into BOTH cards
+    of a pair; ``firstboot_setup.sh`` later rotates to the final
+    serial-derived ``Astromech_Control_<XXXX>`` SSID. Matches
+    ``core.validators._SSID_RE`` (``^Astromech-[0-9]{4}$``).
+    """
+    return f"Astromech-{secrets.randbelow(10000):04d}"
+
+
 def generate_hotspot_bootstrap(password: str) -> HotspotBootstrap:
     """Return a fresh bootstrap rendezvous with random SSID + operator PSK.
 
@@ -90,7 +104,7 @@ def generate_hotspot_bootstrap(password: str) -> HotspotBootstrap:
             "hotspot bootstrap PSK must be ≥8 characters (WPA2-PSK minimum)"
         )
     return HotspotBootstrap(
-        ssid=f"Astromech-{secrets.randbelow(10000):04d}",
+        ssid=generate_hotspot_ssid(),
         password=password,
     )
 

@@ -35,12 +35,11 @@ _WIN_USER_PATH_RE = re.compile(
 )
 
 # Audit bug Sec1: free-text log messages can leak SSID / PSK / password
-# values that never travelled through ``record.ctx``. The classic
-# offender is FlashViewModel.startSession which logged
-# ``Sequential session started — hotspot SSID=Astromech-1234`` —
-# bypassing every ctx-keyed scrub above. These patterns are applied to
-# ``record.msg`` (and its formatted result) inside RedactionFilter so
-# the JSONL formatter never sees the raw secret.
+# values that never travelled through ``record.ctx`` — e.g. a session-start
+# line logging ``hotspot SSID=Astromech-1234`` would bypass every ctx-keyed
+# scrub above. These patterns are applied to ``record.msg`` (and its
+# formatted result) inside RedactionFilter so the JSONL formatter never sees
+# the raw secret, regardless of which call site emitted it.
 _LEAK_PATTERNS = [
     (re.compile(r"(SSID\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
     (re.compile(r"(psk\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),

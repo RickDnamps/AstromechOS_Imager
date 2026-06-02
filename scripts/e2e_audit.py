@@ -112,13 +112,11 @@ def main() -> int:
     state.setMasterDriveId(7)
     state.setSlaveDriveId(7)
 
-    # Start session so flash_vm.sessionSsid populates (header band)
-    if flash_vm is not None and hasattr(flash_vm, "startSession"):
-        try:
-            flash_vm.startSession()
-            log(f"\n=== Session ===\n  hotspot SSID: {flash_vm.property('sessionSsid')}")
-        except Exception as e:
-            log(f"  ⚠️ startSession failed: {e}")
+    # Bootstrap SSID is minted at wizard-state init — read it directly.
+    try:
+        log(f"\n=== Session ===\n  hotspot SSID: {state.hotspotSsid}")
+    except Exception as e:
+        log(f"  ⚠️ could not read hotspotSsid: {e}")
 
     # Plan: 7 screens × 2 themes = 14 captures
     # For role-dependent screens (5 Flash, 6 NextCard) we capture once

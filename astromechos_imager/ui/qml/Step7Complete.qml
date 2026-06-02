@@ -177,11 +177,10 @@ Rectangle {
             variant: "secondary"
             onClicked: {
                 // Audit bugs C3 + H1: a fresh sequential session must
-                // wipe the previous SSID + completedRoles. Without
-                // this, Step 4 would show "✓ DONE" badges on a brand
-                // new card and the runtime hotspot rendezvous would
-                // reuse the previous robot's SSID.
-                flashViewModel.endSession()
+                // wipe completedRoles AND mint a fresh bootstrap SSID.
+                // wizardState.endSession() does both (regenerates
+                // hotspotSsid) so the next pair never reuses the previous
+                // robot's wlan0 rendezvous.
                 wizardState.endSession()
                 wizardState.goto(1)
             }

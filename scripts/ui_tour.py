@@ -1,8 +1,11 @@
-"""Capture one PNG per wizard step into screenshots/ — for design review.
+"""Capture one PNG per README walkthrough step into screenshots/.
 
-Forces fake wizard state so Steps 2-6 render with realistic content even
-without SD cards / real images present. 6-step wizard:
-  Mode → Images → Storage → Customize → Flash → Done.
+Forces fake wizard state so the screens render with realistic content even
+without SD cards / real images present. The live wizard is 7 steps —
+1 Landing · 2 Config(Customize) · 3 Images · 4 Role · 5 Ops · 6 Cycle ·
+7 Complete — but the README tells the story in a different order, so each
+capture label below is paired with the wizard step (``goto`` index) whose
+SCREEN it must show. Keep the two in sync if either changes.
 Captures both Dark and Light themes back-to-back (sun/moon toggle wiring).
 Run from project root:
 
@@ -54,15 +57,17 @@ def main() -> int:
     # navigation explicitly via WizardState.goto(). We capture each step
     # in dark mode, then re-walk in light mode.
     # 4th element = optional action to run after navigating, before capture.
+    # (capture-label, goto-step, settle-ms, action). The label tracks the
+    # README narrative; goto-step is the LIVE wizard step whose screen it shows.
     base_plan = [
-        ("00-splash",        None,  2200, None),   # mid-loader (bar ~60%)
-        ("01-mode",          None,  1800, None),   # let the splash timer fire
-        ("02-images",           2,   700, None),
-        ("03-storage",          3,   700, None),
-        ("04-customize",        4,   700, None),
-        ("05-flash",            5,   700, None),
-        ("05b-write-confirm",   5,   700, "open_confirm"),  # ⚡ WRITE warning dialog
-        ("06-done",             6,   700, None),
+        ("00-splash",                None, 2200, None),  # mid-loader (bar ~60%)
+        ("01-landing",               None, 1800, None),  # splash timer → step 1 Landing
+        ("02-target-drives",            4,  700, None),  # step 4 — Role / INSERT SD CARD
+        ("03-security-validation",      3,  700, None),  # step 3 — Images (role marker)
+        ("04-customize",                2,  700, None),  # step 2 — Config (account/hotspot/wifi)
+        ("05-confirm-flash",            5,  700, None),  # step 5 — Ops (verify + flash)
+        ("05b-write-confirm",           5,  700, "open_confirm"),  # ⚡ WRITE dialog
+        ("06-complete",                 7,  700, None),  # step 7 — Complete
     ]
     themes = ["dark", "light"]
 

@@ -39,13 +39,12 @@ IMG = Path(os.environ.get(
 
 
 class FakeWizardState(QObject):
-    sessionSsidChanged = Signal(str)
-
     def __init__(self, phys_id: int, img: Path):
         super().__init__()
         self.installUser = "astromech"
         self.installPassword = "astropass"
         self.hotspotPassword = "astropass"
+        self.hotspotSsid = "Astromech-0000"
         self.hostnameMaster = "astromech-master"
         self.hostnameSlave = "astromech-slave"
         self.repoUrl = ""

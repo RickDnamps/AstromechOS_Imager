@@ -310,6 +310,7 @@ Rectangle {
                         id: userField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         label: "USERNAME"
                         // Fixed system account — read-only. The flashed login is
                         // always DEFAULT_INSTALL_USER (backend-authoritative);
@@ -322,8 +323,10 @@ Rectangle {
                         id: passField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         label: "PASSWORD"
                         placeholder: "astropass"
+                        helper: "Used for SSH + sudo"
                         ok: installPasswordOk
                         revealable: true
                         onEdited: _flush()
@@ -344,21 +347,43 @@ Rectangle {
                              "robot will be operated at a convention, expo, or any " +
                              "public/shared space."
 
-                AstroField {
-                    id: hotspotField
-                    label: "PRIVATE ROBOT HOTSPOT PASSWORD"
-                    placeholder: "astropass"
-                    ok: hotspotPasswordOk
-                    revealable: true
-                    onEdited: _flush()
+                // SSID (read-only, auto-generated) + password on one row —
+                // same 2-column grid as the Linux account, so it stays compact
+                // and aligned. SSID is bound to the single early-generated
+                // source wizardState.hotspotSsid.
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 14
+                    AstroField {
+                        id: hotspotSsidField
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
+                        label: "HOTSPOT SSID"
+                        locked: true
+                        helper: "Auto-generated per deployment"
+                        text: wizardState.hotspotSsid
+                        ok: true
+                    }
+                    AstroField {
+                        id: hotspotField
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
+                        label: "HOTSPOT PASSWORD"
+                        placeholder: "astropass"
+                        helper: "Links Master ↔ Slave"
+                        ok: hotspotPasswordOk
+                        revealable: true
+                        onEdited: _flush()
+                    }
                 }
             }
 
             // ── Section 3: Home Wi-Fi (optional) ──────────────────────
             SectionCard {
                 title: "HOME Wi-Fi"
-                subtitle: "Optional — connects your robot to your home network. " +
-                          "Can also be configured later from the robot's web UI."
+                subtitle: "Optional (wlan1) — also configurable later from the robot's web UI."
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -367,6 +392,7 @@ Rectangle {
                         id: wifiSsidField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         label: "Wi-Fi NAME"
                         placeholder: "(leave empty to skip)"
                         ok: wifiSsidOk
@@ -377,6 +403,7 @@ Rectangle {
                         id: wifiPskField
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
+                        Layout.alignment: Qt.AlignTop
                         label: "Wi-Fi PASSWORD"
                         placeholder: "(leave empty to skip)"
                         ok: wifiPskOk
@@ -407,14 +434,11 @@ Rectangle {
             variant: "primary"
             enabled: formValid
             onClicked: {
-                // Audit bug C1: mint the session hotspot HERE — after
-                // the operator-typed PSK is validated — so the SSID
-                // baked into both cards matches the PSK actually
-                // written to /boot/astromech_init.cfg. startSession()
-                // is idempotent: going BACK and re-clicking NEXT is a
-                // no-op on the SSID side.
+                // The bootstrap SSID is minted at wizard-state init
+                // (wizardState.hotspotSsid) and shown read-only above, so
+                // there is nothing to "start" here — just persist the typed
+                // fields and advance.
                 _flush()
-                flashViewModel.startSession()
                 wizardState.next()
             }
         }

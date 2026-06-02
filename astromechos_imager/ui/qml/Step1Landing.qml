@@ -2,11 +2,9 @@
 //
 // Sequential Deployment Assistant entry screen. Pure marketing splash
 // — the START DEPLOYMENT button advances to Step 2 Config and nothing
-// else. Audit bug C1: previously this screen called
-// flashViewModel.startSession(), which baked the SSID before Step 2
-// captured the real PSK → SSID/PSK drift on the cards. The session
-// hotspot is now minted at the end of Step 2 (Config NEXT button)
-// once the PSK is validated.
+// else. The bootstrap hotspot SSID is minted once at wizard-state init
+// (wizardState.hotspotSsid) and surfaced read-only in Step 2 Config — not
+// here, to keep the landing screen uncluttered.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -60,39 +58,8 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
         }
 
-        // ── Session SSID preview (only after startSession() ran) ─────
-        Rectangle {
-            visible: flashViewModel.sessionSsid !== ""
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 360
-            implicitHeight: 52
-            color: theme.colors.colorSurface
-            border.color: theme.colors.colorBorderAccent
-            border.width: 1
-            radius: Theme.radiusCard
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 10
-                Text {
-                    text: "SESSION SSID"
-                    color: theme.colors.colorTextAccent
-                    font.family: Theme.fontTitle
-                    font.pixelSize: 10
-                    font.bold: true
-                    font.letterSpacing: 1.4
-                }
-                Text {
-                    text: flashViewModel.sessionSsid
-                    color: theme.colors.colorTextPrimary
-                    font.family: Theme.fontMono
-                    font.pixelSize: 12
-                    font.bold: true
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
-            }
-        }
+        // The bootstrap hotspot SSID is shown read-only in Step 2 Config —
+        // no need to surface it on the landing screen too.
 
         AstroButton {
             text: "START DEPLOYMENT →"

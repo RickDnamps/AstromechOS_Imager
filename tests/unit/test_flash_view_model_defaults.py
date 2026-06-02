@@ -58,6 +58,7 @@ def _fake_wizard(
         installUser=install_user,
         installPassword=install_password,
         hotspotPassword=hotspot_password,
+        hotspotSsid="Astromech-1234",   # early-minted by WizardState in prod
     )
 
 
@@ -163,6 +164,8 @@ def test_username_locked_password_and_hotspot_still_override(tmp_path, monkeypat
     assert job.firstboot_config.install_user == DEFAULT_INSTALL_USER   # NOT r2d2
     assert job.linux_account.cleartext_password == "mySecret123"       # password wins
     assert job.firstboot_config.hotspot_bootstrap.password == "hotspotSecret"
+    # The bootstrap SSID comes from the early-generated wizardState.hotspotSsid
+    assert job.firstboot_config.hotspot_bootstrap.ssid == "Astromech-1234"
 
 
 # ── Username stays fixed regardless of any field content ──────────────

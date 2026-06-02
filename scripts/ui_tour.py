@@ -36,8 +36,20 @@ def main() -> int:
 
     # Seed realistic wizard state — 7-step sequential wizard. The legacy
     # mode picker is gone; Phase B will update the QML capture plan.
-    state.setMasterImagePath(r"C:\images\AstromechOS-master-2026-05-30.img.xz")
-    state.setSlaveImagePath(r"C:\images\AstromechOS-slave-2026-05-30.img.xz")
+    # Use REAL AstromechOS images so Step 3 shows the genuine role-marker
+    # validation badges (the path setters kick off the async validator). The
+    # path shown is a CLEAN, release-style location (a local junction maps it
+    # to the real files) so the published screenshot never leaks a personal
+    # path. Falls back to a placeholder name on machines without the images.
+    _rel = Path(r"C:\AstromechOS_Releases")
+    _master_img = _rel / "AstromechOS_Master_01-06-2026.img.gz"
+    _slave_img = _rel / "AstromechOS_Slave_01-06-2026.img.gz"
+    state.setMasterImagePath(
+        str(_master_img) if _master_img.exists()
+        else r"C:\AstromechOS_Releases\AstromechOS_Master_01-06-2026.img.gz")
+    state.setSlaveImagePath(
+        str(_slave_img) if _slave_img.exists()
+        else r"C:\AstromechOS_Releases\AstromechOS_Slave_01-06-2026.img.gz")
     state.setMasterDriveId(2)
     state.setSlaveDriveId(3)
     state.setHostnameMaster("astromech-master")
@@ -60,14 +72,15 @@ def main() -> int:
     # (capture-label, goto-step, settle-ms, action). The label tracks the
     # README narrative; goto-step is the LIVE wizard step whose screen it shows.
     base_plan = [
-        ("00-splash",                None, 2200, None),  # mid-loader (bar ~60%)
-        ("01-landing",               None, 1800, None),  # splash timer → step 1 Landing
-        ("02-target-drives",            4,  700, None),  # step 4 — Role / INSERT SD CARD
-        ("03-security-validation",      3,  700, None),  # step 3 — Images (role marker)
-        ("04-customize",                2,  700, None),  # step 2 — Config (account/hotspot/wifi)
-        ("05-confirm-flash",            5,  700, None),  # step 5 — Ops (verify + flash)
-        ("05b-write-confirm",           5,  700, "open_confirm"),  # ⚡ WRITE dialog
-        ("06-complete",                 7,  700, None),  # step 7 — Complete
+        ("00-splash",          None, 2200, None),  # mid-loader (bar ~60%)
+        ("01-landing",         None, 1800, None),  # step 1 — Landing
+        ("02-customize",          2,  700, None),  # step 2 — Config (account/hotspot/wifi)
+        ("03-images",             3, 7000, None),  # step 3 — Select Source Images (wait for role validation)
+        ("04-target-drives",      4,  700, None),  # step 4 — Role / Insert SD Card
+        ("05-confirm-flash",      5,  700, None),  # step 5 — Ops (verify + flash)
+        ("05b-write-confirm",     5,  700, "open_confirm"),  # ⚡ WRITE dialog
+        ("06-next-card",          6,  700, "flashed_master"),  # step 6 — Master done, insert next
+        ("07-complete",           7,  700, "flashed_both"),    # step 7 — both done, deployment complete
     ]
     themes = ["dark", "light"]
 
@@ -99,9 +112,19 @@ def main() -> int:
         if dlg is not None:
             QMetaObject.invokeMethod(dlg, "close")
         # Reset wizard back to step 1 between themes so the splash logic
-        # is consistent.
+        # is consistent (and clear the simulated flash progress).
         if name.endswith("00-splash") and i > 0:
-            state.goto(1)   # ensure fresh navigation surface
+            state.endSession()   # wipe completedRoles / cycle for a fresh pass
+            state.goto(1)        # ensure fresh navigation surface
+        # Simulate flash completion so the Cycle / Complete screens render
+        # with the right "Master done" / "both done" state.
+        if action == "flashed_master":
+            state.setCurrentRole("master")
+            state.markCurrentRoleCompleted()
+        elif action == "flashed_both":
+            for _r in ("master", "slave"):
+                state.setCurrentRole(_r)
+                state.markCurrentRoleCompleted()
         if target_step is not None:
             state.goto(target_step)
         # Optional action: pop the ⚡ WRITE confirmation dialog open so we can

@@ -32,53 +32,59 @@ No `dd` gymnastics. No *"wait, which card was the Master?"*. No bricked droid on
 
 ## 📸 The wizard
 
-A **frameless, dual‑themed** (dark / light) Qt Quick flow with an R2‑style cobalt accent and a one‑click sun/moon theme toggle — no restart. Screenshots show the **Light** theme (the default on launch).
+A **frameless, dual‑themed** (dark / light) Qt Quick flow with an R2‑style cobalt accent and a one‑click sun/moon theme toggle — no restart. Screenshots show the **Light** theme (the default on launch), in the real wizard order.
 
 ### Splash
 
 An animated boot splash warms up the engine, then opens into the wizard.
 
-![Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=18)
+![Splash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/splash_light.png?v=19)
 
 ### Step 1 — Landing
 
 The **Sequential Deployment Assistant**: configure once, then flash the Master and Slave one card at a time — both stamped with the **same `Astromech‑XXXX` rendezvous SSID** (minted at launch) so the two halves find each other on first boot.
 
-![Step 1 — Landing](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_landing_light.png?v=18)
+![Step 1 — Landing](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step1_landing_light.png?v=19)
 
-### Step 2 — Target Drives
-
-Removable drives are detected live (your system disk is hidden, for safety). One click locks a physical card to its role — **MASTER** or **SLAVE**.
-
-![Step 2 — Target Drives](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_target_drives_light.png?v=18)
-
-### Step 3 — Security Validation
-
-Each image earns a badge: **green** = role‑marker verified, **amber** = legacy image trusted by filename, **red** = wrong image → `NEXT` disabled. The flash simply cannot proceed with the wrong card.
-
-![Step 3 — Security Validation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_security_validation_light.png?v=18)
-
-### Step 4 — Customize
+### Step 2 — Customize
 
 Set the robot's **password**, the **private hotspot** that links the two halves, and optional **home Wi‑Fi**. The login name is the fixed `astromech` account (shown read‑only) and the rendezvous SSID is auto‑generated — leave the rest blank for safe defaults, or make them your own.
 
-![Step 4 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_customize_light.png?v=18)
+![Step 2 — Customize](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step2_customize_light.png?v=19)
 
-### Step 5 — Confirm & Flash
+### Step 3 — Select & verify images
+
+Point to your downloaded Master and Slave images. Each one is **virtually mounted in memory** and checked against its role marker — a **green ✓ VERIFIED** badge means it's the genuine article; an amber badge flags a legacy image, and a red one **blocks the flash** for the wrong card.
+
+![Step 3 — Select & verify images](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step3_images_light.png?v=19)
+
+### Step 4 — Insert the card
+
+Removable drives are detected live (your system disk is hidden, for safety). Insert the card for this cycle and lock it to its role — **MASTER** (dome) or **SLAVE** (body).
+
+![Step 4 — Insert the card](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step4_target_drives_light.png?v=19)
+
+### Step 5 — Confirm & flash
 
 A clear summary, an optional SHA‑256 integrity check (on by default), and a destructive `⚡ WRITE` that **never fires on the first click** —
 
-![Step 5 — Confirm & Flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=18)
+![Step 5 — Confirm & flash](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_confirm_flash_light.png?v=19)
 
 — it raises a bordered **"ERASE TARGET DRIVE(S)?"** modal so you confirm the drive letters before anything irreversible happens.
 
-![Step 5 — WRITE confirmation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_write_confirm_light.png?v=18)
+![Step 5 — WRITE confirmation](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step5_write_confirm_light.png?v=19)
 
-### Step 6 — Complete
+### Step 6 — Insert the next card
 
-Flashed, verified, personalized — with a clear next‑step recap and a `FLASH ANOTHER` shortcut for the second card.
+After the Master is written and verified, the assistant recaps what's flashed (and the shared hotspot SSID), then prompts you to drop in the second card — auto‑assigned to the remaining role.
 
-![Step 6 — Complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_complete_light.png?v=18)
+![Step 6 — Insert the next card](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step6_next_card_light.png?v=19)
+
+### Step 7 — Deployment complete
+
+Both cards flashed, verified and personalized — with a clear next‑step recap (eject, seat each Pi, power on) and a `FLASH ANOTHER` shortcut for the next droid.
+
+![Step 7 — Deployment complete](https://raw.githubusercontent.com/RickDnamps/AstromechOS_Screenshots/main/Screenshots_Imager/step7_complete_light.png?v=19)
 
 ---
 

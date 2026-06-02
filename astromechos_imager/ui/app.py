@@ -51,7 +51,21 @@ _QT_MSG_LEVEL = {
 }
 
 
+# Benign transient QML warnings, suppressed to keep the log readable: theme
+# context bindings briefly re-evaluated during StackView transitions, and a
+# layout rearrange notice (harmless).
+_QT_NOISE = (
+    "Cannot read property 'colors' of null",
+    "Detected recursive rearrange",
+)
+
+
 def _qt_message_handler(msg_type, ctx, message) -> None:
+    # Drop Qt's own debug chatter and known-benign transient warnings.
+    if msg_type == QtMsgType.QtDebugMsg:
+        return
+    if any(noise in message for noise in _QT_NOISE):
+        return
     sink = sys.stderr if sys.stderr is not None else sys.__stderr__
     if sink is None:
         return
@@ -61,7 +75,7 @@ def _qt_message_handler(msg_type, ctx, message) -> None:
 
 
 def _excepthook(exc_type, exc_value, tb) -> None:
-    """Last-resort crash logger. Replaced by the JSONL logging hook in a later phase."""
+    """Last-resort crash logger for uncaught exceptions."""
     sink = sys.stderr if sys.stderr is not None else sys.__stderr__
     if sink is None:
         return

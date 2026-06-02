@@ -8,10 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from astromechos_imager.core.bootpartition import (
-    find_first_fat32_partition,
-    find_rootfs_partition,
-)
+from astromechos_imager.core.bootpartition import find_first_fat32_partition
 
 
 def _bootpartition_open(
@@ -19,18 +16,12 @@ def _bootpartition_open(
     physical_drive_id: int,
     mbr_bytes: bytes,
 ) -> "object | None":
-    r"""Parse the MBR, find the FAT32 partition, open it via userspace FAT.
+    """Find the FAT32 partition in the MBR and open it via userspace FAT.
 
-    Returns None if no FAT32 partition is found (so callers can skip
-    customize). This is the single monkeypatching point for tests.
-
-    The returned ``RawFatBootPartition`` reads and writes the FAT in
-    userspace (pyfatfs over a raw ``\\.\PHYSICALDRIVEn`` handle) — Windows
-    never mounts the partition, so the "Format K:?" / "K:\\ is not
-    accessible" shell pop-ups can't fire, the customize step never races
-    Explorer, and no drive letter is involved (so the bundle physically
-    cannot leak to C: — the old letter-detection failure mode is gone by
-    construction).
+    Returns None if no FAT32 partition is found. The returned
+    ``RawFatBootPartition`` reads/writes the FAT in userspace (pyfatfs over the
+    raw device), so Windows never mounts the partition — no drive letter, no
+    "Format?" pop-up. Single monkeypatching point for tests.
     """
     from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
     from astromechos_imager.core.raw_fat_partition import RawFatBootPartition  # noqa: PLC0415
@@ -40,73 +31,6 @@ def _bootpartition_open(
         return None
     return RawFatBootPartition.open_on_drive(
         platform_io, physical_drive_id, layout.offset, layout.size,
-    )
-
-
-def _physicaldrive_to_cygwin(win_path: str) -> str:
-    """Map a Win32 ``\\\\.\\PHYSICALDRIVEn`` path to Cygwin's ``/dev/sd<letter>``.
-
-    The bundled e2fsprogs (``debugfs.exe`` / ``e2fsck.exe``) are **Cygwin**
-    builds. Cygwin's libext2fs cannot open a Win32 device namespace path like
-    ``\\\\.\\PHYSICALDRIVE1`` — that yields ERROR_NOT_READY (errno 21). Cygwin
-    instead exposes physical drives as ``/dev/sda`` (PHYSICALDRIVE0),
-    ``/dev/sdb`` (PHYSICALDRIVE1), … i.e. drive *n* → ``/dev/sd`` + chr('a'+n).
-    This mapping is deterministic in Cygwin (derived from the physical drive
-    number), so it targets the same disk the rest of the flash uses.
-
-    Safety: even if the mapping were wrong, debugfs opens at the ext4
-    ``?offset=`` and refuses to operate without a valid ext4 superblock there,
-    so a mis-mapped device fails cleanly (caught + skipped) rather than
-    corrupting another disk.
-
-    Returns the input unchanged if it doesn't match the PHYSICALDRIVE pattern
-    (non-Windows paths, already-translated paths, test fakes).
-    """
-    import re  # noqa: PLC0415
-    m = re.match(r"^\\\\[.?]\\PHYSICALDRIVE(\d+)$", win_path, re.IGNORECASE)
-    if not m:
-        return win_path
-    return "/dev/sd" + chr(ord("a") + int(m.group(1)))
-
-
-def _open_rootfs_partition(
-    raw_device_path: str,
-    mbr_bytes: bytes,
-    debugfs_exe: Path,
-    e2fsck_exe: Path,
-    invoker: list[str] | None = None,
-) -> "object | None":
-    """Parse the MBR, find the Linux (0x83) partition, and open an ext4 backend.
-
-    Returns None if no Linux partition is found.
-    This is the single monkeypatching point for tests.
-
-    On Windows production: ``raw_device_path`` is a Win32 device path
-    (``\\\\.\\PHYSICALDRIVEn``). The bundled e2fsprogs are **Cygwin** builds,
-    which cannot open a Win32 device path, so we translate it to Cygwin's
-    ``/dev/sd<letter>`` form (see :func:`_physicaldrive_to_cygwin`); the ext4
-    backend then constructs ``/dev/sd<letter>?offset=N`` (standard libext2fs
-    ``?offset=`` syntax). When an explicit ``invoker`` is given (e.g. WSL dev
-    mode) the path is passed through unchanged.
-
-    On test machines: monkeypatched to return a FakeRootfsPartition directly.
-    """
-    from astromechos_imager.core.errors import BootPartitionMountError  # noqa: PLC0415
-    from astromechos_imager.core.rootfs import Ext4DebugfsBackend  # noqa: PLC0415
-    try:
-        layout = find_rootfs_partition(mbr_bytes)
-    except BootPartitionMountError:
-        return None
-    # Native Cygwin (no explicit invoker): translate the Win32 device path.
-    image_path = raw_device_path
-    if not invoker:
-        image_path = _physicaldrive_to_cygwin(raw_device_path)
-    return Ext4DebugfsBackend(
-        image_path=image_path,
-        offset_bytes=layout.offset,
-        debugfs_exe=debugfs_exe,
-        e2fsck_exe=e2fsck_exe,
-        invoker=invoker,
     )
 
 
@@ -150,78 +74,45 @@ class FlashJob:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     skip_verify: bool = False
     skip_customize: bool = False
-    # Phase 5.5.4: optional rootfs personalization
-    # When linux_account is None, rootfs personalization is skipped entirely
-    # (backward-compatible for callers that only need the FAT32 firstboot bundle).
+    # Optional first-boot account setup. When None, only the FAT firstboot
+    # bundle is written (no /firstrun.sh).
     linux_account: LinuxAccount | None = None
-    ext4_debugfs_exe: Path | None = None
-    ext4_e2fsck_exe: Path | None = None
 
     def run(self) -> FlashJobResult:
-        # PHASE 0 native shell-quiet: set THIS worker thread's error mode
-        # (SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX) via
-        # astro_flash.dll so any shell error dialog OUR process would
-        # raise while touching the half-written removable device — the
-        # "K:\ is not accessible" box during the customize step's file
-        # I/O — is suppressed for the lifetime of this thread. (The
-        # separate "Format K:?" dialog is Explorer's own; SHChangeNotify
-        # in lock_and_dismount targets that one.) No-op without the DLL.
+        # Suppress this worker thread's shell error dialogs (no-op without the
+        # native DLL) so raw device I/O can't trigger an Explorer pop-up.
         try:
             from astromechos_imager.platform import native_shell_quiet
             if native_shell_quiet.available():
                 native_shell_quiet.quiet_thread()
         except Exception:
             pass
-        # Audit High #15: lock_and_dismount handles MUST be closed. They are
-        # now HELD (locked) for the entire flash — the Win32DiskImager /
-        # rpi-imager model — and the outer `finally` closes them at the very
-        # end (closing releases each FSCTL_LOCK_VOLUME → Windows remounts the
-        # freshly-written card). Holding the lock is what authorises raw
-        # in-partition writes (no ERROR_ACCESS_DENIED) AND keeps the volume
-        # un-mountable (no "Format K:?" pop-up), with no partition-table
-        # surgery.
         locked_handles: list[int] = []
         write_result = None
         dev = None
-        # True once the card carries a VALID partition table again (deferred
-        # MBR written, or the whole image incl. sector 0 streamed for the
-        # degenerate no-deferred-block case). If this stays False after
-        # open_raw_device ran (which wiped the layout), the card is RAW —
-        # a cancel/failure left it unreadable and the outer finally restores
-        # a clean exFAT volume so Windows doesn't nag "Format K:?".
+        # True once the card carries a valid partition table again (deferred MBR
+        # written). If it stays False after open_raw_device wiped the layout the
+        # card is RAW, and the outer finally restores a clean exFAT volume.
         mbr_written = False
         try:
             try:
-                # PHASE PREFLIGHT — validate EVERYTHING that can fail BEFORE
-                # any destructive device mutation. A failure here raises a
-                # PreflightError (sd_state="SAFE") that the `except ImagerError`
-                # below returns as ok=False with the card UNTOUCHED: no
-                # lock/dismount, no partition wipe, no RAW card, no "Format?"
-                # popup. Only a clean preflight proceeds to the flash sequence.
+                # Preflight validates everything that can fail before any
+                # destructive device mutation; a PreflightError aborts with the
+                # card untouched.
                 _log.info("PHASE preflight: validating before any device mutation")
                 self._preflight()
                 _log.info("PHASE preflight: PASSED — beginning flash")
-                # 1. Dismount every volume on this physical drive (lettered
-                #    AND letterless, found by GUID) and remove the drive
-                #    letter from Mount Manager — BEFORE opening the physical
-                #    drive. This is the proven baseline order. lock_and_dismount
-                #    releases its lock and returns [] (no held handle): the
-                #    write is authorised by the dismount + the
-                #    IOCTL_DISK_DELETE_DRIVE_LAYOUT inside open_raw_device, NOT
-                #    by a held lock. Opening the physical drive while a lock
-                #    was HELD, or with the partition layout intact, is what
-                #    denied the in-partition write in the field (errno 5/6).
+                # 1. Dismount every volume on this drive and drop its drive
+                #    letter before opening the physical device.
                 locked_handles = list(
                     self.platform_io.lock_and_dismount(
                         self.target.drive_letters,
                         self.target.physical_drive_id,
                     ) or []
                 )
-                # 2. Open ONE raw device handle (NO_BUFFERING | WRITE_THROUGH |
-                #    SEQUENTIAL_SCAN), used for write, verify AND the final MBR
-                #    write. open_raw_device wipes the in-memory partition layout
-                #    (IOCTL_DISK_DELETE_DRIVE_LAYOUT) so PARTMGR stops policing
-                #    in-partition writes.
+                # 2. Open one raw device handle for write, verify, and the final
+                #    MBR write. open_raw_device wipes the in-memory partition
+                #    layout so PARTMGR stops policing in-partition writes.
                 dev = self.platform_io.open_raw_device(self.target.physical_drive_id)
                 _log.info("FlashJob START role=%s phys_id=%s image=%s skip_verify=%s "
                           "skip_customize=%s linux_account=%s",
@@ -259,12 +150,9 @@ class FlashJob:
                                         first_block=write_result.first_block_data)
                         _log.info("PHASE verify-readback: PASSED")
 
-                    # 4. Userspace-FAT customize — runs while the deferred first
-                    #    block (the MBR) is STILL ABSENT from the disk. With no
-                    #    partition table, Windows cannot discover the FAT32
-                    #    partition to auto-mount it: no drive letter, no
-                    #    Explorer, no "Format K:?" pop-up. The bundle physically
-                    #    cannot reach C: — there is no letter involved.
+                    # 4. Userspace-FAT customize, while the deferred MBR is still
+                    #    absent so Windows can't auto-mount the FAT partition
+                    #    (no drive letter, no "Format?" pop-up).
                     if not self.skip_customize and not self.cancel_event.is_set():
                         _log.info("PHASE customize: starting (userspace FAT)")
                         self.on_progress(DiskWriterProgress(
@@ -281,44 +169,22 @@ class FlashJob:
                         )
                         if bp is not None:
                             try:
-                                # Invariant #5 (MANDATORY, BOTH cards): wire the
-                                # Pi-OS first-boot rootfs auto-resize into
-                                # /cmdline.txt. This is a FAT-only write that
-                                # needs NO ext4/debugfs, so it runs
-                                # UNCONDITIONALLY and BEFORE the optional
-                                # UID-1000 cold surgery — decoupled from it so a
-                                # missing debugfs.exe (cold surgery skipped) can
-                                # never also skip the resize. Without resize the
-                                # rootfs stays pinned at the golden image's ~5 GB
-                                # and the Pi runs out of disk within days.
-                                # Idempotent (no-op if the arg is already there).
+                                # Wire the first-boot rootfs auto-resize into
+                                # cmdline.txt (FAT-only, idempotent).
                                 if not self.cancel_event.is_set():
-                                    from astromechos_imager.core.rootfs_personalizer import (  # noqa: PLC0415
+                                    from astromechos_imager.core.cmdline_resize import (  # noqa: PLC0415
                                         inject_resize_arg,
                                     )
                                     if inject_resize_arg(bp):
-                                        _log.info(
-                                            "PHASE customize: rootfs auto-resize "
-                                            "arg injected into /cmdline.txt"
-                                        )
+                                        _log.info("PHASE customize: rootfs auto-resize arg injected")
                                     else:
-                                        _log.info(
-                                            "PHASE customize: rootfs auto-resize "
-                                            "arg already present (idempotent)"
-                                        )
+                                        _log.info("PHASE customize: rootfs auto-resize arg already present")
+                                # Set the UID-1000 user + password at first boot
+                                # via /firstrun.sh (FAT). Skipped with no account.
                                 if (
                                     self.linux_account is not None
                                     and not self.cancel_event.is_set()
                                 ):
-                                    # UID-1000 username + password are set at
-                                    # FIRST BOOT via the official Raspberry Pi
-                                    # Imager mechanism: write /firstrun.sh to the
-                                    # FAT boot partition + add `systemd.run=...`
-                                    # to cmdline.txt. This is 100% FAT — no
-                                    # ext4/debugfs/e2fsprogs — and is the exact
-                                    # method the official tool uses on Pi OS
-                                    # (incl. Trixie). firstrun.sh self-destructs
-                                    # after it runs.
                                     _log.info("PHASE customize: firstrun.sh account setup")
                                     self._write_firstrun(bp)
                                 if not self.cancel_event.is_set():
@@ -439,15 +305,10 @@ class FlashJob:
                 except Exception:
                     pass  # best-effort; we're already in a finally
 
-            # Card-recovery: if the device was opened (so open_raw_device
-            # wiped its partition layout) but we never wrote a valid MBR back
-            # — i.e. the operator CANCELLED or the flash FAILED mid-way — the
-            # card is left RAW and Windows nags "Format K:?". Quick-format it
-            # to a clean exFAT volume so the operator sees a usable drive
-            # instead of a "broken" one. Best-effort, never raises, only ever
-            # touches the target physical drive. Runs AFTER the handle is
-            # closed (diskpart needs the device free). Skipped on a clean
-            # success (mbr_written) and on platforms without the method.
+            # Card recovery: if the device was opened (layout wiped) but no
+            # valid MBR was written back (cancel or mid-flash failure), the card
+            # is RAW. Quick-format it to a clean exFAT volume so the operator
+            # sees a usable drive. Best-effort, after the handle is closed.
             if dev is not None and not mbr_written:
                 restore = getattr(self.platform_io, "restore_readable_exfat", None)
                 if restore is not None:
@@ -481,64 +342,21 @@ class FlashJob:
         except Exception:
             pass
 
-    def _resolve_ext4_tools(self) -> "tuple[Path, Path]":
-        """Resolve the e2fsprogs tools (debugfs, e2fsck) used for cold surgery.
-
-        Explicit job paths win; else the BUNDLED ``vendor/`` tools on Windows
-        (same resolver as the rest of the app); else POSIX system paths on
-        dev/test hosts. Returns paths WITHOUT probing — existence and
-        loadability are validated up front by :meth:`_preflight`.
-        """
-        debugfs = self.ext4_debugfs_exe
-        e2fsck = self.ext4_e2fsck_exe
-        if debugfs is None or e2fsck is None:
-            import sys  # noqa: PLC0415
-            if sys.platform == "win32":
-                from astromechos_imager.core.vendored_binaries import vendor_root  # noqa: PLC0415
-                debugfs = debugfs or (vendor_root() / "debugfs.exe")
-                e2fsck = e2fsck or (vendor_root() / "e2fsck.exe")
-            else:
-                debugfs = debugfs or Path("/usr/sbin/debugfs")
-                e2fsck = e2fsck or Path("/usr/sbin/e2fsck")
-        return debugfs, e2fsck
-
-    def _on_real_windows(self) -> bool:
-        """True only on the real Win32 platform backend (not test fakes)."""
-        import sys  # noqa: PLC0415
-        return (sys.platform == "win32"
-                and type(self.platform_io).__name__ == "WindowsPlatformIO")
-
     def _preflight(self) -> None:
-        """Validate EVERYTHING that can fail BEFORE any destructive device
-        mutation (lock/dismount + the IOCTL_DISK_DELETE_DRIVE_LAYOUT partition
-        wipe in open_raw_device).
-
-        Operator contract (2026-06-01): run() calls this FIRST. On any problem
-        it raises a ``PreflightError`` (sd_state="SAFE") so the flash aborts
-        with the card **UNTOUCHED** — no partition wipe, no RAW card, no
-        Windows "Format?" popup. Only when it returns cleanly does the
-        destructive flash sequence begin.
-
-        Cold-surgery checks (tool load + device-open probe) run ONLY on the
-        real Windows backend — test fakes skip them.
+        """Validate everything that can fail before any destructive device
+        mutation, so a problem aborts with the card untouched (PreflightError,
+        sd_state="SAFE"). Account setup is FAT firstrun.sh, so the only check
+        is that the source image exists.
         """
         from astromechos_imager.core.errors import DriveNotFoundError  # noqa: PLC0415
-        # Source image present (cheap, always). Account customization now
-        # happens at FIRST BOOT via /firstrun.sh on the FAT partition (the
-        # official Raspberry Pi Imager method) — 100% FAT, no ext4/debugfs/
-        # e2fsprogs — so there are no e2fsprogs tools to validate here.
         if not self.image_path.is_file():
             raise DriveNotFoundError(f"image file not found: {self.image_path}")
 
     def _write_firstrun(self, boot: object) -> None:
-        """Write the official-style ``firstrun.sh`` to the FAT boot partition and
-        wire the ``systemd.run=/boot/firstrun.sh ...`` trigger into
-        ``cmdline.txt``.
-
-        This is the exact Raspberry Pi Imager mechanism for setting the
-        UID-1000 username + password at first boot — 100% FAT-partition work
-        (no ext4 / debugfs / e2fsprogs). ``firstrun.sh`` self-destructs after it
-        runs (rm itself + strip ``systemd.run`` from cmdline.txt).
+        """Set the UID-1000 user + password at first boot the way the official
+        Raspberry Pi Imager does: write /firstrun.sh to the FAT boot partition
+        and add the systemd.run trigger to cmdline.txt. firstrun.sh
+        self-destructs after it runs.
         """
         from astromechos_imager.core.firstrun_generator import (  # noqa: PLC0415
             append_firstrun_trigger,
@@ -583,16 +401,9 @@ class PairFlashJob:
     parallel: bool = True
     skip_verify: bool = False
     skip_customize: bool = False
-    # Phase 5.5.4 / Customize-step restoration: optional cold rootfs
-    # surgery. When ``linux_account`` is set, BOTH child FlashJobs run
-    # rootfs personalization with the same account — the operator
-    # provisions a single UID-1000 identity shared across Master and
-    # Slave for SSH key-trust and the runtime side-by-side rsync
-    # workflow. Per-role accounts would diverge ``/etc/passwd`` and
-    # break the firstboot identity contract.
+    # When set, BOTH child FlashJobs use the same account — a single UID-1000
+    # identity shared across Master and Slave for SSH key-trust.
     linux_account: LinuxAccount | None = None
-    ext4_debugfs_exe: Path | None = None
-    ext4_e2fsck_exe: Path | None = None
 
     def _make_job(self, role: Role, image: Path, target: DiskRef) -> FlashJob:
         return FlashJob(
@@ -604,20 +415,14 @@ class PairFlashJob:
             cancel_event=self.cancel_event,
             skip_verify=self.skip_verify, skip_customize=self.skip_customize,
             linux_account=self.linux_account,
-            ext4_debugfs_exe=self.ext4_debugfs_exe,
-            ext4_e2fsck_exe=self.ext4_e2fsck_exe,
         )
 
     def run(self) -> PairFlashResult:
         m_job = self._make_job(Role.MASTER, self.master_image, self.master_target)
         s_job = self._make_job(Role.SLAVE, self.slave_image, self.slave_target)
         if self.parallel:
-            # Audit Medium #32: capture both `result` and exception per
-            # thread, so an unexpected exception from either job (e.g.
-            # an OSError that slipped through FlashJob.run()'s broad
-            # wrapper — should be impossible now but defence in depth)
-            # is surfaced via FlashJobResult.error rather than turning
-            # into an IndexError on the post-join lookup.
+            # Capture each thread's result or exception so a failure surfaces
+            # via FlashJobResult.error instead of an IndexError after join.
             from astromechos_imager.core.errors import FlashError
 
             m_box: dict[str, object] = {}

@@ -95,7 +95,7 @@ A purpose-built Windows desktop wizard (Python 3.12 + **PySide6 / QML**, distrib
 ├───────────────────────────────────────────────────────┤
 │ Core engine                                           │
 │  imagesource · diskwriter · bootpartition (pyfatfs)  │
-│  rootfs_personalizer · keygen · image_validator      │
+│  firstrun_generator · keygen · image_validator       │
 ├───────────────────────────────────────────────────────┤
 │ Platform IO (Windows-only)                           │
 │  WindowsPlatformIO · raw disk handles · WMI drives   │
@@ -365,8 +365,6 @@ py -3.12 -m venv .venv
 pip install -e .[dev]
 pip install pyinstaller   # for local .exe builds
 ```
-
-Populate `vendor/` with `debugfs.exe`, `e2fsck.exe`, and `msys-2.0.dll` (see `vendor/README.md` for sourcing instructions).
 
 ### Run from source
 

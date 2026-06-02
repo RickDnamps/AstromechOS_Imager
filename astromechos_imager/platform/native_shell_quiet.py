@@ -14,7 +14,7 @@ These are the two mechanisms the pure-Python path never did:
   2. SHChangeNotify, the proactive "this drive is gone" signal that stops
      Explorer polling the device and rendering the "Format K:?" pop-up.
 
-The DLL is resolved from the same ``vendor/`` directory as debugfs.exe via
+The DLL is resolved from the ``vendor/`` directory via
 ``core.vendored_binaries.vendor_root()``. When the DLL is absent (dev box
 without a build, or non-Windows), every function here degrades to a no-op
 that returns False/"" so callers can stay unconditional.

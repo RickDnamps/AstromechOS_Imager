@@ -34,7 +34,7 @@ class WizardState(QObject):
     Step 2 Config collects the deployment-mandatory fields per
     CLAUDE.md "Provisioning architecture":
       * ``installUser`` / ``installPassword`` → UID-1000 Linux account
-        (cold rootfs surgery via core/rootfs_personalizer.py).
+        (set at first boot via /firstrun.sh).
       * ``wifiSsid`` / ``wifiPsk``            → wlan1 domestic Wi-Fi
         (live firstboot brings up NetworkManager with these creds).
     The wlan0 bootstrap AP SSID is auto-generated ONCE per session by

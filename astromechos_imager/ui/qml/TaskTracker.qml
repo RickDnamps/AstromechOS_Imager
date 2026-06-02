@@ -68,11 +68,10 @@ ColumnLayout {
                 }
             }
 
-            // ── Stage label (content-sized, so the detail can sit right
-            //    next to it instead of being shoved to the far right) ──
+            // Stage label, content-sized so the detail sits right next to it.
             Text {
                 Layout.alignment: Qt.AlignVCenter
-                Layout.maximumWidth: parent.width * 0.62   // elide ultra-long labels
+                Layout.maximumWidth: 420   // static cap; binding to parent.width loops the layout
                 elide: Text.ElideRight
                 text: modelData.label || ""
                 font.family: Theme.fontBody

@@ -3,9 +3,8 @@
 #
 # Run:  pyinstaller astromechos_imager.spec
 #
-# vendor/ may be empty in development — the runtime resolves debugfs.exe /
-# e2fsck.exe / msys-2.0.dll via sys._MEIPASS and raises a clear error if
-# they are missing. See vendor/README.md for how to obtain them.
+# vendor/ holds astro_flash.dll (the native shell-quiet helper), resolved at
+# runtime via sys._MEIPASS. It may be empty in development.
 
 import fnmatch
 from pathlib import Path
@@ -35,45 +34,8 @@ if RES_FONT_DIR.exists():
         if p.is_file() and p.suffix.lower() in {".ttf", ".otf"}:
             datas.append((str(p), "astromechos_imager/ui/resources/fonts"))
 if VENDOR_DIR.exists():
-    # Audit Medium #41: ALLOWLIST not denylist. The vendor/ folder is a
-    # known set of three Win32 binaries + supporting DLLs. A denylist
-    # (skip README / .gitkeep / MISSING_BINARIES) would happily ship a
-    # PDB, .bak, license text, or stray dev file the operator dropped in
-    # there. Be explicit about what's allowed and warn loudly on anything
-    # else so build-time noise catches it before distribution.
-    _VENDOR_ALLOWLIST = {
-        "debugfs.exe",
-        "e2fsck.exe",
-        # Native flash core (C ABI, ctypes) — the "tame the shell" layer
-        # and (future phases) the raw-write / userspace-FAT engine.
-        "astro_flash.dll",
-        # ── Cygwin e2fsprogs runtime (the supported source) ──────────────
-        # MSYS2 dropped e2fsprogs mid-2025, so the rootfs cold-surgery tools
-        # come from Cygwin's e2fsprogs package. Cygwin's POSIX shim is
-        # cygwin1.dll (NOT msys-2.0.dll). The full transitive DLL closure of
-        # debugfs.exe + e2fsck.exe (per `cygcheck`) is the 10 below — ship
-        # ALL of them or the .exes fail to load at runtime.
-        "cygwin1.dll",
-        "cygblkid-1.dll",
-        "cygcom_err-2.dll",
-        "cyge2p-2.dll",
-        "cygext2fs-2.dll",
-        "cyggcc_s-seh-1.dll",
-        "cygiconv-2.dll",
-        "cygintl-8.dll",
-        "cygss-2.dll",
-        "cyguuid-1.dll",
-        # ── Legacy MSYS2 runtime (kept for back-compat if an older vendor/
-        # was populated from MSYS2; only shipped when actually present) ───
-        "msys-2.0.dll",
-        "msys-com_err-1.dll",
-        "msys-e2p-2.dll",
-        "msys-ext2fs-2.dll",
-        "msys-ss-2.dll",
-        "msys-uuid-1.dll",
-        "msys-iconv-2.dll",
-        "msys-intl-8.dll",
-    }
+    # Allowlist (not denylist) so a stray dev file never ships by accident.
+    _VENDOR_ALLOWLIST = {"astro_flash.dll"}
     _VENDOR_KNOWN_DOCS = {"README.md", ".gitkeep", "MISSING_BINARIES.md"}
     for p in VENDOR_DIR.iterdir():
         if not p.is_file():

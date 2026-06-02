@@ -86,8 +86,7 @@ def main() -> int:
         print("[ERR] _build_flash_job returned None")
         return 2
     print(f"job: role={job.role} skip_verify={job.skip_verify} "
-          f"linux_account={'SET' if job.linux_account else 'None'} "
-          f"debugfs={job.ext4_debugfs_exe} e2fsck={job.ext4_e2fsck_exe}\n")
+          f"linux_account={'SET' if job.linux_account else 'None'}\n")
 
     last = {"t": 0.0}
     def on_progress(p: DiskWriterProgress) -> None:

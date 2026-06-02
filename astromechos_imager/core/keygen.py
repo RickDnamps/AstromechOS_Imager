@@ -108,10 +108,9 @@ def _sha512_crypt(password: str, salt: str | None = None,
                   rounds: int = 5000) -> str:
     """Pure-Python SHA512-CRYPT compatible with glibc ``crypt(3)``.
 
-    Produces a ``$6$<salt>$<hash>`` string that the Imager writes
-    directly into ``/etc/shadow`` during cold rootfs surgery (see
-    ``core/rootfs_personalizer.py``). Reference implementation: Ulrich
-    Drepper, https://akkadia.org/drepper/SHA-crypt.txt.
+    Produces a ``$6$<salt>$<hash>`` string that the Imager passes to the
+    first-boot ``firstrun.sh`` (``chpasswd -e`` / ``userconf``). Reference
+    implementation: Ulrich Drepper, https://akkadia.org/drepper/SHA-crypt.txt.
 
     Pure Python (not stdlib ``crypt`` — that module is Unix-only and
     deprecated in Python 3.13; the Imager runs on Windows where it is
@@ -227,12 +226,11 @@ def _sha512_crypt(password: str, salt: str | None = None,
 
 
 def generate_linux_account(username: str, cleartext_password: str) -> LinuxAccount:
-    """Build the ``LinuxAccount`` consumed by cold rootfs surgery.
+    """Build the ``LinuxAccount`` used for first-boot account setup.
 
-    The Imager re-names UID-1000 to ``username`` and replaces its
-    ``/etc/shadow`` row with the SHA512-CRYPT hash of
-    ``cleartext_password``. See ``core/rootfs_personalizer.py`` for the
-    surgery itself (libext2fs via ``debugfs.exe``).
+    The Imager writes ``username`` + the SHA512-CRYPT hash of
+    ``cleartext_password`` into ``/firstrun.sh`` so the Pi renames UID-1000
+    and sets its password on first boot.
 
     Validation is the *caller's* responsibility (the UI wires its
     on-keystroke validators to ``core/validators.validate_install_user``

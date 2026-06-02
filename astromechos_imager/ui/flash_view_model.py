@@ -164,12 +164,6 @@ class FlashViewModel(QObject):
     # BOTH cards so the runtime master-slave handshake works. UI binds to
     # this for the persistent "Session hotspot: Astromech-XXXX" header.
     sessionSsidChanged = Signal(str)
-    # True when the vendored e2fsprogs tools are present so the rootfs
-    # UID-1000 cold surgery (username/password rename) can run. When False,
-    # the UI shows a clear warning that the card will keep the golden image's
-    # default account. Probed once at construction (vendor/ contents don't
-    # change mid-session); never blocks the WRITE button.
-    coldSurgeryAvailableChanged = Signal()
 
     def __init__(self, wizard_state, parent=None):
         super().__init__(parent)
@@ -217,9 +211,6 @@ class FlashViewModel(QObject):
         # both master and slave cards carry the SAME SSID + PSK into
         # /boot/astromech_init.cfg. None until startSession() runs.
         self._session_hotspot: HotspotBootstrap | None = None
-        # Probe the vendored e2fsprogs tools ONCE. Drives the UI warning when
-        # the rootfs UID-1000 cold surgery can't run (creds stay golden).
-        self._cold_surgery_available = ext4_tools_available()
 
     @Property(str, notify=statusChanged)
     def status(self) -> str:
@@ -299,13 +290,6 @@ class FlashViewModel(QObject):
     @Property(str, notify=sessionSsidChanged)
     def sessionSsid(self) -> str:
         return self._session_hotspot.ssid if self._session_hotspot else ""
-
-    @Property(bool, notify=coldSurgeryAvailableChanged)
-    def coldSurgeryAvailable(self) -> bool:
-        """False when the vendored e2fsprogs tools are missing, so the UI can
-        warn that the card will keep the golden image's default UID-1000
-        account (username/password NOT customized). Does not block WRITE."""
-        return self._cold_surgery_available
 
     @Slot()
     def startSession(self) -> None:
@@ -759,50 +743,9 @@ DEFAULT_INSTALL_PASSWORD = "astropass"
 DEFAULT_HOTSPOT_PASSWORD = "astropass"
 
 
-#: Default ``skip_verify`` for FlashJobs built from the UI on Windows.
-#:
-#: The customize path no longer mounts the partition (userspace FAT over a
-#: raw handle), so the "Format K:?" pop-up is gone and the bundle lands
-#: correctly with no drive letter involved.
-#:
-#: The post-write SHA-256 READBACK, however, is unreliable on cheap USB-SD
-#: bridges: reading the device back within a few seconds of a multi-GB
-#: write returns deterministically-stale bytes from the bridge's read
-#: cache. The ON-DISK bytes are correct (a fresh read minutes later, and a
-#: full byte-for-byte diff against the source, both match) — only the
-#: immediate read-back lies, which trips verify_readback with a bogus hash
-#: mismatch. SCSI SYNCHRONIZE_CACHE + a fresh read handle + a settle delay
-#: did not fully tame this particular bridge.
-#:
-#: Post-write SHA-256 readback default.
-#:
-#: This was long blamed on a USB-bridge cache, but the real cause was a
-#: producer/consumer race in DiskWriter: on a slow target (an SD card at
-#: ~10 MB/s, where the write consumer lags the decompressing producer) the
-#: producer's end-of-stream path discarded the last queued data chunk to
-#: fit the sentinel. The chunk was already folded into ``source_sha256``
-#: but never written, so the device was ~1 MB short, ``bytes_written``
-#: undercounted by the same amount, and verify_readback compared a
-#: 1-MB-short readback against the full-image hash → a deterministic
-#: SHA-256 mismatch on every large flash. (Fast targets drained the queue
-#: before finish, so it never bit them.) Fixed in DiskWriter (blocking
-#: sentinel put, never drop a chunk). Verify is therefore correct and ON
-#: by default everywhere.
+#: Default ``skip_verify`` for UI-built FlashJobs. Post-write SHA-256 readback
+#: is reliable and ON by default.
 _WINDOWS_SKIP_VERIFY = False
-
-
-def ext4_tools_available() -> bool:
-    """Always True — account customization no longer needs ext4 tools.
-
-    The UID-1000 username + password are now set at FIRST BOOT via the
-    official Raspberry Pi Imager mechanism (``/firstrun.sh`` on the FAT boot
-    partition + ``systemd.run`` in cmdline.txt — see
-    ``core/firstrun_generator.py``). That is 100% FAT-partition work, so there
-    is no debugfs/e2fsprogs dependency and nothing to warn the operator about.
-    Kept as a stable hook for the ``coldSurgeryAvailable`` QML property (which
-    therefore stays True and the missing-tools banner never shows).
-    """
-    return True
 
 
 def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
@@ -872,29 +815,6 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
         hotspot_psk      = (wizard_state.hotspotPassword or "")         or DEFAULT_HOTSPOT_PASSWORD
 
         linux_account = generate_linux_account(install_user, install_password)
-
-        # Resolve the bundled e2fsprogs tools if present, but NON-FATALLY:
-        # a missing debugfs.exe / e2fsck.exe must NOT block the WRITE button
-        # or the pre-flash source validation. When they're absent the rootfs
-        # UID-1000 cold surgery is skipped (with a loud warning logged by the
-        # orchestrator); the rest of the flash — image write, verify,
-        # userspace-FAT firstboot bundle, MBR — still runs. Operators who
-        # need the cold surgery populate vendor/ per vendor/README.md.
-        ext4_debugfs = ext4_e2fsck = None
-        if sys.platform == "win32" and type(platform_io).__name__ == "WindowsPlatformIO":
-            try:
-                from astromechos_imager.core.vendored_binaries import (
-                    debugfs_exe, e2fsck_exe,
-                )
-                ext4_debugfs = debugfs_exe()
-                ext4_e2fsck = e2fsck_exe()
-            except Exception as exc:  # noqa: BLE001
-                import logging
-                logging.getLogger(__name__).warning(
-                    "e2fsprogs tools not available (%s) — rootfs UID-1000 "
-                    "surgery will be skipped this flash", exc,
-                )
-                ext4_debugfs = ext4_e2fsck = None
 
         # SSID is session-scoped — generated ONCE by startSession() on
         # Screen 01. The SAME hotspot creds are baked into both master
@@ -974,8 +894,6 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
                 firstboot_config=firstboot,
                 master_pair=ed25519,
                 linux_account=linux_account,
-                ext4_debugfs_exe=ext4_debugfs,
-                ext4_e2fsck_exe=ext4_e2fsck,
                 skip_verify=_WINDOWS_SKIP_VERIFY,
             )
         # current_role == "slave"
@@ -993,11 +911,9 @@ def _build_flash_job(wizard_state, platform_io=None, session_hotspot=None):
             firstboot_config=firstboot,
             master_pair=ed25519,
             linux_account=linux_account,
-            ext4_debugfs_exe=ext4_debugfs,
-            ext4_e2fsck_exe=ext4_e2fsck,
             skip_verify=_WINDOWS_SKIP_VERIFY,
         )
     except Exception:
-        # Audit High #18: don't swallow silently. Re-raise so startFromWizard
-        # can surface the failure in the UI instead of leaving WRITE a no-op.
+        # Re-raise so startFromWizard surfaces the failure in the UI instead of
+        # leaving WRITE a silent no-op.
         raise

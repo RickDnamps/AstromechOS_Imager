@@ -33,18 +33,6 @@ class BootPartitionLayout:
     partition_type: int   # 0x0B / 0x0C for FAT32, 0x06/0x0E for FAT16
 
 
-@dataclass(frozen=True)
-class RootfsLayout:
-    """Location of a Linux ext4 rootfs partition within a disk image.
-
-    Pi OS places the ext4 rootfs in the second MBR partition (type 0x83).
-    """
-
-    offset: int           # bytes from start of disk image
-    size: int             # bytes
-    partition_type: int   # 0x83 for Linux native ext4
-
-
 #: Partition types accepted as a FAT32/FAT16 boot partition.
 #: Pi OS uses 0x0C (FAT32 LBA); we accept the full family for flexibility.
 _FAT_TYPES: frozenset[int] = frozenset({0x0B, 0x0C, 0x06, 0x0E})
@@ -81,39 +69,6 @@ def find_first_fat32_partition(mbr_bytes: bytes) -> BootPartitionLayout:
         )
 
     raise BootPartitionMountError("No FAT32 partition found in MBR")
-
-
-def find_rootfs_partition(mbr_bytes: bytes) -> RootfsLayout:
-    """Parse a 512-byte MBR and return the first Linux (0x83) partition.
-
-    Pi OS uses MBR (not GPT) and places the ext4 rootfs in partition 2
-    (after the FAT32 boot partition). Extended partitions (0x05/0x0F) and
-    GPT are not supported — Pi OS always uses simple MBR.
-
-    :param mbr_bytes: Exactly 512 bytes from the start of the disk/image.
-    :raises BootPartitionMountError: On invalid MBR signature or no Linux entry.
-    :returns: ``RootfsLayout`` with offset and size in bytes.
-    """
-    if len(mbr_bytes) < 512 or mbr_bytes[510:512] != b"\x55\xAA":
-        raise BootPartitionMountError("Invalid MBR signature")
-
-    for i in range(4):
-        base = 446 + i * 16
-        entry = mbr_bytes[base : base + 16]
-        ptype = entry[4]
-        if ptype != 0x83:  # Linux native
-            continue
-        lba_start: int = struct.unpack_from("<I", entry, 8)[0]
-        lba_size: int = struct.unpack_from("<I", entry, 12)[0]
-        if lba_size == 0:
-            continue  # deleted / empty entry
-        return RootfsLayout(
-            offset=lba_start * _SECTOR,
-            size=lba_size * _SECTOR,
-            partition_type=ptype,
-        )
-
-    raise BootPartitionMountError("No Linux (0x83) partition found in MBR")
 
 
 # ── pyfatfs import helper ──────────────────────────────────────────────────────

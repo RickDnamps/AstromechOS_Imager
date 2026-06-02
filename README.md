@@ -7,7 +7,7 @@
 [![Tests: 504 passing](https://img.shields.io/badge/tests-504%20passing-5ec07a.svg)](#-for-developers)
 [![Installer: 36 MB](https://img.shields.io/badge/installer-36%20MB-5e9bd6.svg)](#-distribution--releases)
 
-> 🤖 Companion to [AstromechOS](https://github.com/RickDnamps/AstromechOS) — the open control platform that makes a 1:1 R2‑D2 droid feel *alive*.
+> 🤖 Companion to [AstromechOS](https://github.com/RickDnamps/AstromechOS) — the open control platform that makes a 1:1 astromech droid feel *alive*.
 
 ## Two Raspberry Pis. One flash session. A droid that wakes up already knowing itself.
 
@@ -156,5 +156,5 @@ Huge thanks to the [**Raspberry Pi Imager**](https://github.com/raspberrypi/rpi-
 ---
 
 <p align="center">
-  <em>Part of the <a href="https://github.com/RickDnamps/AstromechOS">AstromechOS</a> droid‑build ecosystem · 🤖 Made for R2‑D2 builders, by an R2‑D2 builder.</em>
+  <em>Part of the <a href="https://github.com/RickDnamps/AstromechOS">AstromechOS</a> droid‑build ecosystem · 🤖 Made for astromech builders, by an astromech builder.</em>
 </p>

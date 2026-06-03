@@ -159,6 +159,9 @@ from astromechos_imager.core.errors import (  # noqa: E402
     BundleSelfValidationFailedError,
     PairAsymmetryError,
 )
+from astromechos_imager.core.network_config_generator import (  # noqa: E402
+    generate_network_config_slave,
+)
 from astromechos_imager.core.validators import (  # noqa: E402
     OPENSSH_PUBKEY_RE,
     validate_hostname,
@@ -213,9 +216,28 @@ class FirstbootBundle:
         hw = self.cfg.hw_layout_master if role is Role.MASTER else self.cfg.hw_layout_slave
         if hw is not None:
             bp.write_bytes("/hw_layout.json", Path(hw).read_bytes())  # type: ignore[union-attr]
-        # 6.5 — Optional WiFi creds for wlan1 (per Phase 8.10 contract)
-        if self.cfg.wifi_ssid and self.cfg.wifi_psk:
+        # 6.5 — Optional WiFi creds for wlan1 (MASTER ONLY — slave joins
+        #       the master hotspot via /astromech_init.cfg + network-config,
+        #       it has no USB dongle and never wires wlan1).
+        if role is Role.MASTER and self.cfg.wifi_ssid and self.cfg.wifi_psk:
             bp.write_bytes("/astromech_wlan.conf", render_wlan_conf(self.cfg.wifi_ssid, self.cfg.wifi_psk))  # type: ignore[union-attr]
+        # 6.6 — Slave network-config override (Bug B fix). The Golden
+        # Image bakes a stale /boot/firmware/network-config pointing wlan0
+        # at the build-machine's home WiFi; left in place, the slave would
+        # join the operator's home WiFi on first boot and never reach the
+        # master at 192.168.4.1. Overwrite with a netplan v2 wlan0 entry
+        # pointing at the master rendezvous hotspot. Master-side network
+        # config is managed by NetworkManager via setup_master_network.sh
+        # on first boot, so we intentionally do NOT write network-config
+        # for the master.
+        if role is Role.SLAVE and self.cfg.hotspot_bootstrap is not None:
+            bp.write_bytes(  # type: ignore[union-attr]
+                "/network-config",
+                generate_network_config_slave(
+                    self.cfg.hotspot_bootstrap.ssid,
+                    self.cfg.hotspot_bootstrap.password,
+                ),
+            )
         # 7. Self-validate before trigger — raises if contract is violated
         self._self_validate(bp, role)
         # 8. Trigger marker LAST — refs firstboot_setup.sh:67-72
@@ -262,8 +284,9 @@ class FirstbootBundle:
                     raise BundleSelfValidationFailedError("hotspot ssid not written")
                 if f"password = {self.cfg.hotspot_bootstrap.password}" not in init_cfg_text:
                     raise BundleSelfValidationFailedError("hotspot password not written")
-            # WiFi conf: must exist when creds are set, must be absent when not
-            if self.cfg.wifi_ssid and self.cfg.wifi_psk:
+            # WiFi conf: MASTER-only and gated on creds being set.
+            # Slave never gets /astromech_wlan.conf — wlan1 is master-only.
+            if role is Role.MASTER and self.cfg.wifi_ssid and self.cfg.wifi_psk:
                 if not bp.exists("/astromech_wlan.conf"):  # type: ignore[union-attr]
                     raise BundleSelfValidationFailedError(
                         "wifi_ssid and wifi_psk set but /astromech_wlan.conf not written"
@@ -271,8 +294,28 @@ class FirstbootBundle:
             else:
                 if bp.exists("/astromech_wlan.conf"):  # type: ignore[union-attr]
                     raise BundleSelfValidationFailedError(
-                        "/astromech_wlan.conf present but no wifi creds configured"
+                        "/astromech_wlan.conf present but role is not master or no wifi creds"
                     )
+            # Slave network-config override: when hotspot creds are set, the
+            # slave must carry a /network-config pointing wlan0 at the
+            # master hotspot SSID. Master must never carry this file (NM
+            # manages wlan0 as the AP).
+            if role is Role.SLAVE and self.cfg.hotspot_bootstrap is not None:
+                if not bp.exists("/network-config"):  # type: ignore[union-attr]
+                    raise BundleSelfValidationFailedError(
+                        "slave /network-config missing — wlan0 would join Golden's stale WiFi"
+                    )
+                nc_text = bp.read_bytes("/network-config").decode("utf-8")  # type: ignore[union-attr]
+                if self.cfg.hotspot_bootstrap.ssid not in nc_text:
+                    raise BundleSelfValidationFailedError(
+                        "slave /network-config does not reference the master hotspot SSID"
+                    )
+            if role is Role.MASTER and bp.exists("/network-config"):  # type: ignore[union-attr]
+                # We never write network-config for the master, but the Golden
+                # may ship one. Don't tear it down here — NM scripts on first
+                # boot supersede netplan via setup_master_network.sh. The
+                # check stays informational; no raise.
+                pass
         except BundleSelfValidationFailedError:
             raise
         except Exception as e:

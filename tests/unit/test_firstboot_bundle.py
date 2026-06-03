@@ -139,11 +139,23 @@ def test_self_validate_passes_without_wlan_creds(fake_boot_partition):
     assert fake_boot_partition.exists("/ASTROMECH_FIRSTBOOT_READY")
 
 
-def test_wlan_conf_written_for_slave_role(fake_boot_partition):
-    """WiFi conf is role-agnostic — slave also gets the file when creds are set."""
+def test_wlan_conf_NOT_written_for_slave_role(fake_boot_partition):
+    """wlan.conf is for the MASTER's wlan1 USB dongle only — slave joins
+    the master hotspot via /astromech_init.cfg + /network-config and has
+    no USB dongle, so writing home WiFi creds on the slave card would
+    push it onto the operator's home WiFi instead of the master rendezvous.
+    """
     pair = generate_ed25519()
     cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
     FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
+    assert not fake_boot_partition.exists("/astromech_wlan.conf")
+
+
+def test_wlan_conf_written_for_master_role(fake_boot_partition):
+    """Master gets wlan.conf for the wlan1 home WiFi setup."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
     assert fake_boot_partition.exists("/astromech_wlan.conf")
     content = fake_boot_partition.read_bytes("/astromech_wlan.conf")
     assert content == (
@@ -152,3 +164,50 @@ def test_wlan_conf_written_for_slave_role(fake_boot_partition):
         b"password = secret12\n"
         b"key_mgmt = wpa-psk\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Slave network-config — Bug B fix (Golden's stale wlan0 home WiFi)
+# ---------------------------------------------------------------------------
+
+
+def test_network_config_written_for_slave_role(fake_boot_partition):
+    """Slave gets /network-config pointing wlan0 at the master hotspot,
+    overriding whatever stale home-WiFi netplan the Golden ships with."""
+    pair = generate_ed25519()
+    cfg = _cfg()
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
+    assert fake_boot_partition.exists("/network-config")
+    text = fake_boot_partition.read_bytes("/network-config").decode("utf-8")
+    # Hotspot SSID + plaintext password are present, in the wlan0 stanza,
+    # and the netplan v2 shape is correct.
+    assert "network:" in text
+    assert "version: 2" in text
+    assert "wlan0:" in text
+    assert "access-points:" in text
+    assert cfg.hotspot_bootstrap.ssid in text
+    assert cfg.hotspot_bootstrap.password in text
+
+
+def test_network_config_NOT_written_for_master_role(fake_boot_partition):
+    """Master uses NetworkManager (setup_master_network.sh) to manage
+    wlan0 as the AP — netplan + NM fighting over the same iface at boot
+    is a known race. We must not write /network-config for the master."""
+    pair = generate_ed25519()
+    cfg = _cfg()
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.MASTER)
+    assert not fake_boot_partition.exists("/network-config")
+
+
+def test_network_config_slave_uses_hotspot_not_home_wifi(fake_boot_partition):
+    """Regression guard for Bug B: even when home WiFi creds are set,
+    the slave's wlan0 must NOT join home WiFi — it must join the master
+    rendezvous."""
+    pair = generate_ed25519()
+    cfg = _cfg(wifi_ssid="HomeNet", wifi_psk="secret12")
+    FirstbootBundle(cfg, pair).write_to(fake_boot_partition, Role.SLAVE)
+    text = fake_boot_partition.read_bytes("/network-config").decode("utf-8")
+    assert cfg.hotspot_bootstrap.ssid in text
+    assert cfg.hotspot_bootstrap.password in text
+    assert "HomeNet" not in text
+    assert "secret12" not in text

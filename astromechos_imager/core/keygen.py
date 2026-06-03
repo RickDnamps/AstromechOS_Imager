@@ -1,7 +1,6 @@
 """Cryptographic + bootstrap-credential generators. Per design spec §6.2."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import secrets
@@ -118,19 +117,38 @@ def generate_hotspot_bootstrap(password: str) -> HotspotBootstrap:
 _SHA512_CRYPT_SALT_ALPHABET = string.ascii_letters + string.digits + "./"
 
 
-def _sha512_crypt(password: str, salt: str | None = None,
+def _sha512_crypt(cleartext_password: str, salt: str | None = None,
                   rounds: int = 5000) -> str:
-    """Pure-Python SHA512-CRYPT compatible with glibc ``crypt(3)``.
+    """Return the SHA-512 crypt hash of a cleartext password.
 
-    Produces a ``$6$<salt>$<hash>`` string that the Imager passes to the
-    first-boot ``firstrun.sh`` (``chpasswd -e`` / ``userconf``). Reference
-    implementation: Ulrich Drepper, https://akkadia.org/drepper/SHA-crypt.txt.
+    Delegates to ``passlib.hash.sha512_crypt`` which is the canonical
+    reference implementation of Drepper SHA-Crypt v1.1. Output format::
 
-    Pure Python (not stdlib ``crypt`` — that module is Unix-only and
-    deprecated in Python 3.13; the Imager runs on Windows where it is
-    unavailable). 5000 rounds matches the glibc default and what
-    ``passwd`` writes by default.
+        $6$<salt>$<86-char base64-encoded digest>
+
+    Replaces a hand-rolled implementation that truncated the output to
+    82 chars (it was missing the ``b64(0, C[62], C[41], 4)`` step at
+    the end of the encoding sequence). The truncated hash was rejected
+    by Linux PAM / ``chpasswd``, breaking SSH password auth on every
+    flashed Pi.
+
+    The salt argument is optional to preserve backwards-compatibility
+    with existing callers (e.g. ``generate_linux_account``) that rely
+    on the function to mint a fresh 16-char salt per invocation. When
+    a salt is supplied it is truncated to 16 chars (glibc behaviour).
+
+    Args:
+        cleartext_password: The plaintext password.
+        salt: 16-char salt body (no ``$6$...$`` framing). ``None`` =
+            generate a fresh random 16-char salt.
+        rounds: Iteration count (default 5000 per Drepper spec).
+
+    Returns:
+        Full crypt string ``$6$<salt>$<hash>`` suitable for
+        ``/etc/shadow``.
     """
+    from passlib.hash import sha512_crypt
+
     if salt is None:
         salt = "".join(
             secrets.choice(_SHA512_CRYPT_SALT_ALPHABET) for _ in range(16)
@@ -138,105 +156,14 @@ def _sha512_crypt(password: str, salt: str | None = None,
     if len(salt) > 16:
         salt = salt[:16]
 
-    pwd = password.encode("utf-8")
-    salt_b = salt.encode("ascii")
-
-    # Step 1-3
-    a = hashlib.sha512()
-    a.update(pwd)
-    a.update(salt_b)
-
-    # Step 4-8
-    b = hashlib.sha512()
-    b.update(pwd)
-    b.update(salt_b)
-    b.update(pwd)
-    b_digest = b.digest()
-
-    # Step 9-10
-    cnt = len(pwd)
-    while cnt > 64:
-        a.update(b_digest)
-        cnt -= 64
-    a.update(b_digest[:cnt])
-
-    # Step 11
-    cnt = len(pwd)
-    while cnt > 0:
-        if cnt & 1:
-            a.update(b_digest)
-        else:
-            a.update(pwd)
-        cnt >>= 1
-    a_digest = a.digest()
-
-    # Step 13-15 — DP
-    dp = hashlib.sha512()
-    for _ in range(len(pwd)):
-        dp.update(pwd)
-    dp_digest = dp.digest()
-    P = b""
-    cnt = len(pwd)
-    while cnt >= 64:
-        P += dp_digest
-        cnt -= 64
-    P += dp_digest[:cnt]
-
-    # Step 16-19 — DS
-    ds = hashlib.sha512()
-    for _ in range(16 + a_digest[0]):
-        ds.update(salt_b)
-    ds_digest = ds.digest()
-    S = b""
-    cnt = len(salt_b)
-    while cnt >= 64:
-        S += ds_digest
-        cnt -= 64
-    S += ds_digest[:cnt]
-
-    # Step 21 — main loop
-    C = a_digest
-    for i in range(rounds):
-        c = hashlib.sha512()
-        c.update(P if (i & 1) else C)
-        if i % 3:
-            c.update(S)
-        if i % 7:
-            c.update(P)
-        c.update(C if (i & 1) else P)
-        C = c.digest()
-
-    # Step 22 — base64 (modified alphabet, specific byte permutation)
-    _B64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-
-    def _b64_encode(b1: int, b2: int, b3: int, n: int) -> str:
-        v = (b1 << 16) | (b2 << 8) | b3
-        out = []
-        for _ in range(n):
-            out.append(_B64[v & 0x3F])
-            v >>= 6
-        return "".join(out)
-
-    order = [
-        (0, 21, 42, 4),  (22, 43, 1, 4),  (44, 2, 23, 4),  (3, 24, 45, 4),
-        (25, 46, 5, 4),  (47, 6, 26, 4),  (7, 27, 48, 4),  (28, 49, 8, 4),
-        (50, 9, 29, 4),  (10, 30, 51, 4), (31, 52, 11, 4), (53, 12, 32, 4),
-        (13, 33, 54, 4), (34, 55, 14, 4), (56, 15, 35, 4), (16, 36, 57, 4),
-        (37, 58, 17, 4), (59, 18, 38, 4), (19, 39, 60, 4), (40, 61, 20, 4),
-        (62, 63, 0, 2),  # last block: only 2 chars from b63 high bits
-    ]
-    encoded_parts = []
-    for b1, b2, b3, n in order[:-1]:
-        encoded_parts.append(_b64_encode(C[b1], C[b2], C[b3], n))
-    # Final 2-char block uses C[63] only (b1 set to C[63], b2/b3 = 0).
-    encoded_parts.append(_b64_encode(0, 0, C[63], 2))
-    encoded = "".join(encoded_parts)
-
-    # Step 23
-    prefix = "$6$"
-    if rounds != 5000:
-        prefix += f"rounds={rounds}$"
-    return f"{prefix}{salt}${encoded}"
+    # ``relaxed=True`` accepts non-standard rounds counts (e.g. 1000
+    # used by some tests) without raising. passlib omits the
+    # ``rounds=`` prefix when rounds == 5000 (Drepper default) and
+    # only prepends ``$rounds=<N>$`` for non-default counts — matches
+    # what ``chpasswd`` / ``/etc/shadow`` expects.
+    return sha512_crypt.using(
+        rounds=rounds, salt=salt, relaxed=True,
+    ).hash(cleartext_password)
 
 
 def generate_linux_account(username: str, cleartext_password: str) -> LinuxAccount:

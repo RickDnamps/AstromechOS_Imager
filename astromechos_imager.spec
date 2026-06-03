@@ -146,6 +146,11 @@ a = Analysis(
         "astromechos_imager.core.rootfs",
         "astromechos_imager.core.rootfs_personalizer",
         "astromechos_imager.platform.windows",
+        # passlib is imported lazily inside _sha512_crypt() (deferred to
+        # keep cold start fast); PyInstaller's static analyser misses
+        # function-local imports, so pin it explicitly to guarantee the
+        # bundled sha512_crypt hasher ships with the .exe.
+        "passlib.hash",
     ],
     hookspath=[],
     runtime_hooks=[],

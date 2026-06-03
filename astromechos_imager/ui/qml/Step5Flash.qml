@@ -288,6 +288,16 @@ Rectangle {
         anchors.right: parent.right
         anchors.margins: 24
         spacing: 10
+        AstroButton {
+            visible: isError
+            text: "↻ RETRY"
+            variant: "primary"
+            horizontalPadding: 28
+            onClicked: {
+                flashViewModel.resetForNextCycle()
+                confirmDialog.open()
+            }
+        }
         AstroButton { visible: !isVerifying && !isFlashing && !isDone; text: "← BACK"; variant: "secondary"; onClicked: wizardState.back() }
         AstroButton { visible: !isVerifying && !isFlashing && !isDone && !isError; text: "⚡ WRITE"; variant: "danger"; horizontalPadding: 28; onClicked: confirmDialog.open() }
         AstroButton { visible: isVerifying || isFlashing; text: "CANCEL"; variant: "secondary"; onClicked: flashViewModel.cancel() }

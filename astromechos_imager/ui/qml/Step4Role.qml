@@ -407,7 +407,12 @@ Rectangle {
             enabled: hasOneCard
                 && ((wizardState.currentRole === "master" && wizardState.masterDriveId !== -1)
                  || (wizardState.currentRole === "slave"  && wizardState.slaveDriveId  !== -1))
-            onClicked: wizardState.next()
+            onClicked: {
+                if (flashViewModel.status === "error") {
+                    flashViewModel.resetForNextCycle()
+                }
+                wizardState.next()
+            }
         }
     }
 }

@@ -55,3 +55,6 @@ tmp_pytest/
 # Local-only dev artifacts (kept on disk, never tracked)
 CLAUDE.md
 docs/superpowers/
+
+# Session-local temp scripts (never tracked)
+.tmp_*

@@ -12,6 +12,11 @@ from astromechos_imager.core.cloud_init_generator import (
     generate_meta_data,
     generate_user_data,
 )
+from astromechos_imager.core.models import Role
+
+_STALE_NM_RM = (
+    "rm -f /etc/NetworkManager/system-connections/astromech-master-hotspot.nmconnection"
+)
 
 HASH = "$6$abcd1234efgh5678$" + "Z" * 86  # plausible $6$ SHA-512 crypt shape
 
@@ -68,6 +73,46 @@ def test_user_data_yaml_escapes_single_quote_in_username():
     yaml = pytest.importorskip("yaml")
     doc = yaml.safe_load(generate_user_data("o'brien", HASH))
     assert doc["chpasswd"]["users"][0]["name"] == "o'brien"
+
+
+# ── runcmd (slave-only NM profile cleanup, 2026-06-04) ──────────────────────
+def test_user_data_slave_includes_runcmd_for_stale_nm_profile():
+    """Slave user-data must run cleanup runcmd at first boot to remove the
+    stale astromech-master-hotspot.nmconnection inherited from the Golden
+    Image — it has autoconnect-priority=100 which would otherwise outrank
+    our netplan-generated profile pointing at the real hotspot SSID."""
+    out = generate_user_data("astromech", HASH, role=Role.SLAVE).decode("utf-8")
+    assert "runcmd:" in out
+    assert _STALE_NM_RM in out
+
+
+def test_user_data_master_omits_runcmd():
+    """Master user-data MUST NOT include the cleanup runcmd — the legacy
+    master needs that NM profile to remain working in production."""
+    out = generate_user_data("astromech", HASH, role=Role.MASTER).decode("utf-8")
+    # Either no runcmd block at all, or runcmd does NOT contain the rm
+    assert _STALE_NM_RM not in out
+
+
+def test_user_data_default_role_is_master_and_omits_runcmd():
+    """Backwards compat: callers that haven't been updated to pass ``role``
+    must keep producing the unchanged master shape (no runcmd)."""
+    out = generate_user_data("astromech", HASH).decode("utf-8")
+    assert _STALE_NM_RM not in out
+
+
+def test_user_data_runcmd_is_proper_yaml_list():
+    """The runcmd block must parse as valid YAML (list of strings)."""
+    yaml = pytest.importorskip("yaml")
+    out = generate_user_data("astromech", HASH, role=Role.SLAVE)
+    parsed = yaml.safe_load(out)
+    assert isinstance(parsed, dict)
+    assert "runcmd" in parsed
+    assert isinstance(parsed["runcmd"], list)
+    assert len(parsed["runcmd"]) >= 1
+    assert all(isinstance(cmd, str) for cmd in parsed["runcmd"])
+    # And it must contain exactly the targeted scrub command
+    assert any(_STALE_NM_RM in cmd for cmd in parsed["runcmd"])
 
 
 # ── cmdline ──────────────────────────────────────────────────────────────────

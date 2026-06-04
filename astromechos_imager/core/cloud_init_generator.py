@@ -31,6 +31,18 @@ intentionally NOT set here, so the two mechanisms never fight.
 """
 from __future__ import annotations
 
+from astromechos_imager.core.models import Role
+
+#: Stale NetworkManager profile baked into the Golden Image. It carries
+#: ``autoconnect-priority=100`` plus the legacy SSID/PSK ``astromech``/
+#: ``astropass`` and would otherwise outrank the netplan-generated profile
+#: pointing at the real Imager-baked hotspot SSID — so the slave never joins
+#: the master hotspot. Emitted in the SLAVE user-data only (master legacy Pis
+#: in production still rely on this profile and must NOT be touched).
+_STALE_SLAVE_NM_PROFILE = (
+    "/etc/NetworkManager/system-connections/astromech-master-hotspot.nmconnection"
+)
+
 #: Bare cmdline token that triggers the native initramfs partition-resize hook
 #: (``scripts/local-premount/resize_early``). Harmless if unrecognised — the
 #: kernel never tries to exec it, so (unlike ``init=``) it cannot panic PID 1.
@@ -63,7 +75,12 @@ def _yaml_squote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def generate_user_data(username: str, crypt_password_hash: str) -> bytes:
+def generate_user_data(
+    username: str,
+    crypt_password_hash: str,
+    *,
+    role: Role = Role.MASTER,
+) -> bytes:
     """NoCloud ``#cloud-config`` that RECONFIGURES the Golden's existing
     UID-1000 user in place — it never creates a parallel account.
 
@@ -90,12 +107,27 @@ def generate_user_data(username: str, crypt_password_hash: str) -> bytes:
     Wi-Fi, SSH keys, hostname, hotspot and role stay with the AstromechOS
     firstboot bundle (Invariant #2) and are intentionally NOT emitted here.
 
+    SLAVE-only ``runcmd`` (since 2026-06-04): the Golden Image bakes a stale
+    ``astromech-master-hotspot.nmconnection`` NetworkManager profile with
+    ``autoconnect-priority=100`` and the legacy SSID/PSK ``astromech`` /
+    ``astropass``. NetworkManager picks that profile over the netplan-generated
+    one that points at the real Imager-baked hotspot SSID, so the slave never
+    joins the hotspot. On slave cards we emit a one-shot ``runcmd`` (cloud-init
+    runs ``runcmd`` once per instance-id) that ``rm -f``'s the stale file at
+    first boot. The MASTER role intentionally does NOT emit this runcmd — the
+    legacy master Pis in production still rely on that profile naming.
+
     Parameters
     ----------
     username:
         The Golden Image's existing UID-1000 login name to reconfigure.
     crypt_password_hash:
         Pre-computed ``$6$...`` SHA-512 crypt hash (from ``keygen``).
+    role:
+        Target role for this card. ``Role.SLAVE`` adds the runcmd cleanup of
+        the stale NM profile; ``Role.MASTER`` (the default for backwards
+        compatibility) emits no runcmd block, preserving exact byte shape for
+        master cards.
     """
     u = _yaml_squote(username)
     h = _yaml_squote(crypt_password_hash)
@@ -120,6 +152,18 @@ def generate_user_data(username: str, crypt_password_hash: str) -> bytes:
         "ssh_pwauth: true",
         "",
     ]
+    if role is Role.SLAVE:
+        # One-shot scrub of the stale astromech-master-hotspot NM profile
+        # baked into the Golden Image (see module-level _STALE_SLAVE_NM_PROFILE
+        # for the autopsy). rm -f is idempotent: a freshly-baked Golden that
+        # no longer ships the file just sees a no-op. runcmd runs once per
+        # instance-id, so a re-flash with a new id re-applies the cleanup.
+        lines.extend([
+            "# SLAVE only: scrub stale NM profile that outranks netplan's.",
+            "runcmd:",
+            f"  - 'rm -f {_STALE_SLAVE_NM_PROFILE}'",
+            "",
+        ])
     return ("\n".join(lines)).encode("utf-8")
 
 

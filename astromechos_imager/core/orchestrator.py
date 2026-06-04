@@ -374,9 +374,14 @@ class FlashJob:
         acc = self.linux_account
         if acc is not None:
             boot.write_bytes(  # type: ignore[attr-defined]
-                "/user-data", generate_user_data(acc.username, acc.crypt_sha512)
+                "/user-data",
+                generate_user_data(acc.username, acc.crypt_sha512, role=self.role),
             )
-            _log.info("PHASE customize: cloud-init user-data written (user=%s)", acc.username)
+            _log.info(
+                "PHASE customize: cloud-init user-data written (user=%s, role=%s)",
+                acc.username,
+                getattr(self.role, "value", self.role),
+            )
         else:
             # Still a valid NoCloud seed so cloud-init runs and grows the rootfs.
             boot.write_bytes("/user-data", EMPTY_USER_DATA)  # type: ignore[attr-defined]

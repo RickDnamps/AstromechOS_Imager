@@ -17,6 +17,19 @@ from astromechos_imager.core.models import Role
 _STALE_NM_RM = (
     "rm -f /etc/NetworkManager/system-connections/astromech-master-hotspot.nmconnection"
 )
+_MASTER_HOTSPOT_RM = (
+    "rm -f /etc/NetworkManager/system-connections/astromech-hotspot.nmconnection"
+)
+_MASTER_INTERNET_RM = (
+    "rm -f /etc/NetworkManager/system-connections/astromech-internet.nmconnection"
+)
+_MASTER_R2D2_INTERNET_RM = (
+    "rm -f /etc/NetworkManager/system-connections/r2d2-internet.nmconnection"
+)
+_SLAVE_R2D2_MASTER_HOTSPOT_RM = (
+    "rm -f /etc/NetworkManager/system-connections/r2d2-master-hotspot.nmconnection"
+)
+_NMCLI_RELOAD = "nmcli connection reload"
 
 HASH = "$6$abcd1234efgh5678$" + "Z" * 86  # plausible $6$ SHA-512 crypt shape
 
@@ -113,6 +126,78 @@ def test_user_data_runcmd_is_proper_yaml_list():
     assert all(isinstance(cmd, str) for cmd in parsed["runcmd"])
     # And it must contain exactly the targeted scrub command
     assert any(_STALE_NM_RM in cmd for cmd in parsed["runcmd"])
+
+
+# ── role-aware runcmd scrub (2026-06-05) ────────────────────────────────────
+def test_master_runcmd_wipes_authorized_keys():
+    """Master must rm the stale ~/.ssh/authorized_keys at first boot so the
+    previous master's pubkey cannot reach this card. Path uses the supplied
+    username (NEVER hardcoded astromech)."""
+    out = generate_user_data("astromech", HASH, role=Role.MASTER).decode("utf-8")
+    assert "runcmd:" in out
+    assert "rm -f /home/astromech/.ssh/authorized_keys" in out
+
+
+def test_master_runcmd_wipes_wlan0_and_wlan1_profiles():
+    """Master must rm both the wlan0 AP profile and the wlan1 client profile
+    inherited from the Golden Image (legacy SSID/PSK + previous operator's
+    home WiFi creds)."""
+    out = generate_user_data("astromech", HASH, role=Role.MASTER).decode("utf-8")
+    assert _MASTER_HOTSPOT_RM in out
+    assert _MASTER_INTERNET_RM in out
+    assert _MASTER_R2D2_INTERNET_RM in out
+
+
+def test_master_runcmd_does_not_wipe_slave_profiles():
+    """Master must NOT touch the slave's stale astromech-master-hotspot
+    profile (which lives only on slave cards anyway)."""
+    out = generate_user_data("astromech", HASH, role=Role.MASTER).decode("utf-8")
+    assert _STALE_NM_RM not in out
+    assert _SLAVE_R2D2_MASTER_HOTSPOT_RM not in out
+
+
+def test_slave_runcmd_wipes_authorized_keys_and_master_hotspot():
+    """Slave must rm the stale authorized_keys AND the legacy master-hotspot
+    NM profile baked into the Golden."""
+    out = generate_user_data("astromech", HASH, role=Role.SLAVE).decode("utf-8")
+    assert "rm -f /home/astromech/.ssh/authorized_keys" in out
+    assert _STALE_NM_RM in out
+    assert _SLAVE_R2D2_MASTER_HOTSPOT_RM in out
+
+
+def test_slave_runcmd_does_not_wipe_master_only_profiles():
+    """Slave must NOT touch the master-only wlan0 AP / wlan1 client profiles
+    — those don't exist on slave cards."""
+    out = generate_user_data("astromech", HASH, role=Role.SLAVE).decode("utf-8")
+    assert _MASTER_HOTSPOT_RM not in out
+    assert _MASTER_INTERNET_RM not in out
+    assert _MASTER_R2D2_INTERNET_RM not in out
+
+
+def test_both_runcmd_ends_with_nmcli_reload():
+    """The LAST runcmd line for each role must be `nmcli connection reload`
+    so NetworkManager drops in-memory profiles whose backing files just
+    disappeared. Exactly one reload per role (never more)."""
+    yaml = pytest.importorskip("yaml")
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("astromech", HASH, role=role)
+        parsed = yaml.safe_load(out)
+        assert parsed["runcmd"][-1] == _NMCLI_RELOAD, role
+        # Exactly one reload per role — defensive against accidental dupes.
+        assert sum(1 for c in parsed["runcmd"] if c == _NMCLI_RELOAD) == 1
+
+
+def test_username_is_not_hardcoded():
+    """The authorized_keys scrub path must interpolate the supplied username
+    (HARD RULE: code is 100% username-agnostic — see CLAUDE.md). A custom
+    username MUST appear in the path and `astromech` MUST NOT."""
+    out = generate_user_data("custom_user", HASH, role=Role.MASTER).decode("utf-8")
+    assert "rm -f /home/custom_user/.ssh/authorized_keys" in out
+    assert "/home/astromech/" not in out
+    # And again on slave for symmetry.
+    out_s = generate_user_data("custom_user", HASH, role=Role.SLAVE).decode("utf-8")
+    assert "rm -f /home/custom_user/.ssh/authorized_keys" in out_s
+    assert "/home/astromech/" not in out_s
 
 
 # ── cmdline ──────────────────────────────────────────────────────────────────

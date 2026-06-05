@@ -33,15 +33,36 @@ from __future__ import annotations
 
 from astromechos_imager.core.models import Role
 
-#: Stale NetworkManager profile baked into the Golden Image. It carries
-#: ``autoconnect-priority=100`` plus the legacy SSID/PSK ``astromech``/
-#: ``astropass`` and would otherwise outrank the netplan-generated profile
-#: pointing at the real Imager-baked hotspot SSID — so the slave never joins
-#: the master hotspot. Emitted in the SLAVE user-data only (master legacy Pis
-#: in production still rely on this profile and must NOT be touched).
-_STALE_SLAVE_NM_PROFILE = (
-    "/etc/NetworkManager/system-connections/astromech-master-hotspot.nmconnection"
+#: Directory NetworkManager scans for system connection profiles. Stale
+#: profiles baked into the Golden Image live here and would outrank the
+#: per-deployment ones written by AstromechOS firstboot if left in place.
+_NM_SYS_CONN_DIR = "/etc/NetworkManager/system-connections"
+
+#: Stale NetworkManager profiles baked into the Golden Image on the MASTER
+#: role: the wlan0 AP profile (legacy ``astromech``/``astropass`` SSID/PSK)
+#: and the wlan1 client profile pointing at the previous operator's home
+#: WiFi. Both must be removed at first boot so the AstromechOS firstboot
+#: bundle's per-deployment profiles win.
+_STALE_MASTER_NM_PROFILES = (
+    "astromech-hotspot.nmconnection",
+    "astromech-internet.nmconnection",
+    "r2d2-internet.nmconnection",
 )
+
+#: Stale NetworkManager profiles baked into the Golden Image on the SLAVE
+#: role: the wlan0 client profile pointing at the LEGACY master's hotspot.
+#: It carries ``autoconnect-priority=100`` plus the legacy SSID/PSK
+#: ``astromech``/``astropass`` and would otherwise outrank the
+#: netplan-generated profile pointing at the real Imager-baked hotspot SSID.
+#: ``r2d2-master-hotspot`` is the post-rename legacy basename we may also see.
+_STALE_SLAVE_NM_PROFILES = (
+    "astromech-master-hotspot.nmconnection",
+    "r2d2-master-hotspot.nmconnection",
+)
+
+#: Backwards-compat alias for the original constant — preserved so existing
+#: imports / tests that reference the single-profile name keep working.
+_STALE_SLAVE_NM_PROFILE = f"{_NM_SYS_CONN_DIR}/{_STALE_SLAVE_NM_PROFILES[0]}"
 
 #: Bare cmdline token that triggers the native initramfs partition-resize hook
 #: (``scripts/local-premount/resize_early``). Harmless if unrecognised — the
@@ -107,27 +128,41 @@ def generate_user_data(
     Wi-Fi, SSH keys, hostname, hotspot and role stay with the AstromechOS
     firstboot bundle (Invariant #2) and are intentionally NOT emitted here.
 
-    SLAVE-only ``runcmd`` (since 2026-06-04): the Golden Image bakes a stale
-    ``astromech-master-hotspot.nmconnection`` NetworkManager profile with
-    ``autoconnect-priority=100`` and the legacy SSID/PSK ``astromech`` /
-    ``astropass``. NetworkManager picks that profile over the netplan-generated
-    one that points at the real Imager-baked hotspot SSID, so the slave never
-    joins the hotspot. On slave cards we emit a one-shot ``runcmd`` (cloud-init
-    runs ``runcmd`` once per instance-id) that ``rm -f``'s the stale file at
-    first boot. The MASTER role intentionally does NOT emit this runcmd — the
-    legacy master Pis in production still rely on that profile naming.
+    Role-aware ``runcmd`` (since 2026-06-05): the Golden Image bakes stale
+    NetworkManager profiles AND a stale ``~/.ssh/authorized_keys`` (carrying
+    the previous master's ed25519 pubkey) into UID-1000's home. Both must be
+    wiped at first boot so the AstromechOS firstboot bundle's per-deployment
+    SSH keys + WiFi profiles win. The scrubs are role-specific:
+
+    * MASTER: removes ``astromech-hotspot.nmconnection`` (wlan0 AP, legacy
+      ``astromech``/``astropass`` SSID/PSK) and ``astromech-internet.nmconnection``
+      / ``r2d2-internet.nmconnection`` (wlan1 client, carrying the previous
+      operator's home WiFi creds).
+    * SLAVE: removes ``astromech-master-hotspot.nmconnection`` (and its
+      post-rename twin ``r2d2-master-hotspot.nmconnection``) — the wlan0
+      client profile pointing at the LEGACY master's hotspot SSID with
+      ``autoconnect-priority=100`` which would otherwise outrank the
+      netplan-generated profile pointing at the real Imager-baked SSID.
+    * Both roles: ``rm -f /home/<username>/.ssh/authorized_keys`` (defense
+      against the legacy master pubkey carrying over) + a final
+      ``nmcli connection reload`` so NetworkManager drops the in-memory
+      profiles whose backing files just disappeared.
+
+    ``runcmd`` runs once per instance-id and ``rm -f`` is idempotent — a
+    freshly-baked Golden that no longer ships the files just sees no-ops.
 
     Parameters
     ----------
     username:
-        The Golden Image's existing UID-1000 login name to reconfigure.
+        The Golden Image's existing UID-1000 login name to reconfigure. Also
+        interpolated into the ``/home/<username>/.ssh/authorized_keys`` scrub
+        path (HARD RULE: never hardcode ``astromech``).
     crypt_password_hash:
         Pre-computed ``$6$...`` SHA-512 crypt hash (from ``keygen``).
     role:
-        Target role for this card. ``Role.SLAVE`` adds the runcmd cleanup of
-        the stale NM profile; ``Role.MASTER`` (the default for backwards
-        compatibility) emits no runcmd block, preserving exact byte shape for
-        master cards.
+        Target role for this card. ``Role.MASTER`` (the default) emits the
+        master-side NM scrub; ``Role.SLAVE`` emits the slave-side NM scrub.
+        Any other value (defensive) emits no runcmd block.
     """
     u = _yaml_squote(username)
     h = _yaml_squote(crypt_password_hash)
@@ -152,18 +187,42 @@ def generate_user_data(
         "ssh_pwauth: true",
         "",
     ]
-    if role is Role.SLAVE:
-        # One-shot scrub of the stale astromech-master-hotspot NM profile
-        # baked into the Golden Image (see module-level _STALE_SLAVE_NM_PROFILE
-        # for the autopsy). rm -f is idempotent: a freshly-baked Golden that
-        # no longer ships the file just sees a no-op. runcmd runs once per
-        # instance-id, so a re-flash with a new id re-applies the cleanup.
-        lines.extend([
-            "# SLAVE only: scrub stale NM profile that outranks netplan's.",
+    # Role-aware runcmd: scrub stale NM profiles + stale authorized_keys at
+    # first boot. rm -f is idempotent (a freshly-baked Golden that no longer
+    # ships these files just sees no-ops); runcmd runs once per instance-id,
+    # so a re-flash with a new id re-applies the cleanup. Defensive: only
+    # MASTER or SLAVE roles emit a runcmd block; any other value yields none.
+    if role in (Role.MASTER, Role.SLAVE):
+        if role is Role.MASTER:
+            role_label = "MASTER"
+            stale_nm_profiles = _STALE_MASTER_NM_PROFILES
+        else:
+            role_label = "SLAVE"
+            stale_nm_profiles = _STALE_SLAVE_NM_PROFILES
+        # YAML-safe interpolation of the username inside the single-quoted
+        # runcmd scalar: a literal single quote in YAML single-quoted scalars
+        # is escaped by doubling. We do NOT pass the username through the
+        # shell (cloud-init's runcmd list form is execve'd directly when each
+        # item is a list, but when it's a string it goes through sh -c — so
+        # we also keep the path shell-safe by relying on the username
+        # validator (POSIX [a-z_][a-z0-9_-]*) upstream).
+        u_yaml = username.replace("'", "''")
+        runcmd_lines = [
+            f"# {role_label}: scrub stale state baked into the Golden Image.",
             "runcmd:",
-            f"  - 'rm -f {_STALE_SLAVE_NM_PROFILE}'",
-            "",
-        ])
+            # Common to both roles: wipe the legacy authorized_keys so the
+            # previous master's pubkey cannot reach this card; firstboot will
+            # write fresh per-deployment keys.
+            f"  - 'rm -f /home/{u_yaml}/.ssh/authorized_keys'",
+        ]
+        # Per-role NM profile scrub (basename joined with the NM dir).
+        for basename in stale_nm_profiles:
+            runcmd_lines.append(f"  - 'rm -f {_NM_SYS_CONN_DIR}/{basename}'")
+        # Final, common: force NetworkManager to drop the in-memory profiles
+        # whose backing files just disappeared.
+        runcmd_lines.append("  - 'nmcli connection reload'")
+        runcmd_lines.append("")
+        lines.extend(runcmd_lines)
     return ("\n".join(lines)).encode("utf-8")
 
 

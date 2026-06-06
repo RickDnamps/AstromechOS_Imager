@@ -115,16 +115,20 @@ def test_user_data_default_role_is_master_and_omits_runcmd():
 
 
 def test_user_data_runcmd_is_proper_yaml_list():
-    """The runcmd block must parse as valid YAML (list of strings)."""
+    """The runcmd block must parse as valid YAML (list of strings). Since
+    2026-06-06 it is a single compound command guarded by a marker file (so
+    it executes exactly once per Pi — see cc_scripts_user re-fire bug), so
+    the list always has length 1."""
     yaml = pytest.importorskip("yaml")
     out = generate_user_data("astromech", HASH, role=Role.SLAVE)
     parsed = yaml.safe_load(out)
     assert isinstance(parsed, dict)
     assert "runcmd" in parsed
     assert isinstance(parsed["runcmd"], list)
-    assert len(parsed["runcmd"]) >= 1
+    assert len(parsed["runcmd"]) == 1
     assert all(isinstance(cmd, str) for cmd in parsed["runcmd"])
-    # And it must contain exactly the targeted scrub command
+    # And it must contain exactly the targeted scrub command (embedded in
+    # the compound shell guard).
     assert any(_STALE_NM_RM in cmd for cmd in parsed["runcmd"])
 
 
@@ -174,17 +178,26 @@ def test_slave_runcmd_does_not_wipe_master_only_profiles():
     assert _MASTER_R2D2_INTERNET_RM not in out
 
 
-def test_both_runcmd_ends_with_nmcli_reload():
-    """The LAST runcmd line for each role must be `nmcli connection reload`
-    so NetworkManager drops in-memory profiles whose backing files just
-    disappeared. Exactly one reload per role (never more)."""
+def test_both_runcmd_includes_single_nmcli_reload():
+    """Each role's compound runcmd must include exactly one
+    `nmcli connection reload` so NetworkManager drops in-memory profiles
+    whose backing files just disappeared. The reload must precede the
+    marker touch (so the marker is set only after the reload succeeds),
+    and there must be exactly one reload per role (never more)."""
     yaml = pytest.importorskip("yaml")
     for role in (Role.MASTER, Role.SLAVE):
         out = generate_user_data("astromech", HASH, role=role)
         parsed = yaml.safe_load(out)
-        assert parsed["runcmd"][-1] == _NMCLI_RELOAD, role
+        compound = parsed["runcmd"][0]
+        assert _NMCLI_RELOAD in compound, role
         # Exactly one reload per role — defensive against accidental dupes.
-        assert sum(1 for c in parsed["runcmd"] if c == _NMCLI_RELOAD) == 1
+        assert compound.count(_NMCLI_RELOAD) == 1, role
+        # The reload must come BEFORE the marker touch (so the marker is
+        # only set after the reload — if reload fails the marker stays
+        # absent and runcmd retries on next boot).
+        assert compound.index(_NMCLI_RELOAD) < compound.index(
+            "touch /var/lib/astromech/runcmd_done"
+        ), role
 
 
 def test_username_is_not_hardcoded():
@@ -198,6 +211,80 @@ def test_username_is_not_hardcoded():
     out_s = generate_user_data("custom_user", HASH, role=Role.SLAVE).decode("utf-8")
     assert "rm -f /home/custom_user/.ssh/authorized_keys" in out_s
     assert "/home/astromech/" not in out_s
+
+
+# ── runcmd marker-file guard (2026-06-06, cc_scripts_user re-fire bug) ──────
+def test_runcmd_is_marker_guarded():
+    """The runcmd must be wrapped in a marker-file shell guard so it executes
+    EXACTLY ONCE per Pi. cloud-init's cc_scripts_user re-fires the runcmd
+    block on every boot (regardless of cc_runcmd's once-per-instance
+    registration); without the guard, boot 2 wipes the NetworkManager
+    profiles that firstboot just created on boot 1, bricking network
+    reachability (verified live 2026-06-06)."""
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("astromech", HASH, role=role).decode("utf-8")
+        # The literal short-circuit guard at the head of the compound.
+        assert "[ -f /var/lib/astromech/runcmd_done ]" in out, role
+        # The OR short-circuit operator (NOT &&) so the brace block only
+        # runs when the marker is ABSENT.
+        assert "[ -f /var/lib/astromech/runcmd_done ] ||" in out, role
+
+
+def test_runcmd_touches_marker_on_success():
+    """The compound must finish by creating the marker via `mkdir -p ... &&
+    touch ...` so the marker is set ONLY after every prior step succeeded.
+    If the reload (or any rm) fails, the marker stays absent and the next
+    boot retries — defensive belt-and-braces."""
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("astromech", HASH, role=role).decode("utf-8")
+        assert "mkdir -p /var/lib/astromech" in out, role
+        assert "touch /var/lib/astromech/runcmd_done" in out, role
+        # The mkdir / touch pair must be chained with && (not ;) so the
+        # marker is not created if mkdir somehow fails.
+        assert (
+            "mkdir -p /var/lib/astromech && touch /var/lib/astromech/runcmd_done"
+            in out
+        ), role
+
+
+def test_runcmd_yaml_is_parseable_single_compound():
+    """The whole runcmd must be a SINGLE YAML list entry (the compound shell
+    command), so the wipe either runs entirely or not at all — never partial."""
+    yaml = pytest.importorskip("yaml")
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("astromech", HASH, role=role)
+        parsed = yaml.safe_load(out)
+        assert isinstance(parsed, dict), role
+        assert "runcmd" in parsed, role
+        assert isinstance(parsed["runcmd"], list), role
+        assert len(parsed["runcmd"]) == 1, role
+        compound = parsed["runcmd"][0]
+        assert isinstance(compound, str), role
+        # The compound must contain both the head guard and the tail touch.
+        assert "[ -f /var/lib/astromech/runcmd_done ]" in compound, role
+        assert "touch /var/lib/astromech/runcmd_done" in compound, role
+
+
+def test_runcmd_marker_guard_interpolates_username():
+    """The marker-guarded compound must still interpolate the username into
+    the authorized_keys path (HARD RULE: no hardcoded `astromech`). Verify
+    via YAML parse so we know the compound is also still well-formed YAML."""
+    yaml = pytest.importorskip("yaml")
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("custom", HASH, role=role)
+        parsed = yaml.safe_load(out)
+        compound = parsed["runcmd"][0]
+        assert "rm -f /home/custom/.ssh/authorized_keys" in compound, role
+        assert "/home/astromech/" not in compound, role
+
+
+def test_runcmd_marker_paths_consistent():
+    """The marker path inside the guard head and at the touch tail must be
+    the SAME path — otherwise the guard would never catch its own marker."""
+    for role in (Role.MASTER, Role.SLAVE):
+        out = generate_user_data("astromech", HASH, role=role).decode("utf-8")
+        # Both must reference exactly the same canonical path.
+        assert out.count("/var/lib/astromech/runcmd_done") >= 2, role
 
 
 # ── cmdline ──────────────────────────────────────────────────────────────────

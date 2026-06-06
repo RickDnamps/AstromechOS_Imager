@@ -69,6 +69,19 @@ _STALE_SLAVE_NM_PROFILE = f"{_NM_SYS_CONN_DIR}/{_STALE_SLAVE_NM_PROFILES[0]}"
 #: kernel never tries to exec it, so (unlike ``init=``) it cannot panic PID 1.
 RESIZE_TOKEN = "resize"
 
+#: Marker file dropped after the runcmd scrub finishes successfully. cloud-init
+#: ``cc_runcmd`` registers the script once-per-instance, but ``cc_scripts_user``
+#: executes it ``per-always`` — i.e. EVERY boot — so without an external guard
+#: the wipe would re-run on boot 2+ and tear down the NetworkManager profiles
+#: that ``astromech-wlan-setup.service`` + firstboot just created (verified live
+#: 2026-06-06: master Pi lost both ``astromech-hotspot`` AND
+#: ``astromech-internet`` on its second boot, then became unreachable). The
+#: marker is created with ``&&`` inside the guard so it is set only after every
+#: scrub step succeeded; if anything inside fails, the marker is NOT set and
+#: runcmd retries on the next boot. ``rm -f`` is idempotent so a retry is safe.
+_RUNCMD_MARKER_DIR = "/var/lib/astromech"
+_RUNCMD_MARKER = f"{_RUNCMD_MARKER_DIR}/runcmd_done"
+
 
 def generate_instance_id(timestamp_ms: int) -> str:
     """Per-flash cloud-init instance-id in the official rpi-imager format
@@ -94,6 +107,48 @@ def generate_meta_data(instance_id: str) -> bytes:
 def _yaml_squote(value: str) -> str:
     """Single-quote a scalar for YAML (a literal single quote becomes '')."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _build_runcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> str:
+    """Build a single-line shell compound command, guarded by a marker file, so
+    the stale-state scrub runs EXACTLY ONCE per Pi — not on every boot.
+
+    Background (verified live 2026-06-06): cloud-init's ``cc_runcmd`` module is
+    ``once-per-instance`` (it only re-registers the script when the instance-id
+    changes), but ``cc_scripts_user`` — the module that actually EXECUTES the
+    script — runs ``per-always`` on every boot. A flat ``runcmd`` block
+    therefore re-fires every boot, and on boot 2 it would wipe the
+    NetworkManager profiles that ``astromech-wlan-setup.service`` + firstboot
+    just created on boot 1, leaving the Pi with no AP and no internet client.
+
+    The compound is structured as::
+
+        [ -f /var/lib/astromech/runcmd_done ] || { <scrub steps> ; \
+            mkdir -p /var/lib/astromech && touch /var/lib/astromech/runcmd_done ; }
+
+    * ``[ -f marker ] ||`` short-circuits the entire brace block once the
+      marker exists (boot 2+ is a no-op).
+    * The ``mkdir -p ... && touch ...`` runs LAST and is chained with ``&&``
+      so the marker is only set on success. If any prior ``rm -f`` somehow
+      fails (it won't — ``rm -f`` is idempotent), the marker is not written
+      and the next boot retries. Defensive belt-and-braces.
+    * Each statement inside the brace block is semicolon-terminated; bash
+      requires a terminator before the closing brace of a brace group.
+
+    The output is intentionally a single string (one YAML list entry) so the
+    whole compound either runs or doesn't — no partial state where some
+    profiles were wiped and others weren't.
+    """
+    parts = [f"rm -f /home/{username}/.ssh/authorized_keys"]
+    parts.extend(
+        f"rm -f {_NM_SYS_CONN_DIR}/{basename}" for basename in profile_basenames
+    )
+    parts.append("nmcli connection reload")
+    parts.append(
+        f"mkdir -p {_RUNCMD_MARKER_DIR} && touch {_RUNCMD_MARKER}"
+    )
+    inner = "; ".join(parts) + ";"
+    return f"[ -f {_RUNCMD_MARKER} ] || {{ {inner} }}"
 
 
 def generate_user_data(
@@ -148,8 +203,13 @@ def generate_user_data(
       ``nmcli connection reload`` so NetworkManager drops the in-memory
       profiles whose backing files just disappeared.
 
-    ``runcmd`` runs once per instance-id and ``rm -f`` is idempotent — a
-    freshly-baked Golden that no longer ships the files just sees no-ops.
+    ``runcmd`` is wrapped in a marker-file guard (``/var/lib/astromech/
+    runcmd_done``) so the scrub fires EXACTLY ONCE per Pi. cloud-init's
+    ``cc_scripts_user`` re-runs ``runcmd`` ``per-always`` (every boot, despite
+    ``cc_runcmd`` itself being once-per-instance) — without the guard, boot 2
+    would wipe the NetworkManager profiles that firstboot just created on
+    boot 1, leaving the Pi unreachable (verified live 2026-06-06). ``rm -f``
+    is idempotent so a marker-less retry on the next boot is safe.
 
     Parameters
     ----------
@@ -188,10 +248,10 @@ def generate_user_data(
         "",
     ]
     # Role-aware runcmd: scrub stale NM profiles + stale authorized_keys at
-    # first boot. rm -f is idempotent (a freshly-baked Golden that no longer
-    # ships these files just sees no-ops); runcmd runs once per instance-id,
-    # so a re-flash with a new id re-applies the cleanup. Defensive: only
-    # MASTER or SLAVE roles emit a runcmd block; any other value yields none.
+    # first boot, wrapped in a marker-file guard so the whole compound runs
+    # EXACTLY ONCE per Pi even though cloud-init's cc_scripts_user re-fires
+    # runcmd on every boot. Defensive: only MASTER or SLAVE roles emit a
+    # runcmd block; any other value yields none.
     if role in (Role.MASTER, Role.SLAVE):
         if role is Role.MASTER:
             role_label = "MASTER"
@@ -199,29 +259,21 @@ def generate_user_data(
         else:
             role_label = "SLAVE"
             stale_nm_profiles = _STALE_SLAVE_NM_PROFILES
-        # YAML-safe interpolation of the username inside the single-quoted
-        # runcmd scalar: a literal single quote in YAML single-quoted scalars
-        # is escaped by doubling. We do NOT pass the username through the
-        # shell (cloud-init's runcmd list form is execve'd directly when each
-        # item is a list, but when it's a string it goes through sh -c — so
-        # we also keep the path shell-safe by relying on the username
-        # validator (POSIX [a-z_][a-z0-9_-]*) upstream).
-        u_yaml = username.replace("'", "''")
+        # The username is upstream-validated to POSIX login chars
+        # ([a-z_][a-z0-9_-]*), so it carries neither YAML single quotes nor
+        # shell metacharacters; we therefore safely embed it directly inside
+        # the YAML single-quoted scalar AND the shell compound. (If the
+        # validator ever loosens, _build_runcmd_guard would need shell-quoting
+        # added — flagged here.)
+        guard = _build_runcmd_guard(username, stale_nm_profiles)
         runcmd_lines = [
             f"# {role_label}: scrub stale state baked into the Golden Image.",
+            f"# Marker-guarded ({_RUNCMD_MARKER}) so the wipe runs exactly once",
+            "# per Pi (cc_scripts_user re-fires runcmd every boot).",
             "runcmd:",
-            # Common to both roles: wipe the legacy authorized_keys so the
-            # previous master's pubkey cannot reach this card; firstboot will
-            # write fresh per-deployment keys.
-            f"  - 'rm -f /home/{u_yaml}/.ssh/authorized_keys'",
+            f"  - {_yaml_squote(guard)}",
+            "",
         ]
-        # Per-role NM profile scrub (basename joined with the NM dir).
-        for basename in stale_nm_profiles:
-            runcmd_lines.append(f"  - 'rm -f {_NM_SYS_CONN_DIR}/{basename}'")
-        # Final, common: force NetworkManager to drop the in-memory profiles
-        # whose backing files just disappeared.
-        runcmd_lines.append("  - 'nmcli connection reload'")
-        runcmd_lines.append("")
         lines.extend(runcmd_lines)
     return ("\n".join(lines)).encode("utf-8")
 

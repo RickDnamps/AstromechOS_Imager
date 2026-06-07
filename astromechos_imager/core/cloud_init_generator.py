@@ -69,16 +69,16 @@ _STALE_SLAVE_NM_PROFILE = f"{_NM_SYS_CONN_DIR}/{_STALE_SLAVE_NM_PROFILES[0]}"
 #: kernel never tries to exec it, so (unlike ``init=``) it cannot panic PID 1.
 RESIZE_TOKEN = "resize"
 
-#: Marker file dropped after the runcmd scrub finishes successfully. cloud-init
-#: ``cc_runcmd`` registers the script once-per-instance, but ``cc_scripts_user``
-#: executes it ``per-always`` — i.e. EVERY boot — so without an external guard
-#: the wipe would re-run on boot 2+ and tear down the NetworkManager profiles
-#: that ``astromech-wlan-setup.service`` + firstboot just created (verified live
-#: 2026-06-06: master Pi lost both ``astromech-hotspot`` AND
-#: ``astromech-internet`` on its second boot, then became unreachable). The
-#: marker is created with ``&&`` inside the guard so it is set only after every
-#: scrub step succeeded; if anything inside fails, the marker is NOT set and
-#: runcmd retries on the next boot. ``rm -f`` is idempotent so a retry is safe.
+#: Marker file dropped after the bootcmd scrub finishes successfully. cloud-init
+#: ``cc_bootcmd`` runs ``per-always`` (every boot) — like ``cc_scripts_user``
+#: did for the old ``runcmd:`` block — so the guard is still required to make
+#: the wipe a once-per-Pi operation. We KEEP the historical filename
+#: ``runcmd_done`` (not ``bootcmd_done``) for backwards-compat with any
+#: in-flight Pi that already booted under the runcmd flow on 2026-06-05/06: an
+#: in-place upgrade must see the existing marker and stay no-op. The marker is
+#: created with ``&&`` inside the guard so it is set only after every scrub
+#: step succeeded; if anything inside fails, the marker is NOT set and bootcmd
+#: retries on the next boot. ``rm -f`` is idempotent so a retry is safe.
 _RUNCMD_MARKER_DIR = "/var/lib/astromech"
 _RUNCMD_MARKER = f"{_RUNCMD_MARKER_DIR}/runcmd_done"
 
@@ -109,17 +109,21 @@ def _yaml_squote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _build_runcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> str:
+def _build_bootcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> str:
     """Build a single-line shell compound command, guarded by a marker file, so
-    the stale-state scrub runs EXACTLY ONCE per Pi — not on every boot.
+    the stale-state scrub runs EXACTLY ONCE per Pi — not on every boot — AND
+    runs EARLY enough (cloud-init-local stage, uptime ~7s) that it completes
+    before NetworkManager starts.
 
-    Background (verified live 2026-06-06): cloud-init's ``cc_runcmd`` module is
-    ``once-per-instance`` (it only re-registers the script when the instance-id
-    changes), but ``cc_scripts_user`` — the module that actually EXECUTES the
-    script — runs ``per-always`` on every boot. A flat ``runcmd`` block
-    therefore re-fires every boot, and on boot 2 it would wipe the
-    NetworkManager profiles that ``astromech-wlan-setup.service`` + firstboot
-    just created on boot 1, leaving the Pi with no AP and no internet client.
+    Background (verified live 2026-06-06 via SD-USB autopsy): the original
+    ``runcmd:`` implementation ran inside ``cc_scripts_user`` during
+    ``cloud-final.service`` at uptime ~22s — racy with firstboot and (because
+    the AstromechOS sister fix added ``After=cloud-final.service`` to
+    ``astromech-firstboot.service``) created a startup ordering cycle through
+    ``multi-user.target`` that systemd silently broke by dropping firstboot
+    altogether. Switching to ``bootcmd:`` moves the wipe into
+    ``cc_bootcmd`` which runs in ``cloud-init-local.service`` BEFORE
+    NetworkManager has even read any profile — no race, no cycle.
 
     The compound is structured as::
 
@@ -127,13 +131,17 @@ def _build_runcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> st
             mkdir -p /var/lib/astromech && touch /var/lib/astromech/runcmd_done ; }
 
     * ``[ -f marker ] ||`` short-circuits the entire brace block once the
-      marker exists (boot 2+ is a no-op).
+      marker exists (boot 2+ is a no-op — ``cc_bootcmd`` is also per-always).
     * The ``mkdir -p ... && touch ...`` runs LAST and is chained with ``&&``
       so the marker is only set on success. If any prior ``rm -f`` somehow
       fails (it won't — ``rm -f`` is idempotent), the marker is not written
       and the next boot retries. Defensive belt-and-braces.
     * Each statement inside the brace block is semicolon-terminated; bash
       requires a terminator before the closing brace of a brace group.
+    * NO ``nmcli connection reload`` step — at the ``cloud-init-local`` stage
+      NetworkManager is not yet running, so there is nothing to reload. NM
+      will read the remaining (correct, Imager-baked) profiles when it starts
+      later in the boot.
 
     The output is intentionally a single string (one YAML list entry) so the
     whole compound either runs or doesn't — no partial state where some
@@ -143,7 +151,6 @@ def _build_runcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> st
     parts.extend(
         f"rm -f {_NM_SYS_CONN_DIR}/{basename}" for basename in profile_basenames
     )
-    parts.append("nmcli connection reload")
     parts.append(
         f"mkdir -p {_RUNCMD_MARKER_DIR} && touch {_RUNCMD_MARKER}"
     )
@@ -183,7 +190,7 @@ def generate_user_data(
     Wi-Fi, SSH keys, hostname, hotspot and role stay with the AstromechOS
     firstboot bundle (Invariant #2) and are intentionally NOT emitted here.
 
-    Role-aware ``runcmd`` (since 2026-06-05): the Golden Image bakes stale
+    Role-aware ``bootcmd`` (since 2026-06-06): the Golden Image bakes stale
     NetworkManager profiles AND a stale ``~/.ssh/authorized_keys`` (carrying
     the previous master's ed25519 pubkey) into UID-1000's home. Both must be
     wiped at first boot so the AstromechOS firstboot bundle's per-deployment
@@ -199,17 +206,29 @@ def generate_user_data(
       ``autoconnect-priority=100`` which would otherwise outrank the
       netplan-generated profile pointing at the real Imager-baked SSID.
     * Both roles: ``rm -f /home/<username>/.ssh/authorized_keys`` (defense
-      against the legacy master pubkey carrying over) + a final
-      ``nmcli connection reload`` so NetworkManager drops the in-memory
-      profiles whose backing files just disappeared.
+      against the legacy master pubkey carrying over). NO
+      ``nmcli connection reload`` is needed — at the ``cc_bootcmd`` stage
+      NetworkManager is not yet running, so it will read the remaining
+      (correct) profiles fresh when it starts later.
 
-    ``runcmd`` is wrapped in a marker-file guard (``/var/lib/astromech/
-    runcmd_done``) so the scrub fires EXACTLY ONCE per Pi. cloud-init's
-    ``cc_scripts_user`` re-runs ``runcmd`` ``per-always`` (every boot, despite
-    ``cc_runcmd`` itself being once-per-instance) — without the guard, boot 2
-    would wipe the NetworkManager profiles that firstboot just created on
-    boot 1, leaving the Pi unreachable (verified live 2026-06-06). ``rm -f``
-    is idempotent so a marker-less retry on the next boot is safe.
+    ``bootcmd`` is wrapped in a marker-file guard (``/var/lib/astromech/
+    runcmd_done`` — historical filename kept for in-place upgrade
+    backwards-compat) so the scrub fires EXACTLY ONCE per Pi. cloud-init's
+    ``cc_bootcmd`` runs ``per-always`` (every boot) — without the guard, boot
+    2 would wipe the NetworkManager profiles that firstboot just created on
+    boot 1, leaving the Pi unreachable. ``rm -f`` is idempotent so a
+    marker-less retry on the next boot is safe.
+
+    Why bootcmd instead of runcmd (verified live 2026-06-06 via SD-USB
+    autopsy): the prior ``runcmd:`` implementation ran during
+    ``cloud-final.service`` at uptime ~22s. The AstromechOS sister fix added
+    ``After=cloud-final.service`` to ``astromech-firstboot.service``, but
+    ``cloud-final.service`` itself declares ``After=multi-user.target`` and
+    firstboot is ``WantedBy=multi-user.target`` — a startup ordering cycle
+    that systemd silently broke by dropping firstboot. Moving the wipe to
+    ``bootcmd:`` (runs in ``cloud-init-local.service`` at uptime ~7s, BEFORE
+    NetworkManager and BEFORE firstboot is even queued) eliminates the race
+    AND the cycle.
 
     Parameters
     ----------
@@ -222,7 +241,7 @@ def generate_user_data(
     role:
         Target role for this card. ``Role.MASTER`` (the default) emits the
         master-side NM scrub; ``Role.SLAVE`` emits the slave-side NM scrub.
-        Any other value (defensive) emits no runcmd block.
+        Any other value (defensive) emits no bootcmd block.
     """
     u = _yaml_squote(username)
     h = _yaml_squote(crypt_password_hash)
@@ -247,11 +266,14 @@ def generate_user_data(
         "ssh_pwauth: true",
         "",
     ]
-    # Role-aware runcmd: scrub stale NM profiles + stale authorized_keys at
+    # Role-aware bootcmd: scrub stale NM profiles + stale authorized_keys at
     # first boot, wrapped in a marker-file guard so the whole compound runs
-    # EXACTLY ONCE per Pi even though cloud-init's cc_scripts_user re-fires
-    # runcmd on every boot. Defensive: only MASTER or SLAVE roles emit a
-    # runcmd block; any other value yields none.
+    # EXACTLY ONCE per Pi even though cloud-init's cc_bootcmd re-fires
+    # bootcmd on every boot. cc_bootcmd runs in cloud-init-local.service
+    # (uptime ~7s) BEFORE NetworkManager has loaded any profile and BEFORE
+    # astromech-firstboot.service is queued — no race, no ordering cycle.
+    # Defensive: only MASTER or SLAVE roles emit a bootcmd block; any other
+    # value yields none.
     if role in (Role.MASTER, Role.SLAVE):
         if role is Role.MASTER:
             role_label = "MASTER"
@@ -263,18 +285,19 @@ def generate_user_data(
         # ([a-z_][a-z0-9_-]*), so it carries neither YAML single quotes nor
         # shell metacharacters; we therefore safely embed it directly inside
         # the YAML single-quoted scalar AND the shell compound. (If the
-        # validator ever loosens, _build_runcmd_guard would need shell-quoting
+        # validator ever loosens, _build_bootcmd_guard would need shell-quoting
         # added — flagged here.)
-        guard = _build_runcmd_guard(username, stale_nm_profiles)
-        runcmd_lines = [
+        guard = _build_bootcmd_guard(username, stale_nm_profiles)
+        bootcmd_lines = [
             f"# {role_label}: scrub stale state baked into the Golden Image.",
             f"# Marker-guarded ({_RUNCMD_MARKER}) so the wipe runs exactly once",
-            "# per Pi (cc_scripts_user re-fires runcmd every boot).",
-            "runcmd:",
+            "# per Pi (cc_bootcmd re-fires bootcmd every boot). Runs in",
+            "# cloud-init-local stage BEFORE NetworkManager starts.",
+            "bootcmd:",
             f"  - {_yaml_squote(guard)}",
             "",
         ]
-        lines.extend(runcmd_lines)
+        lines.extend(bootcmd_lines)
     return ("\n".join(lines)).encode("utf-8")
 
 

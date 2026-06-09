@@ -15,7 +15,7 @@ Anti-regression invariants (gravé dans le béton via marathon 2026-06-02→07):
 
 PREREQS — see ./README.md
 """
-import io, sys, time, threading
+import io, os, sys, time, threading
 import paramiko
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace",
@@ -23,7 +23,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 MASTER_IP = "192.168.2.104"
 SLAVE_IP = "192.168.4.171"
-PWD = "astropass123"
+# Anti-regression 2026-06-08: parameterize password via env var. Different
+# Imager wizard sessions can bake different installPasswords, so hardcoding
+# any single value will break the next-cycle DD.
+PWD = os.environ.get("IMAGER_FLASH_PWD", "astropass123")
 LOCAL_CLEANUP = r"J:\R2-D2_Build\AstroMechOS_Imager\scripts\golden_image\pi_cleanup.sh"
 REMOTE_CLEANUP = "/tmp/pi_cleanup_patched.sh"
 TARGET = "/mnt/ssd/AstromechOS_Slave_07-06-2026.img"

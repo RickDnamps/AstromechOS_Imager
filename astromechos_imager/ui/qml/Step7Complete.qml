@@ -19,11 +19,11 @@ Rectangle {
     property var nextStepsModel: {
         if (wizardState.completedRoles.length >= 2) {
             return [
-                "Eject both SDs (auto-eject already attempted)",
+                "Eject both SD cards (auto-eject already attempted)",
                 "Insert each card into its Pi 4B (Master → dome, Slave → body)",
-                "Power on both Pis — first boot takes ~3 min, then reboots automatically",
-                "On your phone or PC, join the robot's Wi-Fi hotspot \"Astromech_Control_XXXX\"",
-                "Open http://192.168.4.1:5000 in a browser → the AstromechOS dashboard",
+                "Power on both Pis — first boot takes ~3 min, then the robot reboots itself",
+                "Join the robot's Wi-Fi: look for a network named \"Astromech-XXXX\". The 4-char suffix is taken from the Master Pi's CPU ID, so it WILL differ from the bootstrap name shown earlier here. Sign in with the Private Robot Hotspot Password you set in this Imager.",
+                "Open http://192.168.4.1:5000 in a browser → the AstromechOS dashboard. Its admin actions use the dashboard's OWN password (default \"astro\"), which you change inside the dashboard — the Imager never sets it.",
             ]
         }
         var role = wizardState.completedRoles[0] || "master"
@@ -103,7 +103,9 @@ Rectangle {
         // ── Next steps panel ──────────────────────────────────────────
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 232
+            // Size to content (+36 = 2×18 inner margins) so the longer
+            // network/dashboard guidance never clips on wrap.
+            Layout.preferredHeight: stepsCol.implicitHeight + 36
             color: theme.colors.colorSurface
             border.color: theme.colors.colorBorderIdle
             border.width: 1
@@ -117,6 +119,7 @@ Rectangle {
             }
 
             ColumnLayout {
+                id: stepsCol
                 anchors.fill: parent
                 anchors.margins: 18
                 spacing: 12

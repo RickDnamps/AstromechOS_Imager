@@ -33,6 +33,16 @@ Rectangle {
     // is free to override). "" before any flash.
     readonly property string proposed: wizardState.proposedNextRole
 
+    // The role for THIS card is IMPOSED by the deployment sequence, NOT a
+    // free choice: the first card MUST be MASTER (a Slave is useless without
+    // its Master — they share the per-session rendezvous SSID and pair
+    // master-first), the second is the remaining SLAVE. "" once both are
+    // done. The screen auto-selects this and DISABLES the other option so the
+    // operator can't, e.g., flash a Slave first.
+    readonly property string imposedRole:
+        wizardState.completedRoles.indexOf("master") < 0 ? "master"
+        : (wizardState.completedRoles.indexOf("slave") < 0 ? "slave" : "")
+
     // Read-only bindings to the live drive model — these track the model
     // automatically and stay correct when a card is inserted/removed
     // mid-step, which the old hidden-ListView capture pattern did not.
@@ -51,17 +61,16 @@ Rectangle {
         }
     }
 
-    // Cycle 2+: one role is already done (greyed out, non-selectable), so the
-    // remaining role is the ONLY choice — auto-SELECT it (not just highlight)
-    // so the operator just hits NEXT instead of clicking the obvious card.
-    // Re-runs when the card is inserted after the step loads.
-    function _autoSelectProposed() {
-        if (hasOneCard && proposed !== "" && wizardState.currentRole !== proposed)
-            _assignRole(proposed)
+    // The role is imposed (master first, then slave), so auto-SELECT it — the
+    // operator just hits NEXT. The opposite card is disabled + dimmed. Re-runs
+    // when the card is inserted after the step loads.
+    function _autoSelectImposed() {
+        if (hasOneCard && imposedRole !== "" && wizardState.currentRole !== imposedRole)
+            _assignRole(imposedRole)
     }
-    Component.onCompleted: _autoSelectProposed()
-    onProposedChanged: _autoSelectProposed()
-    onDriveCountChanged: _autoSelectProposed()
+    Component.onCompleted: _autoSelectImposed()
+    onImposedRoleChanged: _autoSelectImposed()
+    onDriveCountChanged: _autoSelectImposed()
 
     ColumnLayout {
         anchors.fill: parent
@@ -78,7 +87,7 @@ Rectangle {
             font.letterSpacing: 1.4
         }
         Text {
-            text: "Sequential deployment flashes ONE card per cycle. Insert the card you want to write next, then pick its role."
+            text: "Sequential deployment flashes ONE card per cycle. The role is assigned automatically — MASTER first, then SLAVE. Insert the next card and hit NEXT."
             color: theme.colors.colorTextSecondary
             font.family: Theme.fontBody
             font.pixelSize: 12
@@ -230,7 +239,9 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         Layout.preferredHeight: 110
-                        opacity: masterDone ? 0.5 : 1.0
+                        // Dimmed when already flashed OR when MASTER isn't the
+                        // role imposed for this card (can't pick it out of turn).
+                        opacity: (masterDone || root.imposedRole !== "master") ? 0.5 : 1.0
                         color: wizardState.currentRole === "master"
                                ? theme.colors.colorSurfaceAccent
                                : theme.colors.colorSurface
@@ -289,10 +300,10 @@ Rectangle {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            // Audit bug H2: disable clicks on a
-                            // completed role to prevent re-flashing
-                            // the same role twice in one session.
-                            enabled: wizardState.completedRoles.indexOf("master") < 0
+                            // Selectable ONLY when MASTER is the imposed role
+                            // for this card (covers Audit bug H2: a done role
+                            // is never the imposed one, so it stays disabled).
+                            enabled: root.imposedRole === "master"
                             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: root._assignRole("master")
                         }
@@ -305,7 +316,9 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
                         Layout.preferredHeight: 110
-                        opacity: slaveDone ? 0.5 : 1.0
+                        // Dimmed when already flashed OR when SLAVE isn't the
+                        // role imposed for this card (MASTER must go first).
+                        opacity: (slaveDone || root.imposedRole !== "slave") ? 0.5 : 1.0
                         color: wizardState.currentRole === "slave"
                                ? theme.colors.colorSurfaceAccent
                                : theme.colors.colorSurface
@@ -364,8 +377,10 @@ Rectangle {
                         }
                         MouseArea {
                             anchors.fill: parent
-                            // Audit bug H2: see MASTER MouseArea above.
-                            enabled: wizardState.completedRoles.indexOf("slave") < 0
+                            // Selectable ONLY when SLAVE is the imposed role —
+                            // i.e. the Master is already done. Can't flash a
+                            // Slave first.
+                            enabled: root.imposedRole === "slave"
                             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: root._assignRole("slave")
                         }

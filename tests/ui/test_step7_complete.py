@@ -29,8 +29,15 @@ def test_step7_complete_contains_next_steps():
     content = _qml_path().read_text(encoding="utf-8")
     assert "NEXT STEPS" in content
     assert "192.168.4.1:5000" in content       # the AstromechOS dashboard URL
-    assert "Astromech_Control" in content       # the robot Wi-Fi hotspot
+    # The robot's final Wi-Fi SSID is "Astromech-XXXX" (hyphen, CPU-derived
+    # suffix) — NOT the bootstrap name the wizard showed earlier.
+    assert "Astromech-XXXX" in content
+    assert "CPU ID" in content                  # the "name will differ" caveat
     assert "dashboard" in content
+    # Dashboard admin password is a live Golden default ("astro"), NOT set by
+    # the Imager — must be called out so it isn't confused with the Linux/Wi-Fi
+    # creds (which the Imager DOES set).
+    assert '\\"astro\\"' in content
 
 
 def test_step7_complete_qml_syntax(qtbot):

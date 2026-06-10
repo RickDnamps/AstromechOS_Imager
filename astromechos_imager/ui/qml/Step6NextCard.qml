@@ -59,6 +59,25 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
         }
 
+        // Both cards are MANDATORY in a pair deployment: the Master and Slave
+        // share THIS session's one-time random hotspot SSID, so a Master-only
+        // flash leaves the Slave unable to ever join it (the two robot halves
+        // never pair). Hence there is no "skip second card" path here.
+        Text {
+            visible: !bothDone
+            text: "⚠  Both cards are required. The Master and Slave share this session's hotspot " +
+                  (wizardState.hotspotSsid !== "" ? "“" + wizardState.hotspotSsid + "”" : "SSID") +
+                  ". If you stop after the Master, the Slave can never connect to it and the robot's two halves won't pair."
+            color: theme.colors.colorTextWarn
+            font.family: Theme.fontBody
+            font.pixelSize: 12
+            font.bold: true
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+            horizontalAlignment: Text.AlignHCenter
+            Layout.alignment: Qt.AlignHCenter
+        }
+
         Text {
             visible: bothDone
             text: "Both Master and Slave cards have been written. The shared hotspot SSID ensures runtime pairing on first boot."
@@ -172,12 +191,6 @@ Rectangle {
         anchors.margins: 24
         spacing: 10
 
-        AstroButton {
-            visible: !bothDone
-            text: "DONE (SKIP SECOND CARD)"
-            variant: "secondary"
-            onClicked: wizardState.goto(7)
-        }
         AstroButton {
             visible: !bothDone
             text: "INSERT NEXT CARD → CONTINUE"

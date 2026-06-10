@@ -185,6 +185,20 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     app.setApplicationName(M["app_title"])
     sys.excepthook = _excepthook
 
+    # Restore Windows automount when the app closes. It is disabled for the
+    # ENTIRE flashing session (FlashJob disables it and never re-enables
+    # per-card) so Windows can't auto-mount + probe a freshly-inserted card
+    # mid-session — notably the Slave — and pop "Format this disk?". This is
+    # the single normal-exit restore point; a crash is covered by the marker
+    # file + restore_automount_if_crashed() on the next launch. enable_automount
+    # is idempotent, so running it on a session that never flashed is harmless.
+    if sys.platform == "win32":
+        try:
+            from astromechos_imager.platform.windows import enable_automount
+            app.aboutToQuit.connect(lambda: enable_automount())
+        except Exception:
+            pass
+
     # Audit High #21: claim the named mutex the Inno Setup installer
     # checks via `AppMutex=Global\AstromechOS_Imager_AppMutex`. While the
     # mutex handle is held, attempting to run the installer pops a
@@ -270,6 +284,31 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
                 drive_model.start_polling()
                 ctx.setContextProperty("driveListModel", drive_model)
                 engine.driveListModel = drive_model   # keepalive
+
+                # CRITICAL: pause the WMI poll while a flash is in flight.
+                # refresh() runs Win32_DiskDrive + ASSOCIATORS queries ON THE
+                # MAIN THREAD every 2 s. During a flash the target disk is
+                # dismounted / layout-deleted / RAW / locked, and a WMI
+                # ASSOCIATORS query against a RAW disk can BLOCK for seconds
+                # inside the storage stack — freezing the UI thread so the
+                # screen never advances past "validating" to "Writing…" and
+                # progress signals from the worker thread pile up undelivered.
+                # The write itself keeps running (worker thread, IOCTL, no COM),
+                # so the operator sees a frozen UI over a healthy flash and
+                # cancels it. Stop polling for verifying+flashing, resume when
+                # idle/done/error/cancelled.
+                def _sync_drive_polling() -> None:
+                    try:
+                        if flash_vm.status in ("verifying", "flashing"):
+                            drive_model.stop_polling()
+                        else:
+                            drive_model.start_polling()
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "drive-poll sync failed"
+                        )
+
+                flash_vm.statusChanged.connect(_sync_drive_polling)
             except Exception:
                 logging.getLogger(__name__).exception(
                     "DriveListModel bring-up failed — Step 3 will be empty"

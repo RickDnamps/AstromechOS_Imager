@@ -231,6 +231,65 @@ def test_flash_worker_emits_preparing_phase_immediately_single(qtbot):
     thread.wait(2000)
 
 
+class _OneChunkSingleSlaveJob:
+    """Single-target job whose ``role`` is SLAVE (sequential slave cycle).
+
+    Fires one ``decompress_write`` chunk through the single-job on_progress
+    callback. Used to lock the regression fix: a single SLAVE job must report
+    on the SLAVE channel, not the master channel — otherwise the slave-cycle
+    progress bar (which reads slaveProgress) sits frozen at 0% over a healthy
+    write and the operator cancels it.
+    """
+
+    def __init__(self) -> None:
+        from astromechos_imager.core.models import Role
+        # No master_target → single job. role drives channel selection.
+        self.role = Role.SLAVE
+        self.on_progress = None
+        self.cancel_event = threading.Event()
+
+    def run(self):
+        from astromechos_imager.core.diskwriter import DiskWriterProgress
+        time.sleep(0.05)
+        self.on_progress(
+            DiskWriterProgress(
+                phase="decompress_write",
+                bytes_done=100,
+                bytes_total=1000,
+                throughput_bps=0.0,
+            )
+        )
+        return _FakeSingleResult()
+
+
+def test_flash_worker_single_slave_job_reports_on_slave_channel(qtbot):
+    """Regression: a single FlashJob with role=SLAVE must emit on
+    ``progressSlave`` (both the preparing ping AND write chunks), NOT on
+    ``progressMaster``. Before the fix the single-job path hard-coded the
+    master channel, so the slave-cycle bar — which reads slaveProgress —
+    stayed frozen at 0% while the card wrote fine, and operators cancelled a
+    working flash."""
+    job = _OneChunkSingleSlaveJob()
+
+    master_events, slave_events, thread, _w = _start_worker_and_collect(
+        job, is_pair=False, qtbot=qtbot, settle_ms=400
+    )
+    thread.quit()
+    thread.wait(2000)
+
+    assert slave_events, "single SLAVE job emitted nothing on the slave channel"
+    assert any(p == "preparing" and f == 0.0 for f, p, t in slave_events), (
+        f"slave channel must get the preparing ping; got {slave_events!r}"
+    )
+    assert any(p == "decompress_write" for f, p, t in slave_events), (
+        f"slave channel must get the write progress; got {slave_events!r}"
+    )
+    assert master_events == [], (
+        f"a single SLAVE job must NOT leak onto the master channel; "
+        f"got {master_events!r}"
+    )
+
+
 def test_flash_worker_preparing_then_write_phase_sequence(qtbot):
     """Pair flow: the FIRST master event is ``(0.0, "preparing")``;
     a later event must be ``(0.1, "decompress_write")`` once

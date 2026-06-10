@@ -94,16 +94,21 @@ class FlashJob:
         # written). If it stays False after open_raw_device wiped the layout the
         # card is RAW, and the outer finally restores a clean exFAT volume.
         mbr_written = False
-        # Kill the post-flash "Format this disk?" pop-up at the source: disable
-        # Windows automount so the freshly-written FAT32 + ext4 partitions never
-        # get a drive letter (the pop-up's precondition). Best-effort; re-enabled
-        # in the outer finally below and crash-safe via a marker file (restored
-        # on next launch — see windows.restore_automount_if_crashed).
-        _automount_disabled = False
+        # Disable Windows automount for the WHOLE Imager session. The "Format
+        # this disk?" pop-up fires when Windows auto-mounts a freshly-INSERTED
+        # card mid-session and probes its (being-overwritten) filesystem — the
+        # SLAVE is the classic victim, inserted while warm right after the
+        # Master. This is deliberately NOT re-enabled per-card: re-enabling
+        # between Master and Slave let Windows grab + probe the Slave at
+        # insertion and pop the dialog at ~5% of the write. Automount is
+        # restored ONLY when the app closes (app.aboutToQuit → enable_automount)
+        # or, after a crash, on the next launch via
+        # restore_automount_if_crashed() + the marker file. Idempotent across
+        # cards (mountvol /N again is a harmless no-op). Best-effort.
         try:
             disable = getattr(self.platform_io, "disable_automount", None)
             if disable is not None:
-                _automount_disabled = bool(disable())
+                disable()
         except Exception:
             pass
         try:
@@ -132,6 +137,17 @@ class FlashJob:
                           self.target.physical_drive_id, self.image_path.name,
                           self.skip_verify, self.skip_customize,
                           "set" if self.linux_account else "none")
+                # NOTE: do NOT pre-zero sector 0 here. Empirically (field log
+                # 2026-06-10, master vs slave) wiping the partition table up
+                # front turns the card RAW for the whole write window, and a RAW
+                # card with a still-attached drive letter is EXACTLY what makes
+                # the shell pop "Format this disk?". On the master the same
+                # pre-zero was denied (ERROR_ACCESS_DENIED) so the card never
+                # went RAW — and it flashed completely silently. The silent path
+                # is therefore: leave sector 0 alone, let the streaming write +
+                # deferred-MBR-last carry the partition table, and rely on
+                # lock_and_dismount + IOCTL_DISK_DELETE_DRIVE_LAYOUT + automount
+                # disable + native shell-quiet to keep the shell out of it.
                 try:
                     _log.info("PHASE streaming-write: starting")
                     with open_image(self.image_path) as src:
@@ -333,16 +349,12 @@ class FlashJob:
                     except Exception:
                         pass  # best-effort recovery; never mask the real result
 
-            # Re-enable Windows automount LAST — after eject + any exFAT
-            # restore. Mirrors the disable at the top of run(); inside the
-            # finally so it always runs, even on cancel/error.
-            if _automount_disabled:
-                try:
-                    enable = getattr(self.platform_io, "enable_automount", None)
-                    if enable is not None:
-                        enable()
-                except Exception:
-                    pass
+            # NOTE: automount is intentionally NOT re-enabled here. It stays
+            # disabled for the whole session (across BOTH cards) so Windows
+            # can't grab + probe the freshly-inserted Slave and pop "Format
+            # this disk?". The single restore point is app shutdown
+            # (app.aboutToQuit → enable_automount); a crash is covered by the
+            # marker file + restore_automount_if_crashed() on next launch.
 
     def _sync_cache(self, dev: object) -> None:
         """Best-effort flush of the USB-bridge firmware write cache.

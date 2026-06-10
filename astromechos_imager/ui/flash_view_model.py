@@ -60,7 +60,7 @@ class _FlashWorker(QObject):
             self.progressMaster.emit(0.0, "preparing", 0.0)
             self.progressSlave.emit(0.0, "preparing", 0.0)
         else:
-            self.progressMaster.emit(0.0, "preparing", 0.0)
+            self._single_sig().emit(0.0, "preparing", 0.0)
 
         try:
             if self._is_pair:
@@ -101,11 +101,30 @@ class _FlashWorker(QObject):
         sig = self.progressMaster if role is Role.MASTER else self.progressSlave
         sig.emit(frac, p.phase, p.throughput_bps)
 
+    def _single_is_slave(self) -> bool:
+        """A single FlashJob carries its own ``role`` — route its progress to
+        the MATCHING channel.
+
+        Regression guard: this used to hard-emit ``progressMaster`` for every
+        single job. After Step5Flash started reading ``slaveProgress`` for the
+        slave cycle (role-aware sidecar fix), that mismatch left the slave
+        progress bar frozen at 0% while the write ran fine at full device
+        speed — operators read the frozen bar as a hang and cancelled a
+        healthy flash, and the cancel cleanup wiped the partial card. Routing
+        by role keeps worker channel == UI channel.
+        """
+        role = getattr(self._job, "role", None)
+        return (role is Role.SLAVE) or (getattr(role, "value", role) == "slave")
+
+    def _single_sig(self):
+        return self.progressSlave if self._single_is_slave() else self.progressMaster
+
     def _on_single_progress(self, p: DiskWriterProgress) -> None:
-        if not self._gate("m", p.phase):
+        key = "s" if self._single_is_slave() else "m"
+        if not self._gate(key, p.phase):
             return
         frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
-        self.progressMaster.emit(frac, p.phase, p.throughput_bps)
+        self._single_sig().emit(frac, p.phase, p.throughput_bps)
 
 
 class _HashWorker(QObject):

@@ -291,10 +291,67 @@ def test_cancellation_skips_bundle_and_eject(tmp_path, fake_platform_io, monkeyp
     assert ejects == [], "must not eject a cancelled (non-mbr_written) flash"
 
 
-def test_flash_brackets_automount_disable_enable(tmp_path, fake_platform_io, monkeypatch):
-    """The flash disables Windows automount up front and re-enables it in the
-    finally — killing the post-flash 'Format this disk?' pop-up without ever
-    leaving the operator's system with automount off."""
+def test_flash_does_not_prezero_sector0(tmp_path, fake_platform_io, monkeypatch):
+    """The flash must NOT wipe sector 0 before the streaming write.
+
+    Field log 2026-06-10: pre-zeroing the partition table turns the card RAW
+    for the whole write window, and a RAW card with a still-attached drive
+    letter is exactly what makes Windows pop "Format this disk?". The silent
+    path leaves sector 0 untouched and lets the deferred-MBR-last design carry
+    the partition table. So the FIRST device write must NOT be an all-zero
+    sector-0 wipe.
+    """
+    fake_platform_io.add_drive(7, size=512 * 1024 + 1024)
+    fake_boot = FakeBootPartitionForFlash()
+    _patch_boot(monkeypatch, fake_boot)
+
+    writes: list[tuple[int, bool, int]] = []  # (offset, all_zero, length)
+    orig_open = fake_platform_io.open_raw_device
+
+    class _RecordingDev:
+        def __init__(self, inner):
+            self._inner = inner
+            self.sector_size = getattr(inner, "sector_size", 512)
+            self._h = getattr(inner, "_h", 0xF000)
+
+        def write(self, offset, data):
+            writes.append((offset, set(data) <= {0}, len(data)))
+            return self._inner.write(offset, data)
+
+        def read(self, offset, length):
+            return self._inner.read(offset, length)
+
+        def flush(self):
+            self._inner.flush()
+
+        def close(self):
+            self._inner.close()
+
+    monkeypatch.setattr(fake_platform_io, "open_raw_device",
+                        lambda pid: _RecordingDev(orig_open(pid)))
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=fake_platform_io.enumerate_removable_drives()[0], role=Role.MASTER,
+        firstboot_config=_make_cfg(), master_pair=generate_ed25519(),
+        linux_account=ACC, skip_verify=True,
+    )
+    assert job.run().ok
+    assert writes, "no writes recorded"
+    # No early all-zero sector-0 wipe — the first write must NOT be a small
+    # all-zero block at offset 0 (that was the RAW-card / pop-up regression).
+    first_off, first_zero, first_len = writes[0]
+    assert not (first_off == 0 and first_zero and first_len <= 4096), (
+        f"flash must not pre-zero sector 0; first write was {writes[0]}"
+    )
+
+
+def test_flash_disables_automount_and_does_not_reenable(tmp_path, fake_platform_io, monkeypatch):
+    """The flash disables Windows automount up front and — critically — does
+    NOT re-enable it per-card. Automount stays off for the whole session so
+    Windows can't grab + probe the freshly-inserted Slave between cards and pop
+    'Format this disk?'. The restore happens at app shutdown (aboutToQuit), not
+    inside FlashJob.run()."""
     fake_platform_io.add_drive(8, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
@@ -311,11 +368,16 @@ def test_flash_brackets_automount_disable_enable(tmp_path, fake_platform_io, mon
         linux_account=ACC, skip_verify=True,
     )
     assert job.run().ok
-    assert calls == ["disable", "enable"], f"expected disable→enable bracket, got {calls}"
+    assert calls == ["disable"], (
+        f"FlashJob must disable automount but NOT re-enable it per-card "
+        f"(restore is app-shutdown scoped); got {calls}"
+    )
 
 
-def test_automount_reenabled_even_on_cancel(tmp_path, fake_platform_io, monkeypatch):
-    """Even a cancelled flash must re-enable automount (it lives in the finally)."""
+def test_cancel_does_not_reenable_automount(tmp_path, fake_platform_io, monkeypatch):
+    """A cancelled flash must NOT re-enable automount either — it stays off for
+    the whole session (restored only at app shutdown). Re-enabling on cancel
+    would re-open the between-cards window Windows uses to probe the Slave."""
     fake_platform_io.add_drive(9, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
     _patch_boot(monkeypatch, fake_boot)
@@ -334,4 +396,7 @@ def test_automount_reenabled_even_on_cancel(tmp_path, fake_platform_io, monkeypa
         linux_account=ACC, skip_verify=True, cancel_event=cancel,
     )
     job.run()
-    assert "enable" in calls, f"automount must be re-enabled even on cancel, got {calls}"
+    assert "enable" not in calls, (
+        f"automount must stay disabled across a cancel (restored at app "
+        f"shutdown, not in FlashJob); got {calls}"
+    )

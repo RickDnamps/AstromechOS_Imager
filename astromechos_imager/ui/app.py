@@ -147,6 +147,26 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             _suppress_shell_error_dialogs_for_process()
         except Exception:
             pass  # non-fatal — pop-ups will still appear, that's all
+        # Explicit AppUserModelID so the Windows taskbar binds OUR custom .ico
+        # to this process. Without it the taskbar falls back to the host
+        # python/bootloader's generic icon (and won't group our window).
+        # Must run before the first top-level window is created.
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "AstromechOS.Imager.1"
+            )
+        except Exception:
+            pass
+        # If a previous run crashed mid-flash with automount disabled, re-enable
+        # it now (crash-safe restore of the Windows auto-mount setting).
+        try:
+            from astromechos_imager.platform.windows import (
+                restore_automount_if_crashed,
+            )
+            restore_automount_if_crashed()
+        except Exception:
+            pass
     # Install Qt's message handler BEFORE QGuiApplication so any warnings
     # emitted during Qt init (plugin loading, style resolution, etc.) land
     # in our startup.log instead of disappearing into a console=False stderr.
@@ -225,36 +245,38 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     engine.flashViewModel = flash_vm   # keepalive
     engine.themeManager = theme         # keepalive
 
-    # Drive list model — Windows-only; tests inject their own.
-    # Audit Medium #36: previously every exception was silenced with a
-    # bare `pass`, so a wizard with no Step 3 entries could not be
-    # distinguished from "no card inserted", "WMI broken", or "pywin32
-    # missing". Now any failure is logged to startup.log (frozen builds)
-    # and the model is exposed as None so QML can render an actionable
-    # empty-state instead of just sitting silent.
-    if sys.platform == "win32":
-        try:
-            from astromechos_imager.platform.windows import WindowsPlatformIO
-            from astromechos_imager.ui.drive_list_model import DriveListModel
-            drive_model = DriveListModel(WindowsPlatformIO())
-            drive_model.start_polling()
-            ctx.setContextProperty("driveListModel", drive_model)
-            # Hold a reference so it doesn't get GC'd
-            engine.driveListModel = drive_model
-        except Exception:
-            # WMI / pywin32 / WindowsPlatformIO failure. Route through the
-            # standard logging module so the traceback lands in the JSONL
-            # session log (%APPDATA%\AstromechOS Imager\logs\flash-*.log)
-            # AND — for frozen builds — in startup.log via the stderr
-            # redirect at module top. Still don't crash: the wizard's
-            # empty-state badge ("AWAITING SD CARD") covers the no-model
-            # path.
-            logging.getLogger(__name__).exception(
-                "DriveListModel bring-up failed — Step 3 will be empty"
-            )
+    # Drive list model — Windows-only; tests inject their own. Declared as a
+    # null placeholder BEFORE engine.load() so QML bindings resolve (Step 3 /
+    # Step 5 guard `driveListModel ? …`). The REAL model — and its slow,
+    # blocking WMI/COM `start_polling()` — is brought up on the first event-loop
+    # tick AFTER the splash is on screen, so the icon→window delay stays tiny.
+    ctx.setContextProperty("driveListModel", None)
 
     qml_main = _qml_main_path()
     engine.load(QUrl.fromLocalFile(str(qml_main)))
+
+    if sys.platform == "win32":
+        from PySide6.QtCore import QTimer
+
+        def _bring_up_drive_model() -> None:
+            # Audit Medium #36: log failures (don't silently swallow) so a
+            # blank Step 3 is distinguishable from "no card / WMI broken".
+            # setContextProperty on the already-declared key refreshes the
+            # QML bindings that reference driveListModel.
+            try:
+                from astromechos_imager.platform.windows import WindowsPlatformIO
+                from astromechos_imager.ui.drive_list_model import DriveListModel
+                drive_model = DriveListModel(WindowsPlatformIO())
+                drive_model.start_polling()
+                ctx.setContextProperty("driveListModel", drive_model)
+                engine.driveListModel = drive_model   # keepalive
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "DriveListModel bring-up failed — Step 3 will be empty"
+                )
+
+        QTimer.singleShot(0, _bring_up_drive_model)
+
     return app, engine, state
 
 

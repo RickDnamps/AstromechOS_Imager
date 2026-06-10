@@ -94,6 +94,18 @@ class FlashJob:
         # written). If it stays False after open_raw_device wiped the layout the
         # card is RAW, and the outer finally restores a clean exFAT volume.
         mbr_written = False
+        # Kill the post-flash "Format this disk?" pop-up at the source: disable
+        # Windows automount so the freshly-written FAT32 + ext4 partitions never
+        # get a drive letter (the pop-up's precondition). Best-effort; re-enabled
+        # in the outer finally below and crash-safe via a marker file (restored
+        # on next launch — see windows.restore_automount_if_crashed).
+        _automount_disabled = False
+        try:
+            disable = getattr(self.platform_io, "disable_automount", None)
+            if disable is not None:
+                _automount_disabled = bool(disable())
+        except Exception:
+            pass
         try:
             try:
                 # Preflight validates everything that can fail before any
@@ -320,6 +332,17 @@ class FlashJob:
                         restore(self.target.physical_drive_id)
                     except Exception:
                         pass  # best-effort recovery; never mask the real result
+
+            # Re-enable Windows automount LAST — after eject + any exFAT
+            # restore. Mirrors the disable at the top of run(); inside the
+            # finally so it always runs, even on cancel/error.
+            if _automount_disabled:
+                try:
+                    enable = getattr(self.platform_io, "enable_automount", None)
+                    if enable is not None:
+                        enable()
+                except Exception:
+                    pass
 
     def _sync_cache(self, dev: object) -> None:
         """Best-effort flush of the USB-bridge firmware write cache.

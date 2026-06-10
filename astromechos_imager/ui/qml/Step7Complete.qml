@@ -21,9 +21,9 @@ Rectangle {
             return [
                 "Eject both SDs (auto-eject already attempted)",
                 "Insert each card into its Pi 4B (Master → dome, Slave → body)",
-                "Power on both Pis; the runtime hotspot handshake auto-starts",
-                "First boot takes ~3 min and reboots automatically",
-                "SSH via astromech-master.local / astromech-slave.local",
+                "Power on both Pis — first boot takes ~3 min, then reboots automatically",
+                "On your phone or PC, join the robot's Wi-Fi hotspot \"Astromech_Control_XXXX\"",
+                "Open http://192.168.4.1:5000 in a browser → the AstromechOS dashboard",
             ]
         }
         var role = wizardState.completedRoles[0] || "master"

@@ -289,3 +289,49 @@ def test_cancellation_skips_bundle_and_eject(tmp_path, fake_platform_io, monkeyp
     job.run()
     assert not fake_boot.exists("/ASTROMECH_FIRSTBOOT_READY")
     assert ejects == [], "must not eject a cancelled (non-mbr_written) flash"
+
+
+def test_flash_brackets_automount_disable_enable(tmp_path, fake_platform_io, monkeypatch):
+    """The flash disables Windows automount up front and re-enables it in the
+    finally — killing the post-flash 'Format this disk?' pop-up without ever
+    leaving the operator's system with automount off."""
+    fake_platform_io.add_drive(8, size=512 * 1024 + 1024)
+    fake_boot = FakeBootPartitionForFlash()
+    _patch_boot(monkeypatch, fake_boot)
+    calls: list[str] = []
+    monkeypatch.setattr(fake_platform_io, "disable_automount",
+                        lambda: (calls.append("disable"), True)[1], raising=False)
+    monkeypatch.setattr(fake_platform_io, "enable_automount",
+                        lambda: calls.append("enable"), raising=False)
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=fake_platform_io.enumerate_removable_drives()[0], role=Role.MASTER,
+        firstboot_config=_make_cfg(), master_pair=generate_ed25519(),
+        linux_account=ACC, skip_verify=True,
+    )
+    assert job.run().ok
+    assert calls == ["disable", "enable"], f"expected disable→enable bracket, got {calls}"
+
+
+def test_automount_reenabled_even_on_cancel(tmp_path, fake_platform_io, monkeypatch):
+    """Even a cancelled flash must re-enable automount (it lives in the finally)."""
+    fake_platform_io.add_drive(9, size=512 * 1024 + 1024)
+    fake_boot = FakeBootPartitionForFlash()
+    _patch_boot(monkeypatch, fake_boot)
+    calls: list[str] = []
+    monkeypatch.setattr(fake_platform_io, "disable_automount",
+                        lambda: (calls.append("disable"), True)[1], raising=False)
+    monkeypatch.setattr(fake_platform_io, "enable_automount",
+                        lambda: calls.append("enable"), raising=False)
+    cancel = threading.Event()
+    cancel.set()
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=fake_platform_io.enumerate_removable_drives()[0], role=Role.MASTER,
+        firstboot_config=_make_cfg(), master_pair=generate_ed25519(),
+        linux_account=ACC, skip_verify=True, cancel_event=cancel,
+    )
+    job.run()
+    assert "enable" in calls, f"automount must be re-enabled even on cancel, got {calls}"

@@ -24,11 +24,13 @@ def test_step7_complete_contains_astromechos_branding():
 
 
 def test_step7_complete_contains_next_steps():
-    """Verify that next-steps guidance text is present."""
+    """Verify the next-steps guidance points operators at the Flask dashboard
+    (the robot hotspot + the http://192.168.4.1:5000 web UI), not raw SSH."""
     content = _qml_path().read_text(encoding="utf-8")
     assert "NEXT STEPS" in content
-    assert "astromech-master.local" in content
-    assert "astromech-slave.local" in content
+    assert "192.168.4.1:5000" in content       # the AstromechOS dashboard URL
+    assert "Astromech_Control" in content       # the robot Wi-Fi hotspot
+    assert "dashboard" in content
 
 
 def test_step7_complete_qml_syntax(qtbot):

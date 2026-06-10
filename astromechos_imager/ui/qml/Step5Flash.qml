@@ -14,12 +14,23 @@ Rectangle {
     property bool needMaster: wizardState.currentRole === "master"
     property bool needSlave:  wizardState.currentRole === "slave"
 
+    // ── Role-aware property selection ─────────────────────────────────
+    // The flash pipeline routes progress/hash/sidecar into master* OR slave*
+    // depending on the role flashed this cycle. The UI MUST read the matching
+    // set — reading master* during a SLAVE cycle showed "no sidecar" + a
+    // frozen bar (the slave's real values live in slave*).
+    function _hashProgress() { return needSlave ? (flashViewModel.slaveHashProgress || 0) : (flashViewModel.masterHashProgress || 0) }
+    function _phase()        { return needSlave ? (flashViewModel.slavePhase || "")        : (flashViewModel.masterPhase || "") }
+    function _progress()     { return needSlave ? (flashViewModel.slaveProgress || 0)      : (flashViewModel.masterProgress || 0) }
+    function _sidecarMatch() { return needSlave ? flashViewModel.slaveHashSidecarMatch     : flashViewModel.masterHashSidecarMatch }
+    function _throughput()   { return needSlave ? (flashViewModel.slaveThroughputBps || 0) : (flashViewModel.masterThroughputBps || 0) }
+
     // ── Stage model for TaskTracker (option 1B 4-stage layout) ────────
     function _buildStages() {
         if (!flashViewModel) return []
-        var hp = flashViewModel.masterHashProgress || 0
-        var p = flashViewModel.masterPhase || ""
-        var prog = flashViewModel.masterProgress || 0
+        var hp = _hashProgress()
+        var p = _phase()
+        var prog = _progress()
         var hashDone = hp >= 1.0 || isFlashing || isDone
         var verifyOn = wizardState ? wizardState.verifyIntegrity : true
         // Stage 1: SHA-256 — option 3B (skipped state)
@@ -29,7 +40,7 @@ Rectangle {
         else if (isVerifying && !hashDone)          { s1 = "active"; s1det = Math.round(hp * 100) + " %" }
         else if (hashDone) {
             s1 = "done"
-            var m = flashViewModel.masterHashSidecarMatch
+            var m = _sidecarMatch()
             s1det = m === true ? "✓ matches sidecar"
                   : m === false ? "✗ mismatch"
                   : "no sidecar"
@@ -66,10 +77,10 @@ Rectangle {
         if (!flashViewModel) return 0.0
         if (isDone)      return 1.0
         if (isError)     return 0   // floor holds the last value via monotonic
-        if (isVerifying) return (flashViewModel.masterHashProgress || 0) * 0.05
+        if (isVerifying) return _hashProgress() * 0.05
         if (isFlashing) {
-            var p = flashViewModel.masterPhase || ""
-            var prog = flashViewModel.masterProgress || 0
+            var p = _phase()
+            var prog = _progress()
             if (p === "preparing")        return 0.05
             if (p === "decompress_write") return 0.05 + prog * 0.55
             if (p === "verify")           return 0.60 + prog * 0.35
@@ -79,12 +90,12 @@ Rectangle {
     }
     function _globalMode() {
         if (!flashViewModel) return "determinate"
-        var p = flashViewModel.masterPhase || ""
+        var p = _phase()
         return (isFlashing && (p === "preparing" || p === "customizing")) ? "indeterminate" : "determinate"
     }
     function _globalLabel() {
         if (!flashViewModel) return ""
-        var p = flashViewModel.masterPhase || ""
+        var p = _phase()
         if (isFlashing && p === "customizing") return "Personalizing…"
         if (isFlashing && p === "preparing")   return "Preparing…"
         return ""
@@ -176,7 +187,7 @@ Rectangle {
 
         // ── Integrity verification toggle (idle state only) ───────────
         RowLayout {
-            visible: !isVerifying && !isFlashing && !isDone
+            visible: !isVerifying && !isFlashing && !isDone && !isError
             spacing: 12
             Layout.fillWidth: true
             Rectangle {
@@ -213,7 +224,7 @@ Rectangle {
 
         // ── Summary panel (idle state) ────────────────────────────────
         Rectangle {
-            visible: !isVerifying && !isFlashing && !isDone
+            visible: !isVerifying && !isFlashing && !isDone && !isError
             Layout.fillWidth: true
             Layout.preferredHeight: 180
             radius: Theme.radiusCard
@@ -278,7 +289,7 @@ Rectangle {
             mode: _globalMode()
             label: _globalLabel()
             monotonic: true
-            throughputBps: flashViewModel ? flashViewModel.masterThroughputBps : 0
+            throughputBps: flashViewModel ? _throughput() : 0
         }
     }
 
@@ -381,7 +392,10 @@ Rectangle {
                 }
             }
         }
-        onAccepted: flashViewModel.startFromWizard()
+        // resetFloor() clears the GlobalProgressBar's monotonic floor so a
+        // RETRY (same role → no onCurrentRoleChanged) doesn't keep the bar
+        // pinned at the previous run's 100%.
+        onAccepted: { if (globalBar) globalBar.resetFloor(); flashViewModel.startFromWizard() }
     }
 
     // ── Blocking "cancelling / restoring card" overlay ────────────────────

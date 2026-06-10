@@ -796,6 +796,84 @@ def finalize_eject(physical_drive_id: int) -> bool:
         close_handle(h)
 
 
+# ── Automount control (kill the post-flash "Format this disk?" pop-up) ──────
+#
+# After the deferred MBR is written, Windows re-enumerates the card, finds the
+# FAT32 boot + unreadable ext4 rootfs partitions, auto-mounts them (assigns a
+# drive letter) and pops "You need to format the disk" / "no recognized file
+# system". The prompt REQUIRES a drive-letter assignment — so disabling
+# automatic mounting of new volumes for the flash window kills it at the
+# source, independently of whether the USB-SD bridge supports eject.
+#
+# `mountvol /N` disables, `mountvol /E` re-enables (system-wide, persisted in
+# the mountmgr registry → needs the elevated process we already run as, plus a
+# crash-safe marker so a killed run doesn't leave automount off forever).
+
+
+def _automount_marker_path():
+    from pathlib import Path
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or "."
+    d = Path(base) / "AstromechOS_Imager"
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return d / "automount_disabled.marker"
+
+
+def _run_mountvol(flag: str) -> bool:
+    import subprocess
+    try:
+        subprocess.run(
+            ["mountvol", flag],
+            capture_output=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except Exception as exc:
+        _log.info("mountvol %s failed (%s) — ignored", flag, exc)
+        return False
+
+
+def disable_automount() -> bool:
+    """Disable Windows auto-mounting of new volumes for the flash window.
+
+    Drops a crash-safe marker so a killed run is repaired on next launch (see
+    ``restore_automount_if_crashed``). Returns True only when ``mountvol /N``
+    succeeded, so the caller knows whether it must re-enable.
+    """
+    ok = _run_mountvol("/N")
+    if ok:
+        try:
+            _automount_marker_path().write_text("disabled\n", encoding="ascii")
+        except OSError:
+            pass
+        _log.info("automount disabled for the flash (mountvol /N)")
+    return ok
+
+
+def enable_automount() -> bool:
+    """Re-enable Windows auto-mounting (``mountvol /E``) and clear the marker."""
+    _run_mountvol("/E")
+    try:
+        _automount_marker_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+    _log.info("automount re-enabled (mountvol /E)")
+    return True
+
+
+def restore_automount_if_crashed() -> None:
+    """If a previous run died with automount disabled (marker present), restore."""
+    try:
+        if _automount_marker_path().exists():
+            _log.info("automount marker present — a previous run left automount "
+                      "disabled; restoring")
+            enable_automount()
+    except OSError:
+        pass
+
+
 # ── _Win32RawDevice + helpers ──────────────────────────────────────────────
 
 from astromechos_imager.core.platform_io import RawDevice  # noqa: E402 (Protocol, no runtime dep)
@@ -1049,6 +1127,14 @@ class WindowsPlatformIO:
     def finalize_eject(self, physical_drive_id):
         """Best-effort eject on a fresh handle after the write handle closed."""
         return finalize_eject(physical_drive_id)
+
+    def disable_automount(self):
+        """Disable Windows auto-mount for the flash (kills the Format pop-up)."""
+        return disable_automount()
+
+    def enable_automount(self):
+        """Re-enable Windows auto-mount (call in the flash's finally)."""
+        return enable_automount()
 
     def attach_letter_to_unmounted_volume(
         self, letter: str, physical_drive_id: int, timeout_s: float = 15.0,

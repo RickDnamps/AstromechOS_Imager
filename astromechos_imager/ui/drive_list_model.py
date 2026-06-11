@@ -80,7 +80,16 @@ class DriveListModel(QAbstractListModel):
 
     @Slot()
     def refresh(self) -> None:
-        new = list(self._platform.enumerate_removable_drives())
+        # Letterless enumeration: the per-disk ASSOCIATORS letter query makes
+        # WmiPrvSE touch each lettered volume — against a RAW/ext4 card this
+        # pops "Format this disk?" every 2 s poll (audit defect A1). Letters
+        # are resolved at action time only. TypeError fallback keeps fakes
+        # and older PlatformIO implementations working.
+        try:
+            new = list(self._platform.enumerate_removable_drives(
+                include_letters=False))
+        except TypeError:
+            new = list(self._platform.enumerate_removable_drives())
         # Only reset if changed (cheap diff by phys_id+size)
         before = [(d.physical_drive_id, d.size_bytes) for d in self._drives]
         after = [(d.physical_drive_id, d.size_bytes) for d in new]
@@ -119,6 +128,18 @@ class DriveListModel(QAbstractListModel):
 
     def roleNames(self) -> dict[int, QByteArray]:
         return {k: QByteArray(v) for k, v in _ROLE_NAMES.items()}
+
+    def strippable_drive_ids(self) -> list[int]:
+        """Drive ids whose letters may be auto-released at scan time.
+
+        USB FIXED media (external SSDs — e.g. the operator's image-source
+        drive) are excluded: auto-dismounting those would detach a disk the
+        operator is actively using (audit defect C1).
+        """
+        return [
+            d.physical_drive_id for d in self._drives
+            if not getattr(d, "is_suspect_fixed", False)
+        ]
 
     @Slot(int, result=int)
     def driveIdAt(self, row: int) -> int:

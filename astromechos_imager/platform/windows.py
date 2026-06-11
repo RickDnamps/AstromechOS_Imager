@@ -72,7 +72,7 @@ def _system_drive_id() -> int:
     return -1
 
 
-def enumerate_removable_drives() -> Iterator[DiskRef]:
+def enumerate_removable_drives(include_letters: bool = True) -> Iterator[DiskRef]:
     """Yield only safe removable candidates. Refs design spec §5.1.
 
     Every WMI candidate's accept/reject decision is logged at INFO so a
@@ -80,6 +80,14 @@ def enumerate_removable_drives() -> Iterator[DiskRef]:
     misreports as ``InterfaceType=SCSI`` + ``MediaType="Fixed hard disk
     media"`` becomes visible in the session log instead of silently
     disappearing into the filter.
+
+    ``include_letters=False`` skips the per-disk ASSOCIATORS query that
+    materialises ``Win32_LogicalDisk`` objects. That query makes WmiPrvSE
+    (out of process — our SetErrorMode cannot reach it) touch each lettered
+    volume; against a RAW/ext4 partition this is exactly what pops the
+    Windows "Format this disk?" dialog. The 2 s UI poll therefore runs
+    letterless; letters are only resolved at action time (selection/flash)
+    via the COM-free ``letters_on_disk``.
     """
     sys_id = _system_drive_id()
     candidates = list(_wmi_query())
@@ -127,10 +135,11 @@ def enumerate_removable_drives() -> Iterator[DiskRef]:
         yield DiskRef(
             physical_drive_id=phys_id,
             device_path=device_id,
-            drive_letters=_drive_letters_for(device_id),
+            drive_letters=_drive_letters_for(device_id) if include_letters else (),
             size_bytes=size,
             model=(d.Model or "Unknown").strip(),
             serial=(d.SerialNumber or "").strip(),
+            media_type=media,
         )
 
 
@@ -925,9 +934,12 @@ def _run_mountvol(flag: str) -> bool:
     """
     import subprocess
     try:
+        # 5 s cap: mountvol normally returns in <200 ms; the cap only bounds
+        # pathological systems so the pre-Qt launch path can never stall the
+        # window for the old 15 s × N spawns.
         proc = subprocess.run(
             ["mountvol", flag],
-            capture_output=True, timeout=15,
+            capture_output=True, timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if proc.returncode != 0:
@@ -1208,8 +1220,8 @@ def _query_disk_size(h: int) -> int:
 # ── WindowsPlatformIO facade ───────────────────────────────────────────────
 
 class WindowsPlatformIO:
-    def enumerate_removable_drives(self):
-        return list(enumerate_removable_drives())
+    def enumerate_removable_drives(self, include_letters: bool = True):
+        return list(enumerate_removable_drives(include_letters=include_letters))
 
     def lock_and_dismount(self, letters, physical_drive_id=None):
         return lock_and_dismount(letters, physical_drive_id)

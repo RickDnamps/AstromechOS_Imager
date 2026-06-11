@@ -313,9 +313,11 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
 
     # Drive list model — Windows-only; tests inject their own. Declared as a
     # null placeholder BEFORE engine.load() so QML bindings resolve (Step 3 /
-    # Step 5 guard `driveListModel ? …`). The REAL model — and its slow,
-    # blocking WMI/COM `start_polling()` — is brought up on the first event-loop
-    # tick AFTER the splash is on screen, so the icon→window delay stays tiny.
+    # Step 5 guard `driveListModel ? …`). The REAL model — and its blocking
+    # WMI/COM first refresh — is brought up 200 ms into the event loop: a
+    # singleShot(0) fires on the FIRST loop iteration, i.e. typically before
+    # the first frame has presented, so the WMI query would block the thread
+    # before anything is on screen. 200 ms lets the splash paint first.
     ctx.setContextProperty("driveListModel", None)
 
     qml_main = _qml_main_path()
@@ -336,6 +338,39 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
                 drive_model.start_polling()
                 ctx.setContextProperty("driveListModel", drive_model)
                 engine.driveListModel = drive_model   # keepalive
+
+                # Strip the drive letters of every NON-suspect candidate, now
+                # and on every list change. Cards inserted BEFORE launch kept
+                # their letters (automount-off only blocks NEW mounts), and a
+                # crashed-session repair (mountvol /E) may have just remounted
+                # one — a lettered RAW/ext4 volume is what Explorer/WmiPrvSE
+                # probe and answer with "Format this disk?" (audit defect A1).
+                # USB FIXED disks (external SSDs) are never auto-touched.
+                # Win32 calls run on a daemon thread (COM-free helpers), and
+                # re-stripping an already-letterless disk is a cheap no-op.
+                import threading
+
+                def _strip_candidate_letters() -> None:
+                    ids = drive_model.strippable_drive_ids()
+                    if not ids:
+                        return
+
+                    def work() -> None:
+                        for drive_id in ids:
+                            try:
+                                release_letters(drive_id)
+                            except Exception:
+                                logging.getLogger(__name__).exception(
+                                    "letter strip failed for drive %s",
+                                    drive_id,
+                                )
+
+                    threading.Thread(
+                        target=work, name="strip-letters", daemon=True
+                    ).start()
+
+                _strip_candidate_letters()
+                drive_model.countChanged.connect(_strip_candidate_letters)
 
                 # CRITICAL: pause the WMI poll while a flash is in flight.
                 # refresh() runs Win32_DiskDrive + ASSOCIATORS queries ON THE
@@ -366,7 +401,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
                     "DriveListModel bring-up failed — Step 3 will be empty"
                 )
 
-        QTimer.singleShot(0, _bring_up_drive_model)
+        QTimer.singleShot(200, _bring_up_drive_model)
 
     return app, engine, state
 

@@ -57,6 +57,16 @@ class DiskRef:
     size_bytes: int
     model: str
     serial: str
+    # Raw WMI MediaType ("Removable Media", "Fixed hard disk media", …).
+    # "fixed" + USB usually means an external SSD, not an SD card — consumers
+    # treat those as suspect (never auto-touched, explicit confirmation).
+    media_type: str = ""
+
+    @property
+    def is_suspect_fixed(self) -> bool:
+        """USB-attached FIXED media (external SSD/HDD) — eligible but never
+        auto-selected and never auto-dismounted."""
+        return "fixed" in self.media_type.lower()
 
 
 @dataclass(frozen=True)

@@ -962,7 +962,9 @@ def disable_automount() -> bool:
     ok = _run_mountvol("/N")
     if ok:
         try:
-            _automount_marker_path().write_text("disabled\n", encoding="ascii")
+            # PID in the marker = forensic trace for double-instance reports.
+            _automount_marker_path().write_text(
+                f"disabled pid={os.getpid()}\n", encoding="ascii")
         except OSError:
             pass
         _log.info("automount disabled for the flash (mountvol /N)")

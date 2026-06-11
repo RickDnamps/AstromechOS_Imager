@@ -142,6 +142,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # True = automount is OFF for the session (or N/A off-Windows); False =
     # mountvol /N failed (non-elevated run) and pop-ups can still fire.
     _automount_defense_active = True
+    _session_guard = None
     if sys.platform == "win32":
         try:
             from astromechos_imager.platform.windows import (
@@ -175,24 +176,40 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
         # point of the wizard never gets a drive letter, so Explorer has
         # nothing to render, probe, or pop a format dialog against.
         # Restore points unchanged: aboutToQuit below + the crash marker.
+        # The AutomountSessionGuard owns the {mutex, marker, automount}
+        # triple: it claims the single-instance mutex FIRST, so a present
+        # marker can only mean a genuinely crashed session (a second live
+        # instance no longer runs mountvol /E under the first one's feet).
         try:
-            from astromechos_imager.platform.windows import (
-                disable_automount,
-                is_elevated,
-                restore_automount_if_crashed,
+            from astromechos_imager.platform.session_guard import (
+                AutomountSessionGuard,
             )
-            restore_automount_if_crashed()
-            # disable_automount now reports the TRUTH (mountvol exit code is
-            # checked): False means the anti-popup defense is NOT armed —
-            # typically a non-elevated run. Surface it instead of pretending.
-            _automount_defense_active = disable_automount()
+            from astromechos_imager.platform.windows import is_elevated
+            _session_guard = AutomountSessionGuard()
+            _automount_defense_active = _session_guard.acquire()
+            if _session_guard.already_running:
+                # Another live instance owns the automount session — touching
+                # it here would disarm that instance mid-flash (audit A4).
+                # Native MessageBox: Qt does not exist yet at this point.
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(
+                    None,
+                    "AstromechOS Imager is already running.\n\n"
+                    "Close the other window first.",
+                    "AstromechOS Imager",
+                    0x30,  # MB_ICONWARNING
+                )
+                sys.exit(0)
             if not _automount_defense_active:
                 logging.getLogger(__name__).warning(
                     "automount defense NOT armed (mountvol /N failed; "
                     "elevated=%s) — run as administrator to suppress "
                     "Windows format pop-ups", is_elevated(),
                 )
+        except SystemExit:
+            raise
         except Exception:
+            logging.getLogger(__name__).exception("session guard failed")
             _automount_defense_active = False
     # Install Qt's message handler BEFORE QGuiApplication so any warnings
     # emitted during Qt init (plugin loading, style resolution, etc.) land
@@ -213,42 +230,27 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     sys.excepthook = _excepthook
 
     # Restore Windows automount when the app closes. It is disabled for the
-    # ENTIRE flashing session (FlashJob disables it and never re-enables
-    # per-card) so Windows can't auto-mount + probe a freshly-inserted card
-    # mid-session — notably the Slave — and pop "Format this disk?". This is
-    # the single normal-exit restore point; a crash is covered by the marker
-    # file + restore_automount_if_crashed() on the next launch. enable_automount
-    # is idempotent, so running it on a session that never flashed is harmless.
+    # ENTIRE flashing session (disabled at launch by the session guard, never
+    # re-enabled per-card) so Windows can't auto-mount + probe a
+    # freshly-inserted card mid-session — notably the Slave — and pop
+    # "Format this disk?". This is the single normal-exit restore point; a
+    # crash is covered by the marker file + the guard's repair on the next
+    # launch. The guard also holds the named mutex the Inno Setup installer
+    # checks (AppMutex=Global\AstromechOS_Imager_AppMutex, Audit High #21) —
+    # stashing it on app keeps the handle alive for the process lifetime.
     if sys.platform == "win32":
-        try:
-            from astromechos_imager.platform.windows import enable_automount
-            app.aboutToQuit.connect(lambda: enable_automount())
-        except Exception:
-            pass
-
-    # Audit High #21: claim the named mutex the Inno Setup installer
-    # checks via `AppMutex=Global\AstromechOS_Imager_AppMutex`. While the
-    # mutex handle is held, attempting to run the installer pops a
-    # "AstromechOS Imager is currently running" warning instead of
-    # silently overwriting bundle files mid-flash. Windows-only; the
-    # handle stays open for the lifetime of the process and is released
-    # automatically on exit. Best-effort: if mutex creation fails we
-    # still launch the app — the installer just loses its safety net.
-    if sys.platform == "win32" and getattr(sys, "frozen", False):
-        try:
-            import ctypes
-            from ctypes import wintypes
-            kernel32 = ctypes.windll.kernel32
-            # CreateMutexW(lpMutexAttributes, bInitialOwner, lpName)
-            # Global\ prefix makes it visible across sessions.
-            _APP_MUTEX = kernel32.CreateMutexW(
-                None, False, "Global\\AstromechOS_Imager_AppMutex"
-            )
-            engine_attr = "_app_mutex_handle"
-            # Stash the handle on app so it isn't GC'd before process exit.
-            setattr(app, engine_attr, _APP_MUTEX)
-        except Exception:
-            pass
+        if _session_guard is not None:
+            setattr(app, "_session_guard", _session_guard)
+            app.aboutToQuit.connect(lambda: _session_guard.release())
+        else:
+            # Guard construction failed — fall back to a best-effort direct
+            # restore so a session that DID manage to disable automount
+            # never leaves the machine without its USB drives.
+            try:
+                from astromechos_imager.platform.windows import enable_automount
+                app.aboutToQuit.connect(lambda: enable_automount())
+            except Exception:
+                pass
 
     # Register bundled fonts (Orbitron) so QML can use them by family.
     # Must happen after QGuiApplication exists, before engine.load().

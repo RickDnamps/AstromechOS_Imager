@@ -39,6 +39,56 @@ ApplicationWindow {
     // -1 while splash is showing, 0..6 = currentStep-1 once advanced.
     property int displayedStepIdx: -1
 
+    // ── Quit guard (audit defect F4) ──────────────────────────────────
+    // Closing mid-flash used to fire aboutToQuit → enable_automount WHILE
+    // the writer streamed (Windows could mount + probe the half-written
+    // card) and killed the worker thread mid-write, leaving a RAW card
+    // with no exFAT recovery. Intercept close, confirm, cancel cleanly,
+    // and only quit once the worker has wound down.
+    property bool quitPending: false
+    readonly property bool flashBusy: flashViewModel
+        && (flashViewModel.status === "verifying"
+            || flashViewModel.status === "flashing"
+            || flashViewModel.status === "cancelling")
+
+    onClosing: (close) => {
+        if (flashBusy) {
+            close.accepted = false
+            quitConfirmDialog.open()
+        }
+    }
+
+    Connections {
+        target: flashViewModel
+        function onStatusChanged() {
+            if (root.quitPending && !root.flashBusy)
+                Qt.quit()
+        }
+    }
+
+    Dialog {
+        id: quitConfirmDialog
+        modal: true
+        anchors.centerIn: parent
+        title: "Flash in progress"
+        standardButtons: Dialog.Yes | Dialog.No
+        Text {
+            text: "A card is being written. Cancel the flash and quit?\n" +
+                  "The card will be recovered to a clean exFAT volume first."
+            color: theme.colors.colorTextSecondary
+            font.family: Theme.fontBody
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+        }
+        onAccepted: {
+            root.quitPending = true
+            if (flashViewModel.status === "verifying"
+                    || flashViewModel.status === "flashing")
+                flashViewModel.cancel()
+            // already "cancelling": just wait for onStatusChanged
+        }
+    }
+
     // ── Custom header (drag region + controls) ────────────────────────
     header: Rectangle {
         id: headerBar
@@ -183,7 +233,9 @@ ApplicationWindow {
                 closeStyle: true
                 tooltipText: "Close"
                 accessibleName: "Close window"
-                onActivated: Qt.quit()
+                // Route through close() so the onClosing quit-guard can
+                // intercept a mid-flash exit (Qt.quit() would bypass it).
+                onActivated: root.close()
             }
         }
     }

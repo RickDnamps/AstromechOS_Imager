@@ -386,7 +386,13 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
                 # idle/done/error/cancelled.
                 def _sync_drive_polling() -> None:
                     try:
-                        if flash_vm.status in ("verifying", "flashing"):
+                        # "cancelling" included (audit R2): cancel() flips the
+                        # status immediately while the worker is still running
+                        # its cleanup (diskpart exFAT restore on a RAW disk) —
+                        # resuming the WMI poll there races diskpart and can
+                        # block the UI thread for seconds.
+                        if flash_vm.status in (
+                                "verifying", "flashing", "cancelling"):
                             drive_model.stop_polling()
                         else:
                             drive_model.start_polling()

@@ -506,11 +506,27 @@ class FlashViewModel(QObject):
             self._slave_hash_progress = frac
             self.slaveHashProgressChanged.emit()
 
+    def _park_overrun_thread(self, thread, worker) -> None:
+        """Keep a reference to a QThread that missed its 500 ms join.
+
+        Dropping the last Python reference to a still-RUNNING QThread lets
+        the QThread object be destroyed under the live thread — a hard Qt
+        fatal ("QThread: Destroyed while thread is still running"). Park the
+        pair until the thread actually finishes; the list self-prunes on the
+        next park, and a session parks at most a handful.
+        """
+        zombies = getattr(self, "_zombie_threads", None)
+        if zombies is None:
+            zombies = self._zombie_threads = []
+        zombies[:] = [(t, w) for (t, w) in zombies if not t.isFinished()]
+        zombies.append((thread, worker))
+
     def _on_hash_finished(self, role: str, digest: str, match) -> None:
         # Always tear down the worker thread before deciding what's next.
         if self._hash_thread is not None:
             self._hash_thread.quit()
-            self._hash_thread.wait(500)
+            if not self._hash_thread.wait(500):
+                self._park_overrun_thread(self._hash_thread, self._hash_worker)
             self._hash_thread = None
             self._hash_worker = None
 
@@ -701,7 +717,8 @@ class FlashViewModel(QObject):
         self.errorMessageChanged.emit()
         if self._thread is not None:
             self._thread.quit()
-            self._thread.wait(500)
+            if not self._thread.wait(500):
+                self._park_overrun_thread(self._thread, self._worker)
             self._thread = None
             self._worker = None
 

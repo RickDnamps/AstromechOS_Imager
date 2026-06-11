@@ -147,6 +147,35 @@ Rectangle {
                 }
             }
 
+            // Automount-defense amber strip — mountvol /N failed (typically a
+            // non-elevated run): Windows can still auto-mount + probe a card
+            // and pop "Format this disk?". Tell the operator instead of
+            // silently degrading.
+            Rectangle {
+                visible: typeof automountDefenseActive !== "undefined"
+                         && automountDefenseActive === false
+                anchors.top: parent.top
+                anchors.topMargin: 8
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 460
+                height: automountWarnText.implicitHeight + 14
+                radius: 6
+                color: "transparent"
+                border.color: theme.colors.colorBorderWarn
+                border.width: 1
+                Text {
+                    id: automountWarnText
+                    anchors.centerIn: parent
+                    width: parent.width - 20
+                    text: "⚠ Windows automount is still ON (run the Imager as administrator). Format pop-ups may appear — do NOT click Format."
+                    color: theme.colors.colorBorderWarn
+                    font.family: Theme.fontBody
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+
             // Too-many-cards red banner
             ColumnLayout {
                 anchors.centerIn: parent

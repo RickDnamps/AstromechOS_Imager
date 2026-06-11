@@ -107,8 +107,12 @@ class FlashJob:
         # cards (mountvol /N again is a harmless no-op). Best-effort.
         try:
             disable = getattr(self.platform_io, "disable_automount", None)
-            if disable is not None:
-                disable()
+            if disable is not None and not disable():
+                _log.warning(
+                    "automount could NOT be disabled (elevation?) — the "
+                    "mid-flash pop-up defense now relies on the deferred "
+                    "MBR alone"
+                )
         except Exception:
             pass
         try:

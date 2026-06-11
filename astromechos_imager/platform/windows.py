@@ -914,16 +914,41 @@ def _automount_marker_path():
 
 
 def _run_mountvol(flag: str) -> bool:
+    """Run ``mountvol <flag>`` and return True ONLY on exit code 0.
+
+    mountvol /N (disable automount) requires elevation; in a non-elevated
+    process it fails with a non-zero exit code. Treating a spawned-but-failed
+    mountvol as success made the whole anti-popup defense a fiction — the app
+    logged "automount disabled" while the setting never changed. Failures are
+    logged at WARNING with the captured stderr so startup.log keeps a
+    forensic trace.
+    """
     import subprocess
     try:
-        subprocess.run(
+        proc = subprocess.run(
             ["mountvol", flag],
             capture_output=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or b"").decode(
+                "utf-8", "replace").strip()
+            _log.warning(
+                "mountvol %s FAILED rc=%s%s",
+                flag, proc.returncode, f": {err[:200]}" if err else "",
+            )
+            return False
         return True
     except Exception as exc:
-        _log.info("mountvol %s failed (%s) — ignored", flag, exc)
+        _log.warning("mountvol %s failed to run (%s)", flag, exc)
+        return False
+
+
+def is_elevated() -> bool:
+    """True when this process has admin rights (mountvol /N needs them)."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
         return False
 
 
@@ -945,14 +970,20 @@ def disable_automount() -> bool:
 
 
 def enable_automount() -> bool:
-    """Re-enable Windows auto-mounting (``mountvol /E``) and clear the marker."""
-    _run_mountvol("/E")
-    try:
-        _automount_marker_path().unlink(missing_ok=True)
-    except OSError:
-        pass
-    _log.info("automount re-enabled (mountvol /E)")
-    return True
+    """Re-enable Windows auto-mounting (``mountvol /E``) and clear the marker.
+
+    The marker is removed ONLY when /E actually succeeded. A failed restore
+    (e.g. a non-elevated relaunch) must keep the repair record — deleting it
+    would leave the machine with automount permanently off and no trace.
+    """
+    ok = _run_mountvol("/E")
+    if ok:
+        try:
+            _automount_marker_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+        _log.info("automount re-enabled (mountvol /E)")
+    return ok
 
 
 def restore_automount_if_crashed() -> None:

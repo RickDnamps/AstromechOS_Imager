@@ -139,6 +139,9 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # FileNotFoundError(errno=2). SetErrorMode is process-inherited so
     # both the GUI and any subprocess we spawn benefit. Must run before
     # QGuiApplication so the flag is in force during plugin init too.
+    # True = automount is OFF for the session (or N/A off-Windows); False =
+    # mountvol /N failed (non-elevated run) and pop-ups can still fire.
+    _automount_defense_active = True
     if sys.platform == "win32":
         try:
             from astromechos_imager.platform.windows import (
@@ -175,12 +178,22 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
         try:
             from astromechos_imager.platform.windows import (
                 disable_automount,
+                is_elevated,
                 restore_automount_if_crashed,
             )
             restore_automount_if_crashed()
-            disable_automount()
+            # disable_automount now reports the TRUTH (mountvol exit code is
+            # checked): False means the anti-popup defense is NOT armed —
+            # typically a non-elevated run. Surface it instead of pretending.
+            _automount_defense_active = disable_automount()
+            if not _automount_defense_active:
+                logging.getLogger(__name__).warning(
+                    "automount defense NOT armed (mountvol /N failed; "
+                    "elevated=%s) — run as administrator to suppress "
+                    "Windows format pop-ups", is_elevated(),
+                )
         except Exception:
-            pass
+            _automount_defense_active = False
     # Install Qt's message handler BEFORE QGuiApplication so any warnings
     # emitted during Qt init (plugin loading, style resolution, etc.) land
     # in our startup.log instead of disappearing into a console=False stderr.
@@ -290,6 +303,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     ctx.setContextProperty("wizardState", state)
     ctx.setContextProperty("flashViewModel", flash_vm)
     ctx.setContextProperty("theme", theme)
+    ctx.setContextProperty("automountDefenseActive", _automount_defense_active)
     from astromechos_imager import __version__ as _app_version
     ctx.setContextProperty("appVersion", _app_version)
     engine.flashViewModel = flash_vm   # keepalive

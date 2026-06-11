@@ -568,6 +568,33 @@ def _volume_disk_extents(volume_guid: str) -> list[int]:
         k.CloseHandle(h)
 
 
+def _notify_shell_drive_removed(letter: str) -> None:
+    """Tell Explorer the letter is gone so it stops rendering a dead icon.
+
+    DeleteVolumeMountPointW removes the Mount-Manager binding but never
+    notifies the shell — Explorer keeps a stale drive icon that errors on
+    click ("captive reader", audit defect F3). Prefer the native DLL's
+    quiet dance; fall back to a direct SHChangeNotify so a missing
+    astro_flash.dll no longer degrades to a silent no-op.
+    """
+    try:
+        from astromechos_imager.platform import native_shell_quiet  # noqa: PLC0415
+        if native_shell_quiet.available():
+            native_shell_quiet.lock_and_quiet(letter)
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        SHCNE_DRIVEREMOVED = 0x00000080
+        SHCNF_PATHW = 0x0005
+        ctypes.windll.shell32.SHChangeNotify(
+            SHCNE_DRIVEREMOVED, SHCNF_PATHW,
+            ctypes.create_unicode_buffer(f"{letter}:\\"), None,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def force_unmount_letter(letter: str) -> bool:
     r"""DEVICE-SAFE forced detach of a drive letter.
 
@@ -586,28 +613,34 @@ def force_unmount_letter(letter: str) -> bool:
         return False
     h = _open_volume_handle(f"\\\\.\\{letter}:")
     if h != INVALID_HANDLE_VALUE:
-        locked = False
-        for _ in range(4):
-            try:
-                _ctl(h, FSCTL_LOCK_VOLUME)
-                locked = True
-                break
-            except OSError:
-                time.sleep(0.15)
         try:
-            _ctl(h, FSCTL_DISMOUNT_VOLUME)
-        except OSError as exc:
-            _log.info("  force_unmount_letter(%s): dismount failed (%s)", letter, exc)
-        if locked:
+            locked = False
+            for _ in range(4):
+                try:
+                    _ctl(h, FSCTL_LOCK_VOLUME)
+                    locked = True
+                    break
+                except OSError:
+                    time.sleep(0.15)
             try:
-                _ctl(h, FSCTL_UNLOCK_VOLUME)
-            except OSError:
-                pass
-        kernel32().CloseHandle(h)
+                _ctl(h, FSCTL_DISMOUNT_VOLUME)
+            except OSError as exc:
+                _log.info("  force_unmount_letter(%s): dismount failed (%s)", letter, exc)
+            if locked:
+                try:
+                    _ctl(h, FSCTL_UNLOCK_VOLUME)
+                except OSError:
+                    pass
+        finally:
+            # The volume handle must never outlive this call — this runs on
+            # the unsupervised letter-strip daemon threads and in the
+            # active-wait gate's hot loop (audit defect B5).
+            kernel32().CloseHandle(h)
     try:
         kernel32().DeleteVolumeMountPointW(f"{letter}:\\")
     except Exception:  # noqa: BLE001
         pass
+    _notify_shell_drive_removed(letter)
     return True
 
 
@@ -752,6 +785,41 @@ def update_disk_properties(h: int) -> None:
     _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
 
 
+def _first_free_letter() -> str | None:
+    """First unused drive letter from E: upward (C:/D: are usually taken)."""
+    try:
+        mask = kernel32().GetLogicalDrives()
+    except Exception:  # noqa: BLE001
+        return None
+    for i in range(4, 26):  # E .. Z
+        if not (mask >> i) & 1:
+            return chr(ord("A") + i)
+    return None
+
+
+def make_card_visible(physical_drive_id: int, timeout_s: float = 10.0) -> bool:
+    """Post-flash: give the freshly-written boot volume a drive letter back.
+
+    With automount disabled for the whole session and every letter binding
+    purged during the flash, a successfully-flashed card ends up present but
+    LETTERLESS — invisible in Explorer until physically reinserted (audit
+    defect F1, the "captive reader"). Most SD-USB bridges also reject
+    IOCTL_STORAGE_EJECT_MEDIA, so eject can't save us. Re-attach a free
+    letter to the card's parseable (FAT32 boot) volume instead; the ext4
+    rootfs stays letterless, so no format pop-up can fire. Best-effort.
+    """
+    letter = _first_free_letter()
+    if letter is None:
+        _log.warning("make_card_visible: no free drive letter available")
+        return False
+    ok = attach_letter_to_unmounted_volume(
+        letter, physical_drive_id, timeout_s=timeout_s)
+    if ok:
+        _log.info("make_card_visible: disk %d visible again as %s:",
+                  physical_drive_id, letter)
+    return ok
+
+
 def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> bool:
     r"""Best-effort: quick-format the target drive to a clean exFAT volume.
 
@@ -782,10 +850,12 @@ def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> b
         # with — so a cancelled flash leaves the card looking like a blank
         # card, not one branded by this tool.
         'format fs=exfat quick label="NO NAME"',
-        # NOTE: no "assign". Windows auto-mounts the removable exFAT volume
-        # and picks a free letter on its own — forcing one here just adds to
-        # the drive-letter creep (each format = new volume GUID = Mount
-        # Manager hands out the next free letter and remembers the old one).
+        # "assign" is REQUIRED here: automount is disabled for the entire
+        # Imager session (session guard at app launch), so the old rationale
+        # — "Windows auto-mounts the fresh exFAT volume on its own" — no
+        # longer holds. Without it the recovered card stays letterless and
+        # invisible, and the operator concludes it is bricked (audit F2).
+        "assign",
         "exit",
         "",
     ])
@@ -1222,6 +1292,10 @@ def _query_disk_size(h: int) -> int:
 class WindowsPlatformIO:
     def enumerate_removable_drives(self, include_letters: bool = True):
         return list(enumerate_removable_drives(include_letters=include_letters))
+
+    def make_card_visible(self, physical_drive_id: int,
+                          timeout_s: float = 10.0) -> bool:
+        return make_card_visible(physical_drive_id, timeout_s=timeout_s)
 
     def lock_and_dismount(self, letters, physical_drive_id=None):
         return lock_and_dismount(letters, physical_drive_id)

@@ -258,11 +258,27 @@ class FlashJob:
                 # rootfs. Best-effort — never affects the result.
                 if mbr_written and not self.cancel_event.is_set():
                     finalize = getattr(self.platform_io, "finalize_eject", None)
+                    ejected = False
                     if finalize is not None:
                         try:
-                            finalize(self.target.physical_drive_id)
+                            ejected = bool(
+                                finalize(self.target.physical_drive_id))
                         except Exception:
-                            pass
+                            ejected = False
+                    if not ejected:
+                        # Most SD-USB bridges reject IOCTL_STORAGE_EJECT_MEDIA.
+                        # Without a letter re-attach the flashed card stays
+                        # present but LETTERLESS — invisible in Explorer until
+                        # physical reinsertion (the "captive reader", audit
+                        # defect F1). Give the fresh FAT32 boot volume a letter
+                        # so the operator sees a healthy card. Best-effort.
+                        visible = getattr(
+                            self.platform_io, "make_card_visible", None)
+                        if visible is not None:
+                            try:
+                                visible(self.target.physical_drive_id)
+                            except Exception:
+                                pass
                 return FlashJobResult(ok=True,
                                       bytes_written=write_result.bytes_written,
                                       source_sha256=write_result.source_sha256)

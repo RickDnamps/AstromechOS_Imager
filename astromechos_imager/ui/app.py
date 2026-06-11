@@ -259,7 +259,29 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             sink.write(f"[boot] __file__={__file__}\n")
             sink.write(f"[boot] cwd={os.getcwd()}\n")
 
-    state = WizardState()
+    # Windows: when the operator SELECTS a target card (wizard Step 4), kill
+    # its drive letter(s) immediately. Covers the card-inserted-BEFORE-launch
+    # case that automount-off cannot (automount only blocks NEW mounts).
+    # Selection is the earliest moment the TARGET disk is known — doing this
+    # at launch would also detach the operator's SSD/USB sticks. Injected as
+    # a callable so WizardState stays platform-free and unit tests (which
+    # call the drive-id setters with arbitrary ids) never touch real disks.
+    release_letters = None
+    if sys.platform == "win32":
+        def release_letters(drive_id: int) -> None:
+            from astromechos_imager.platform.windows import (  # noqa: PLC0415
+                force_unmount_letter,
+                letters_on_disk,
+            )
+            letters = letters_on_disk(drive_id)
+            for letter in letters:
+                force_unmount_letter(letter)
+            if letters:
+                logging.getLogger(__name__).info(
+                    "selection: released letter(s) %s on disk %s",
+                    letters, drive_id)
+
+    state = WizardState(release_disk_letters=release_letters)
     flash_vm = FlashViewModel(state)
     theme = ThemeManager()
     engine = QQmlApplicationEngine()

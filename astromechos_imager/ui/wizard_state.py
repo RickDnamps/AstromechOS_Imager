@@ -99,8 +99,17 @@ class WizardState(QObject):
 
     _VALID_ROLES = ("master", "slave")
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None,
+                 release_disk_letters=None) -> None:
         super().__init__(parent)
+        # Optional platform hook: callable(physical_drive_id) that detaches
+        # every drive letter of the selected target disk. Injected by
+        # ui/app.py on Windows ONLY (bug fix 2026-06-11: a card already
+        # inserted BEFORE app launch keeps its Explorer letter — automount-off
+        # at startup only stops NEW mounts). Default None keeps unit tests
+        # and non-Windows platforms 100% side-effect free: tests call the
+        # drive-id setters with arbitrary ids and must NEVER touch real disks.
+        self._release_disk_letters = release_disk_letters
         self._step = self.MIN_STEP
         self._master_image_path = ""
         self._slave_image_path = ""
@@ -425,13 +434,47 @@ class WizardState(QObject):
     def setMasterDriveId(self, drive_id: int) -> None:
         if drive_id != self._master_drive_id:
             self._master_drive_id = drive_id
+            self._release_letters_async(drive_id)
             self.masterDriveIdChanged.emit(drive_id)
 
     @Slot(int)
     def setSlaveDriveId(self, drive_id: int) -> None:
         if drive_id != self._slave_drive_id:
             self._slave_drive_id = drive_id
+            self._release_letters_async(drive_id)
             self.slaveDriveIdChanged.emit(drive_id)
+
+    def _release_letters_async(self, drive_id: int) -> None:
+        """Detach the freshly-selected card's drive letter(s) in a daemon
+        thread (selection click must never block on FSCTL retries).
+
+        Bug fix 2026-06-11: automount-off at app launch only prevents NEW
+        mounts — a card inserted BEFORE the app started keeps its letter
+        (e.g. K:) and stays browsable in Explorer. Selecting it as Master or
+        Slave is the explicit operator intent, and the earliest moment the
+        TARGET disk is known (killing letters at launch would also hit the
+        operator's SSD/USB sticks). With automount off, Windows cannot
+        re-mount it afterwards — the card stays invisible until the app
+        closes. The flash-time live-letter merge in lock_and_dismount and
+        the _wait_for_unmount gate remain as backstops. Best-effort: a
+        failure here can never break the wizard.
+        """
+        if self._release_disk_letters is None or drive_id < 0:
+            return
+        import threading  # noqa: PLC0415
+
+        hook = self._release_disk_letters
+
+        def _work() -> None:
+            try:
+                hook(drive_id)
+            except Exception:  # noqa: BLE001
+                logging.getLogger(__name__).info(
+                    "release_disk_letters(%s) failed (best-effort)", drive_id,
+                    exc_info=True)
+
+        threading.Thread(target=_work, daemon=True,
+                         name=f"release-letters-{drive_id}").start()
 
     # ------------------------------------------------------------------
     # Sequential workflow state machine (Screens 4 Role / 6 Cycle).

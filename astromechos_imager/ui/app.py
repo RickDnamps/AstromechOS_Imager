@@ -159,12 +159,26 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
         except Exception:
             pass
         # If a previous run crashed mid-flash with automount disabled, re-enable
-        # it now (crash-safe restore of the Windows auto-mount setting).
+        # it now (crash-safe restore of the Windows auto-mount setting), then
+        # immediately disable automount for THIS app session.
+        #
+        # Bug fix 2026-06-11 (field: K: visible in Explorer + "Format?" popup
+        # while flashing the MASTER): FlashJob only disabled automount when the
+        # operator clicked Flash — but the wizard tells the operator to INSERT
+        # the cards earlier (Step 4), while automount was still ON. Windows
+        # assigned the letter (and persisted the volume↔letter binding in
+        # MountedDevices) at insertion, before any FlashJob defense ran.
+        # Disabling at app launch closes that window: a card inserted at ANY
+        # point of the wizard never gets a drive letter, so Explorer has
+        # nothing to render, probe, or pop a format dialog against.
+        # Restore points unchanged: aboutToQuit below + the crash marker.
         try:
             from astromechos_imager.platform.windows import (
+                disable_automount,
                 restore_automount_if_crashed,
             )
             restore_automount_if_crashed()
+            disable_automount()
         except Exception:
             pass
     # Install Qt's message handler BEFORE QGuiApplication so any warnings

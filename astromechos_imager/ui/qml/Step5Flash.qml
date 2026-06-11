@@ -47,11 +47,13 @@ Rectangle {
         }
         // Stage 2: Streaming & writing (option 1B — combined)
         var s2 = "pending", s2det = ""
-        var s2Active = isFlashing && (p === "preparing" || p === "decompress_write")
+        var s2Active = isFlashing && (p === "preparing" || p === "waiting_unmount" || p === "decompress_write")
         var s2Done = (p === "verify" || p === "customizing" || isDone)
         if (s2Active) {
             s2 = "active"
-            s2det = p === "preparing" ? "preparing…" : Math.round(prog * 100) + " %"
+            s2det = (p === "preparing")       ? "preparing…"
+                  : (p === "waiting_unmount") ? "🛡️ waiting for unmount…"
+                  : Math.round(prog * 100) + " %"
         } else if (s2Done)                                       { s2 = "done"; s2det = "✓ OK" }
         else if (isError && (s1 === "done" || s1 === "skipped")) { s2 = "failed" }
         // Stage 3: Verifying integrity (readback)
@@ -81,6 +83,7 @@ Rectangle {
         if (isFlashing) {
             var p = _phase()
             var prog = _progress()
+            if (p === "waiting_unmount")  return 0.05
             if (p === "preparing")        return 0.05
             if (p === "decompress_write") return 0.05 + prog * 0.55
             if (p === "verify")           return 0.60 + prog * 0.35
@@ -91,11 +94,12 @@ Rectangle {
     function _globalMode() {
         if (!flashViewModel) return "determinate"
         var p = _phase()
-        return (isFlashing && (p === "preparing" || p === "customizing")) ? "indeterminate" : "determinate"
+        return (isFlashing && (p === "preparing" || p === "waiting_unmount" || p === "customizing")) ? "indeterminate" : "determinate"
     }
     function _globalLabel() {
         if (!flashViewModel) return ""
         var p = _phase()
+        if (isFlashing && p === "waiting_unmount") return "🛡️ RAW — Drive Locked: Waiting for unmount"
         if (isFlashing && p === "customizing") return "Personalizing…"
         if (isFlashing && p === "preparing")   return "Preparing…"
         return ""

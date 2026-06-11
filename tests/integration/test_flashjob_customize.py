@@ -346,6 +346,69 @@ def test_flash_does_not_prezero_sector0(tmp_path, fake_platform_io, monkeypatch)
     )
 
 
+def test_wait_for_unmount_polls_until_letterless(tmp_path, fake_platform_io, monkeypatch):
+    r"""Active-wait gate: keep force-dismounting + polling until the target disk
+    is letter-less, so we never open \\.\PhysicalDrive while Windows still holds
+    the freshly-inserted Slave (the 'Format this disk?' precondition)."""
+    fake_platform_io.add_drive(12, size=512 * 1024 + 1024)
+    target = fake_platform_io.enumerate_removable_drives()[0]
+    state = {"polls": 0}
+
+    def fake_letters(pid):
+        state["polls"] += 1
+        return ["K"] if state["polls"] <= 2 else []   # Windows releases after 2
+
+    unmounts: list[str] = []
+    monkeypatch.setattr(fake_platform_io, "letters_on_disk", fake_letters, raising=False)
+    monkeypatch.setattr(fake_platform_io, "force_unmount_letter",
+                        lambda letter: unmounts.append(letter), raising=False)
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=target, role=Role.MASTER, firstboot_config=_make_cfg(),
+        master_pair=generate_ed25519(), linux_account=ACC, skip_verify=True,
+    )
+    job._wait_for_unmount(timeout_s=5.0, poll_s=0.01)
+    assert unmounts == ["K", "K"], f"expected two force-unmounts of K, got {unmounts}"
+    assert state["polls"] >= 3, "must poll until the disk reports no letter"
+
+
+def test_wait_for_unmount_times_out_best_effort(tmp_path, fake_platform_io, monkeypatch):
+    """If Windows never releases the letter, the gate proceeds best-effort
+    (logs + returns) instead of blocking the flash forever — no regression."""
+    fake_platform_io.add_drive(13, size=512 * 1024 + 1024)
+    target = fake_platform_io.enumerate_removable_drives()[0]
+    calls: list[str] = []
+    monkeypatch.setattr(fake_platform_io, "letters_on_disk",
+                        lambda pid: ["K"], raising=False)
+    monkeypatch.setattr(fake_platform_io, "force_unmount_letter",
+                        lambda letter: calls.append(letter), raising=False)
+
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=target, role=Role.MASTER, firstboot_config=_make_cfg(),
+        master_pair=generate_ed25519(), linux_account=ACC, skip_verify=True,
+    )
+    import time as _t
+    t0 = _t.monotonic()
+    job._wait_for_unmount(timeout_s=0.05, poll_s=0.01)
+    assert _t.monotonic() - t0 < 3.0, "must not block forever on a stuck letter"
+    assert calls, "force_unmount must be attempted before giving up"
+
+
+def test_wait_for_unmount_noop_without_platform_hooks(tmp_path, fake_platform_io):
+    """On platforms/fakes without the hooks (letters_on_disk/force_unmount_letter)
+    the gate is a no-op and never blocks — the default fake has no such methods."""
+    fake_platform_io.add_drive(14, size=512 * 1024 + 1024)
+    target = fake_platform_io.enumerate_removable_drives()[0]
+    job = FlashJob(
+        platform_io=fake_platform_io, image_path=_img(tmp_path, "m.img.xz"),
+        target=target, role=Role.MASTER, firstboot_config=_make_cfg(),
+        master_pair=generate_ed25519(), linux_account=ACC, skip_verify=True,
+    )
+    job._wait_for_unmount(timeout_s=5.0, poll_s=0.01)  # returns immediately
+
+
 def test_flash_disables_automount_and_does_not_reenable(tmp_path, fake_platform_io, monkeypatch):
     """The flash disables Windows automount up front and — critically — does
     NOT re-enable it per-card. Automount stays off for the whole session so

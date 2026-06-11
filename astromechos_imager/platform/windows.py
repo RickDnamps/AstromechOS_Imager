@@ -298,7 +298,25 @@ def lock_and_dismount(letters: tuple[str, ...],
 
     # Remove the drive letter(s) from Mount Manager so the shell has no
     # letter to render "Format K:?" against (baseline pop-up suppression).
-    for letter in letters:
+    #
+    # Bug fix 2026-06-11 (field: K: stayed visible through the whole Master
+    # flash): ``letters`` comes from the WMI scan and is STALE — the operator
+    # inserts the card AFTER the drive list was captured (wizard Step 4), so
+    # the live letter Windows just assigned is not in the list and was never
+    # deleted. Re-enumerate the letters LIVE from Mount Manager for this
+    # physical disk and merge them with the caller's list before deleting.
+    live_letters: list[str] = []
+    if physical_drive_id is not None:
+        try:
+            live_letters = letters_on_disk(physical_drive_id)
+        except Exception as exc:  # noqa: BLE001
+            _log.info("  live letter enumeration failed (%s) — using the "
+                      "scan-time list only", exc)
+    all_letters = tuple(dict.fromkeys([*letters, *live_letters]))
+    if set(all_letters) - set(letters):
+        _log.info("  stale scan list %s — live letters on disk %s: %s",
+                  letters, physical_drive_id, live_letters)
+    for letter in all_letters:
         try:
             _delete_mount_point(letter)
         except Exception as exc:  # noqa: BLE001
@@ -308,8 +326,8 @@ def lock_and_dismount(letters: tuple[str, ...],
     # Explorer stops polling the device and never renders the modal dialog.
     try:
         from astromechos_imager.platform import native_shell_quiet
-        if native_shell_quiet.available() and letters:
-            native_shell_quiet.lock_and_quiet(letters)
+        if native_shell_quiet.available() and all_letters:
+            native_shell_quiet.lock_and_quiet(all_letters)
     except Exception as exc:  # noqa: BLE001
         _log.info("native shell-quiet unavailable (%s) — continuing", exc)
 
@@ -539,6 +557,80 @@ def _volume_disk_extents(volume_guid: str) -> list[int]:
         return disks
     finally:
         k.CloseHandle(h)
+
+
+def force_unmount_letter(letter: str) -> bool:
+    r"""DEVICE-SAFE forced detach of a drive letter.
+
+    Open ``\\.\X:``, ``FSCTL_DISMOUNT_VOLUME`` (a forced dismount invalidates
+    any open handle — e.g. the Explorer window AutoPlay opened on a
+    freshly-inserted card), then ``DeleteVolumeMountPointW`` to drop the letter.
+    These are the EXACT same Win32 calls ``lock_and_dismount`` already uses
+    without breaking the raw write — there is deliberately NO ``mountvol /D``
+    (left the disk ERROR_NOT_READY) and NO ``MountedDevices`` registry edit
+    (triggered a re-evaluation that popped the dialog on BOTH cards). Used by
+    the orchestrator's active-wait gate to keep re-dismounting until Windows
+    releases the letter. Best-effort.
+    """
+    letter = (letter or "").strip().rstrip("\\").rstrip(":")
+    if len(letter) != 1 or not letter.isalpha():
+        return False
+    h = _open_volume_handle(f"\\\\.\\{letter}:")
+    if h != INVALID_HANDLE_VALUE:
+        locked = False
+        for _ in range(4):
+            try:
+                _ctl(h, FSCTL_LOCK_VOLUME)
+                locked = True
+                break
+            except OSError:
+                time.sleep(0.15)
+        try:
+            _ctl(h, FSCTL_DISMOUNT_VOLUME)
+        except OSError as exc:
+            _log.info("  force_unmount_letter(%s): dismount failed (%s)", letter, exc)
+        if locked:
+            try:
+                _ctl(h, FSCTL_UNLOCK_VOLUME)
+            except OSError:
+                pass
+        kernel32().CloseHandle(h)
+    try:
+        kernel32().DeleteVolumeMountPointW(f"{letter}:\\")
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
+def letters_on_disk(physical_drive_id: int) -> list[str]:
+    r"""COM-free: drive letters currently associated with ``physical_drive_id``.
+
+    The orchestrator's active-wait gate polls this BETWEEN dismount attempts to
+    decide whether Windows has finally released the card. It is COM-free
+    (FindFirstVolume + IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS +
+    GetVolumePathNamesForVolumeNameW, no WMI) so it works on the flash worker
+    thread, which never initialises COM. Returns e.g. ``['K']`` or ``[]``.
+    """
+    k = kernel32()
+    out: list[str] = []
+    try:
+        for vol in _list_volumes():           # \\?\Volume{guid}\
+            if physical_drive_id not in _volume_disk_extents(vol):
+                continue
+            buf = ctypes.create_unicode_buffer(1024)
+            returned = wintypes.DWORD(0)
+            ok = k.GetVolumePathNamesForVolumeNameW(
+                vol, buf, len(buf), ctypes.byref(returned),
+            )
+            if not ok:
+                continue
+            raw = buf[: returned.value]
+            for p in raw.split("\x00"):
+                if len(p) == 3 and p[1] == ":" and p[2] == "\\":
+                    out.append(p[0])
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def attach_letter_to_unmounted_volume(
@@ -1127,6 +1219,16 @@ class WindowsPlatformIO:
     def finalize_eject(self, physical_drive_id):
         """Best-effort eject on a fresh handle after the write handle closed."""
         return finalize_eject(physical_drive_id)
+
+    def letters_on_disk(self, physical_drive_id):
+        """COM-free: drive letters currently associated with the target disk
+        (active-wait gate polls this until Windows releases the card)."""
+        return letters_on_disk(physical_drive_id)
+
+    def force_unmount_letter(self, letter):
+        """Device-safe forced detach of a drive letter (FSCTL dismount +
+        DeleteVolumeMountPoint — no mountvol /D, no registry)."""
+        return force_unmount_letter(letter)
 
     def disable_automount(self):
         """Disable Windows auto-mount for the flash (kills the Format pop-up)."""

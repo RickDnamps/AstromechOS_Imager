@@ -127,6 +127,13 @@ class FlashJob:
                         self.target.physical_drive_id,
                     ) or []
                 )
+                # 1b. ACTIVE-WAIT GATE: never open \\.\PhysicalDrive while
+                #     Windows still has a drive letter on the target. The Master
+                #     flashes clean because the OS has released the card by then;
+                #     the freshly-inserted Slave is still held by Explorer
+                #     (AutoPlay) and re-bound to K:, and writing under it pops
+                #     "Format this disk?". Re-dismount + poll until released.
+                self._wait_for_unmount()
                 # 2. Open one raw device handle for write, verify, and the final
                 #    MBR write. open_raw_device wipes the in-memory partition
                 #    layout so PARTMGR stops policing in-partition writes.
@@ -355,6 +362,58 @@ class FlashJob:
             # this disk?". The single restore point is app shutdown
             # (app.aboutToQuit → enable_automount); a crash is covered by the
             # marker file + restore_automount_if_crashed() on next launch.
+
+    def _wait_for_unmount(self, timeout_s: float = 30.0, poll_s: float = 0.25) -> None:
+        r"""Active-wait gate: keep force-dismounting until the target disk is
+        letter-less, so we never open ``\\.\PhysicalDrive`` while Windows still
+        has the card mounted.
+
+        The Master flashes clean because by flash time Windows has released the
+        card; the freshly-inserted Slave is still held by Explorer (AutoPlay)
+        and re-bound to its remembered letter (K:), and writing under it pops
+        "Format this disk?". This reproduces the Master's released state for the
+        Slave — re-dismount + poll until no letter is associated. Device-safe
+        (FSCTL dismount + DeleteVolumeMountPoint only, via the platform hooks);
+        on timeout it proceeds best-effort, i.e. exactly the prior behaviour, so
+        it can never regress a flash. No-op on platforms/fakes lacking the hooks.
+        """
+        import time as _t  # noqa: PLC0415
+        letters_fn = getattr(self.platform_io, "letters_on_disk", None)
+        force_fn = getattr(self.platform_io, "force_unmount_letter", None)
+        if letters_fn is None or force_fn is None:
+            return
+        deadline = _t.monotonic() + timeout_s
+        announced = False
+        while True:
+            try:
+                letters = list(letters_fn(self.target.physical_drive_id) or [])
+            except Exception:  # noqa: BLE001
+                return  # can't probe — don't block the flash
+            if not letters:
+                if announced:
+                    _log.info("PHASE wait-unmount: target disk released by Windows")
+                return
+            for letter in letters:
+                try:
+                    force_fn(letter)
+                except Exception:  # noqa: BLE001
+                    pass
+            if _t.monotonic() >= deadline:
+                _log.info(
+                    "PHASE wait-unmount: disk %s still holds %s after %.0fs — "
+                    "proceeding best-effort (pop-up possible, write unaffected)",
+                    self.target.physical_drive_id, letters, timeout_s,
+                )
+                return
+            if not announced:
+                _log.info("PHASE wait-unmount: waiting for Windows to release %s "
+                          "on disk %s", letters, self.target.physical_drive_id)
+                announced = True
+            self.on_progress(DiskWriterProgress(
+                phase="waiting_unmount", bytes_done=0, bytes_total=0,
+                throughput_bps=0.0,
+            ))
+            _t.sleep(poll_s)
 
     def _sync_cache(self, dev: object) -> None:
         """Best-effort flush of the USB-bridge firmware write cache.

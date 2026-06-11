@@ -205,6 +205,15 @@ class DriveListModel(QAbstractListModel):
             return ""
         return _drive_letters_str(self._drives[0])
 
+    @Property(bool, notify=firstDriveChanged)
+    def firstDriveSuspect(self) -> bool:
+        """True when the single candidate is USB FIXED media (external
+        SSD/HDD, not an SD card) — Step 4 skips auto-selection and demands
+        an explicit override (audit defect C1)."""
+        if not self._drives:
+            return False
+        return bool(getattr(self._drives[0], "is_suspect_fixed", False))
+
     @Property(str, notify=firstDriveChanged)
     def firstDriveModel(self) -> str:
         return self._drives[0].model if self._drives else ""

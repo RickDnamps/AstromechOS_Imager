@@ -797,6 +797,28 @@ def _first_free_letter() -> str | None:
     return None
 
 
+def disk_ids_for_path(path: str) -> list[int]:
+    r"""Physical drive numbers backing the volume that hosts ``path``.
+
+    Safety primitive for the flash preflight: the target disk must NEVER be
+    the disk the source image lives on (the operator's USB SSD passes the
+    removable-candidate filter — flashing it would destroy the very image
+    being written, audit defect C1). Best-effort: returns [] on any failure
+    so the guard degrades open rather than blocking legitimate flashes.
+    """
+    try:
+        k = kernel32()
+        buf = ctypes.create_unicode_buffer(512)
+        if not k.GetVolumePathNameW(str(path), buf, len(buf)):
+            return []
+        root = buf.value.rstrip("\\")          # e.g. "J:"
+        if not root:
+            return []
+        return _volume_disk_extents(f"\\\\.\\{root}")
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def make_card_visible(physical_drive_id: int, timeout_s: float = 10.0) -> bool:
     """Post-flash: give the freshly-written boot volume a drive letter back.
 
@@ -1296,6 +1318,9 @@ class WindowsPlatformIO:
     def make_card_visible(self, physical_drive_id: int,
                           timeout_s: float = 10.0) -> bool:
         return make_card_visible(physical_drive_id, timeout_s=timeout_s)
+
+    def disk_ids_for_path(self, path: str) -> list[int]:
+        return disk_ids_for_path(path)
 
     def lock_and_dismount(self, letters, physical_drive_id=None):
         return lock_and_dismount(letters, physical_drive_id)

@@ -55,7 +55,7 @@ Or with explicit path:
 & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" installer\AstromechOSImager.iss
 ```
 
-Output: `dist\AstromechOS_Imager-Setup-0.2.1.exe` (~50-70 MB with
+Output: `dist\AstromechOS_Imager-Setup-0.2.2.exe` (~50-70 MB with
 LZMA2/max compression).
 
 ## Step 3 — Release

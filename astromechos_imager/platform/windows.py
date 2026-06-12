@@ -1102,6 +1102,35 @@ def enable_automount() -> bool:
     return ok
 
 
+def purge_stale_mount_points() -> bool:
+    r"""``mountvol /R`` — delete letter bindings of volumes ABSENT from the system.
+
+    Field log 2026-06-12 #2 (0.2.1, master card): a sticky
+    ``HKLM\SYSTEM\MountedDevices`` binding re-letters a volume the moment it
+    (re-)arrives, even with automount off and even after the on-disk
+    partition table was scrubbed (removable media exposes a whole-disk
+    "superfloppy" RAW volume when sector 0 is blank). The strip's
+    ``DeleteVolumeMountPointW`` races AutoPlay and can silently leave the
+    registry binding behind.
+
+    The orchestrator calls this right after ``open_raw_device`` tore the
+    target's volumes down: at that instant the card's old volumes are "no
+    longer in the system", so ``mountvol /R`` deletes their registry
+    bindings through the OS-sanctioned cleanup path (no direct registry
+    edit — a previous raw MountedDevices edit experiment re-triggered the
+    dialog). With the bindings gone AND automount off, a mid-write volume
+    arrival can never take a drive letter.
+
+    Side effect: stale bindings of OTHER absent devices (long-unplugged
+    USB sticks) are purged too — they simply get a fresh letter on next
+    insertion. Live volumes are never touched.
+    """
+    ok = _run_mountvol("/R")
+    if ok:
+        _log.info("stale mount points purged (mountvol /R)")
+    return ok
+
+
 def restore_automount_if_crashed() -> None:
     """If a previous run died with automount disabled (marker present), restore.
 
@@ -1390,6 +1419,10 @@ class WindowsPlatformIO:
     def enable_automount(self):
         """Re-enable Windows auto-mount (call in the flash's finally)."""
         return enable_automount()
+
+    def purge_stale_mount_points(self):
+        """mountvol /R — kill sticky letter bindings of absent volumes."""
+        return purge_stale_mount_points()
 
     def attach_letter_to_unmounted_volume(
         self, letter: str, physical_drive_id: int, timeout_s: float = 15.0,

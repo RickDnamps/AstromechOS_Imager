@@ -54,6 +54,10 @@ from astromechos_imager.core.platform_io import PlatformIO  # noqa: E402
 
 _log = logging.getLogger(__name__)
 
+# Mid-flash letter watchdog poll interval (seconds). Module-level so tests
+# can shrink it; 0.25 s keeps a surprise letter alive for at most a blink.
+_WATCHDOG_POLL_S = 0.25
+
 
 @dataclass(frozen=True)
 class FlashJobResult:
@@ -190,6 +194,57 @@ class FlashJob:
                         "mid-write re-enumeration may resurrect the old "
                         "partitions and pop the format dialog", exc,
                     )
+                # STICKY-BINDING PURGE (field log 2026-06-12 #2, 0.2.1): the
+                # scrub alone was NOT enough — on REMOVABLE media a blank
+                # sector 0 still yields a whole-disk "superfloppy" RAW volume
+                # on re-enumeration, and a sticky MountedDevices binding
+                # re-letters it ("Format?" popped 42 s into the master write).
+                # The target's old volumes were torn down by open_raw_device a
+                # moment ago, so their registry bindings are now "absent" and
+                # mountvol /R deletes them through the OS-sanctioned path.
+                # No binding + automount off = no letter can EVER attach
+                # mid-write. Best-effort.
+                try:
+                    purge = getattr(
+                        self.platform_io, "purge_stale_mount_points", None)
+                    if purge is not None and not purge():
+                        _log.warning(
+                            "mountvol /R failed — a stale letter binding may "
+                            "survive and re-letter a mid-write volume arrival")
+                except Exception:
+                    pass
+                # MID-FLASH LETTER WATCHDOG — belt-and-suspenders for whatever
+                # mechanism still letters the target while the device handle
+                # is open: poll COM-free every _WATCHDOG_POLL_S, strip + WARN
+                # (the warning is the forensic trail for the next field log).
+                # Stopped in the inner finally, BEFORE the cancel-path exFAT
+                # restore (whose diskpart "assign" must not be raced) and
+                # before make_card_visible's deliberate letter attach.
+                watchdog_stop = threading.Event()
+                watchdog_thread = None
+                _letters_fn = getattr(self.platform_io, "letters_on_disk", None)
+                _strip_fn = getattr(
+                    self.platform_io, "force_unmount_letter", None)
+                if _letters_fn is not None and _strip_fn is not None:
+                    _watch_pid = self.target.physical_drive_id
+
+                    def _letter_watchdog() -> None:
+                        while not watchdog_stop.wait(_WATCHDOG_POLL_S):
+                            try:
+                                for letter in (_letters_fn(_watch_pid) or []):
+                                    _log.warning(
+                                        "mid-flash watchdog: letter %s: "
+                                        "appeared on disk %s during the "
+                                        "device-open window — stripping",
+                                        letter, _watch_pid)
+                                    _strip_fn(letter)
+                            except Exception:  # noqa: BLE001 — never kill the flash
+                                pass
+
+                    watchdog_thread = threading.Thread(
+                        target=_letter_watchdog, name="letter-watchdog",
+                        daemon=True)
+                    watchdog_thread.start()
                 try:
                     _log.info("PHASE streaming-write: starting")
                     with open_image(self.image_path) as src:
@@ -280,6 +335,13 @@ class FlashJob:
                         # card carries the image's own MBR — it's valid.
                         mbr_written = True
                 finally:
+                    # Stop the letter watchdog FIRST: the cancel-path exFAT
+                    # restore (diskpart "assign") and make_card_visible both
+                    # attach letters deliberately — the watchdog must never
+                    # race them.
+                    watchdog_stop.set()
+                    if watchdog_thread is not None:
+                        watchdog_thread.join(timeout=2.0)
                     # DiskWriter joins its threads and verify runs synchronously
                     # before this point, so no background I/O can touch the
                     # handle. close() is idempotent.

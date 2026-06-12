@@ -89,3 +89,19 @@ def test_invalid_letter_rejected(win):
     assert win.force_unmount_letter("") is False
     assert win.force_unmount_letter("KL") is False
     assert win.force_unmount_letter("5") is False
+
+
+def test_purge_stale_mount_points_runs_mountvol_r(monkeypatch):
+    """purge_stale_mount_points must be exactly `mountvol /R` (the
+    OS-sanctioned stale-binding cleanup) and report its success truthfully."""
+    from astromechos_imager.platform import windows
+
+    flags = []
+    monkeypatch.setattr(
+        windows, "_run_mountvol",
+        lambda flag: (flags.append(flag), True)[1])
+    assert windows.purge_stale_mount_points() is True
+    assert flags == ["/R"]
+
+    monkeypatch.setattr(windows, "_run_mountvol", lambda flag: False)
+    assert windows.purge_stale_mount_points() is False

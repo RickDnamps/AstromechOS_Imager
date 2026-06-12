@@ -18,7 +18,7 @@
 ; A future improvement would auto-derive this from pyproject.toml via a
 ; build-time generated `version.iss` include; deferred to keep iscc
 ; invocable as a single command.
-#define AppVersion     "0.2.1"
+#define AppVersion     "0.2.2"
 #define AppPublisher   "AstromechOS Project"
 #define AppURL         "https://github.com/RickDnamps/AstromechOS_Imager"
 #define AppExeName     "AstromechOS Imager.exe"

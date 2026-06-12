@@ -27,7 +27,18 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Skip read-back SHA256 verification (discouraged)")
     flash.add_argument("--sequential", action="store_true",
                        help="Force sequential flash even when 2 SDs are present")
-    flash.add_argument("--install-user", type=str, default="pi")
+    # Lockstep with the GUI (audit C4): the wizard hard-locks the install
+    # user to DEFAULT_INSTALL_USER ("astromech") — a CLI default of "pi"
+    # produced a different account contract than a GUI flash.
+    from astromechos_imager.ui.flash_view_model import (
+        DEFAULT_INSTALL_PASSWORD, DEFAULT_INSTALL_USER,
+    )
+    flash.add_argument("--install-user", type=str,
+                       default=DEFAULT_INSTALL_USER)
+    flash.add_argument("--install-password", type=str,
+                       default=DEFAULT_INSTALL_PASSWORD,
+                       help="Password for the UID-1000 Linux account "
+                            "(default: same fallback as the GUI wizard).")
     flash.add_argument("--repo-url", type=str, default=None)
     flash.add_argument("--repo-branch", type=str, default="main")
     flash.add_argument("--hostname-master", type=str, default="astromech-master")
@@ -82,7 +93,10 @@ def _build_platform_io():
 
 
 def _cmd_flash(args: argparse.Namespace) -> int:
-    from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
+    from astromechos_imager import __version__
+    from astromechos_imager.core.keygen import (
+        generate_ed25519, generate_hotspot_bootstrap, generate_linux_account,
+    )
     from astromechos_imager.core.models import FirstbootConfig, Role, _utc_iso_now
     from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
 
@@ -97,10 +111,15 @@ def _cmd_flash(args: argparse.Namespace) -> int:
         hostname_master=args.hostname_master,
         hostname_slave=args.hostname_slave,
         hotspot_bootstrap=generate_hotspot_bootstrap(args.hotspot_psk),
-        imager_version="0.1.0",
+        imager_version=__version__,
         flashed_at_iso=_utc_iso_now(),
     )
     pair = generate_ed25519()
+    # Lockstep with the GUI (audit C4): a CLI flash that never passed
+    # linux_account wrote EMPTY_USER_DATA — no account provisioning on
+    # the flashed Trixie image, unlike every GUI flash.
+    linux_account = generate_linux_account(
+        args.install_user, args.install_password)
 
     if args.master_image and args.slave_image:
         job = PairFlashJob(
@@ -129,6 +148,7 @@ def _cmd_flash(args: argparse.Namespace) -> int:
             role=role,
             firstboot_config=cfg,
             master_pair=pair,
+            linux_account=linux_account,
             skip_verify=args.no_verify,
         )
         return 0 if single.run().ok else 2

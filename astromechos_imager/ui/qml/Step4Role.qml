@@ -50,6 +50,19 @@ Rectangle {
     readonly property string firstDriveLetters: driveListModel ? driveListModel.firstDriveLetters : ""
     readonly property string firstDriveModel:   driveListModel ? driveListModel.firstDriveModel   : ""
     readonly property string firstDriveSize:    driveListModel ? driveListModel.firstDriveSize    : ""
+    // USB FIXED media (external SSD/HDD — e.g. the operator's image-source
+    // drive) — eligible to LIST but never auto-selected (audit defect C1).
+    readonly property bool   firstDriveSuspect: driveListModel
+        && driveListModel.firstDriveSuspect !== undefined
+        ? driveListModel.firstDriveSuspect : false
+
+    // The drive id currently held by WizardState for the imposed role —
+    // the NEXT gate requires it to match the LIVE first drive, so a card
+    // swap (pull A, insert B) can never flash a stale id (audit defect C3).
+    readonly property int selectedDriveId:
+        wizardState.currentRole === "master" ? wizardState.masterDriveId
+        : wizardState.currentRole === "slave" ? wizardState.slaveDriveId
+        : -1
 
     function _assignRole(role) {
         wizardState.setCurrentRole(role)
@@ -63,14 +76,20 @@ Rectangle {
 
     // The role is imposed (master first, then slave), so auto-SELECT it — the
     // operator just hits NEXT. The opposite card is disabled + dimmed. Re-runs
-    // when the card is inserted after the step loads.
+    // when the card is inserted after the step loads AND when the single
+    // drive's id changes (card swap) — the old role-only guard left a stale
+    // drive id behind a swapped card (audit defect C3). Suspect FIXED disks
+    // are never auto-selected; the operator must click the explicit override.
     function _autoSelectImposed() {
-        if (hasOneCard && imposedRole !== "" && wizardState.currentRole !== imposedRole)
+        if (!hasOneCard || imposedRole === "" || firstDriveSuspect) return
+        if (wizardState.currentRole !== imposedRole
+                || selectedDriveId !== firstDriveId)
             _assignRole(imposedRole)
     }
     Component.onCompleted: _autoSelectImposed()
     onImposedRoleChanged: _autoSelectImposed()
     onDriveCountChanged: _autoSelectImposed()
+    onFirstDriveIdChanged: _autoSelectImposed()
 
     ColumnLayout {
         anchors.fill: parent
@@ -176,6 +195,49 @@ Rectangle {
                 }
             }
 
+            // Suspect USB FIXED disk — looks like an external SSD/HDD, not
+            // an SD card (audit defect C1: the operator's 256 GB image-source
+            // SSD passes the eligibility filter). Never auto-selected; the
+            // operator must explicitly override. Some SD readers behind
+            // USB-SATA bridges legitimately report "Fixed", hence the
+            // override instead of a hard block.
+            ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 12
+                visible: hasOneCard && firstDriveSuspect
+                         && selectedDriveId !== firstDriveId
+                width: 460
+                Text {
+                    text: "⚠ USB FIXED DISK DETECTED"
+                    color: theme.colors.colorBorderWarn
+                    font.family: Theme.fontTitle
+                    font.pixelSize: 14
+                    font.bold: true
+                    font.letterSpacing: 1.6
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: true
+                }
+                Text {
+                    text: firstDriveModel + " (" + firstDriveSize + ") reports "
+                          + "itself as a FIXED disk — that is usually an external "
+                          + "SSD/HDD, not an SD card. It was NOT auto-selected. "
+                          + "Unplug it and insert the SD card, or — only if this "
+                          + "really is your SD reader — override below."
+                    color: theme.colors.colorTextSecondary
+                    font.family: Theme.fontBody
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: true
+                }
+                AstroButton {
+                    text: "USE THIS FIXED DISK ANYWAY"
+                    variant: "secondary"
+                    Layout.alignment: Qt.AlignHCenter
+                    onClicked: _assignRole(imposedRole)
+                }
+            }
+
             // Too-many-cards red banner
             ColumnLayout {
                 anchors.centerIn: parent
@@ -203,12 +265,14 @@ Rectangle {
                 }
             }
 
-            // Single-card view — drive info + role pick
+            // Single-card view — drive info + role pick. Hidden while an
+            // un-overridden suspect FIXED disk shows its warning banner.
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 18
                 spacing: 18
-                visible: hasOneCard
+                visible: hasOneCard && (!firstDriveSuspect
+                                        || selectedDriveId === firstDriveId)
 
                 // Drive row
                 Rectangle {
@@ -448,9 +512,13 @@ Rectangle {
         AstroButton {
             text: "NEXT →"
             variant: "primary"
+            // selectedDriveId must equal the LIVE first drive id: a card
+            // swap (pull A, insert B) used to leave the stale id A armed
+            // while the row displayed B (audit defect C3). Also blocks the
+            // un-overridden suspect-FIXED case (selectedDriveId stays -1).
             enabled: hasOneCard
-                && ((wizardState.currentRole === "master" && wizardState.masterDriveId !== -1)
-                 || (wizardState.currentRole === "slave"  && wizardState.slaveDriveId  !== -1))
+                && selectedDriveId !== -1
+                && selectedDriveId === firstDriveId
             onClicked: {
                 if (flashViewModel.status === "error") {
                     flashViewModel.resetForNextCycle()

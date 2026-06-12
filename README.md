@@ -4,7 +4,7 @@
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3127/)
 [![PySide6 6.7](https://img.shields.io/badge/PySide6-6.7-41CD52.svg?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython-6/)
 [![Platform: Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6.svg?logo=windows&logoColor=white)](#-distribution--releases)
-[![Tests: 504 passing](https://img.shields.io/badge/tests-504%20passing-5ec07a.svg)](#-for-developers)
+[![Tests: 602 passing](https://img.shields.io/badge/tests-602%20passing-5ec07a.svg)](#-for-developers)
 [![Installer: 36 MB](https://img.shields.io/badge/installer-36%20MB-5e9bd6.svg)](#-distribution--releases)
 
 > 🤖 Companion to [AstromechOS](https://github.com/RickDnamps/AstromechOS) — the open control platform that makes a 1:1 astromech droid feel *alive*.
@@ -148,7 +148,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
-**504 passing tests** cover the image validator, wizard state, the flash view‑model, the cloud‑init generator, FAT32 boot‑partition I/O, ed25519 keypair generation, first‑boot bundle self‑validation, and end‑to‑end personalization on simulated drives.
+**602 passing tests** cover the image validator, wizard state, the flash view‑model, the cloud‑init generator, FAT32 boot‑partition I/O, ed25519 keypair generation, first‑boot bundle self‑validation, the anti‑"Format this disk?" defense stack (MBR scrub, sticky‑binding purge, mid‑flash letter watchdog), and end‑to‑end personalization on simulated drives.
 
 - 🏗️ **Architecture & internals:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - 📦 **Build the installer:** [`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md) (PyInstaller → Inno Setup)

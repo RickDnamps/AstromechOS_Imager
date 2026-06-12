@@ -147,17 +147,49 @@ class FlashJob:
                           self.target.physical_drive_id, self.image_path.name,
                           self.skip_verify, self.skip_customize,
                           "set" if self.linux_account else "none")
-                # NOTE: do NOT pre-zero sector 0 here. Empirically (field log
-                # 2026-06-10, master vs slave) wiping the partition table up
-                # front turns the card RAW for the whole write window, and a RAW
-                # card with a still-attached drive letter is EXACTLY what makes
-                # the shell pop "Format this disk?". On the master the same
-                # pre-zero was denied (ERROR_ACCESS_DENIED) so the card never
-                # went RAW — and it flashed completely silently. The silent path
-                # is therefore: leave sector 0 alone, let the streaming write +
-                # deferred-MBR-last carry the partition table, and rely on
-                # lock_and_dismount + IOCTL_DISK_DELETE_DRIVE_LAYOUT + automount
-                # disable + native shell-quiet to keep the shell out of it.
+                # MBR SCRUB — zero the OLD on-disk partition table before the
+                # streaming write. IOCTL_DISK_DELETE_DRIVE_LAYOUT (in
+                # open_raw_device) only clears partmgr's IN-MEMORY layout; the
+                # old table stays physically on the card for the whole write
+                # window because the deferred-MBR design writes sector 0 LAST.
+                # Field log 2026-06-12 (slave card): the volume teardown after
+                # DELETE_DRIVE_LAYOUT makes the shell re-query the layout,
+                # disk.sys re-READS the still-valid old table from media, the
+                # old volumes re-arrive mid-write, and a sticky MountedDevices
+                # letter binding re-attaches K: to a half-overwritten (RAW)
+                # FAT — "Format this disk?" pops over a perfectly healthy
+                # flash. Zeroing the on-disk table closes that hole: a
+                # mid-write re-read finds no partitions, so no volume can
+                # arrive and no letter can attach, sticky binding or not.
+                #
+                # History: a pre-zero attempt on 2026-06-10 POPPED the dialog
+                # — but that build stripped no letters, so the card went RAW
+                # while still LETTERED. The pre-zero is only safe AFTER
+                # lock_and_dismount + the active-wait gate guarantee zero
+                # letters on the target (both run above), which they now do.
+                # Best-effort: a denied write here just degrades to the
+                # pre-scrub behaviour.
+                try:
+                    sector = max(512, int(getattr(dev, "sector_size", 512) or 512))
+                    scrub_len = max(4096, sector)
+                    scrub_len -= scrub_len % sector
+                    size_bytes = getattr(dev, "size_bytes", None)
+                    if isinstance(size_bytes, int) and 0 < size_bytes < scrub_len:
+                        scrub_len = (size_bytes // sector) * sector
+                    if scrub_len >= 512:
+                        dev.write(0, b"\x00" * scrub_len)
+                        dev.flush()
+                        _log.info(
+                            "PHASE mbr-scrub: zeroed first %d bytes — old "
+                            "partition table can no longer resurrect "
+                            "mid-write", scrub_len,
+                        )
+                except Exception as exc:
+                    _log.warning(
+                        "PHASE mbr-scrub failed (%s) — continuing; a "
+                        "mid-write re-enumeration may resurrect the old "
+                        "partitions and pop the format dialog", exc,
+                    )
                 try:
                     _log.info("PHASE streaming-write: starting")
                     with open_image(self.image_path) as src:

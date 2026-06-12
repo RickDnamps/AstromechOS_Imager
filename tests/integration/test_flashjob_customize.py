@@ -270,15 +270,18 @@ def test_cancellation_skips_bundle_and_eject(tmp_path, fake_platform_io, monkeyp
     assert ejects == [], "must not eject a cancelled (non-mbr_written) flash"
 
 
-def test_flash_does_not_prezero_sector0(tmp_path, fake_platform_io, monkeypatch):
-    """The flash must NOT wipe sector 0 before the streaming write.
+def test_flash_scrubs_sector0_before_stream(tmp_path, fake_platform_io, monkeypatch):
+    """The flash MUST zero the old on-disk partition table before streaming.
 
-    Field log 2026-06-10: pre-zeroing the partition table turns the card RAW
-    for the whole write window, and a RAW card with a still-attached drive
-    letter is exactly what makes Windows pop "Format this disk?". The silent
-    path leaves sector 0 untouched and lets the deferred-MBR-last design carry
-    the partition table. So the FIRST device write must NOT be an all-zero
-    sector-0 wipe.
+    Two field logs pin the contract from both sides. 2026-06-10: pre-zeroing
+    while the card still HELD a drive letter turned it RAW-and-lettered —
+    instant "Format this disk?" (that build stripped no letters). 2026-06-12:
+    NOT zeroing left the old table on media, a mid-write shell re-query made
+    disk.sys re-read it, the old volumes re-arrived and a sticky MountedDevices
+    binding re-attached K: to a half-overwritten FAT — same pop-up. The fixed
+    sequence is: strip letters + active-wait gate FIRST (no letter can exist),
+    THEN scrub sector 0 so a mid-write re-read finds no partitions at all.
+    So the FIRST device write must BE an all-zero scrub at offset 0.
     """
     fake_platform_io.add_drive(7, size=512 * 1024 + 1024)
     fake_boot = FakeBootPartitionForFlash()
@@ -317,11 +320,16 @@ def test_flash_does_not_prezero_sector0(tmp_path, fake_platform_io, monkeypatch)
     )
     assert job.run().ok
     assert writes, "no writes recorded"
-    # No early all-zero sector-0 wipe — the first write must NOT be a small
-    # all-zero block at offset 0 (that was the RAW-card / pop-up regression).
+    # First write = the MBR scrub: all zeros at offset 0, >= 4096 bytes.
     first_off, first_zero, first_len = writes[0]
-    assert not (first_off == 0 and first_zero and first_len <= 4096), (
-        f"flash must not pre-zero sector 0; first write was {writes[0]}"
+    assert first_off == 0 and first_zero and first_len >= 4096, (
+        f"flash must scrub the old partition table first; "
+        f"first write was {writes[0]}"
+    )
+    # Last write = the deferred MBR: real image bytes back at offset 0.
+    last_off, last_zero, _last_len = writes[-1]
+    assert last_off == 0 and not last_zero, (
+        f"deferred-MBR must be the final write; last write was {writes[-1]}"
     )
 
 

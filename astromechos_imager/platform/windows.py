@@ -632,8 +632,24 @@ def force_unmount_letter(letter: str) -> bool:
             # the unsupervised letter-strip daemon threads and in the
             # active-wait gate's hot loop (audit defect B5).
             kernel32().CloseHandle(h)
-    with contextlib.suppress(Exception):
-        kernel32().DeleteVolumeMountPointW(f"{letter}:\\")
+    # CHECKED delete with retries (field log 2026-06-12): the scan-time
+    # strip races AutoPlay's probe of a freshly-inserted card, and a raw
+    # ctypes DeleteVolumeMountPointW failure is a silent FALSE return, not
+    # an exception — the old contextlib.suppress never noticed. A letter
+    # binding that survives here re-attaches on the next volume arrival
+    # (sticky-binding "Format?" pop-up risk), so failures must be loud.
+    deleted = False
+    for _attempt in range(3):
+        if _delete_mount_point(letter):
+            deleted = True
+            break
+        time.sleep(0.2)
+    if not deleted:
+        _log.warning(
+            "force_unmount_letter(%s): DeleteVolumeMountPointW still failing "
+            "after 3 attempts — the letter binding may survive and re-attach "
+            "on the next volume arrival", letter,
+        )
     _notify_shell_drive_removed(letter)
     return True
 

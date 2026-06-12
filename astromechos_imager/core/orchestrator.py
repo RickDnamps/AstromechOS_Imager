@@ -87,7 +87,6 @@ class FlashJob:
                 native_shell_quiet.quiet_thread()
         except Exception:
             pass
-        locked_handles: list[int] = []
         write_result = None
         dev = None
         # True once the card carries a valid partition table again (deferred MBR
@@ -124,12 +123,12 @@ class FlashJob:
                 self._preflight()
                 _log.info("PHASE preflight: PASSED — beginning flash")
                 # 1. Dismount every volume on this drive and drop its drive
-                #    letter before opening the physical device.
-                locked_handles = list(
-                    self.platform_io.lock_and_dismount(
-                        self.target.drive_letters,
-                        self.target.physical_drive_id,
-                    ) or []
+                #    letter before opening the physical device. The baseline
+                #    recipe locks/unlocks/closes per volume internally and
+                #    returns [] — no handle survives the call.
+                self.platform_io.lock_and_dismount(
+                    self.target.drive_letters,
+                    self.target.physical_drive_id,
                 )
                 # 1b. ACTIVE-WAIT GATE: never open \\.\PhysicalDrive while
                 #     Windows still has a drive letter on the target. The Master
@@ -333,30 +332,19 @@ class FlashJob:
                     error=wrapped,
                 )
         finally:
-            # Cleanup. lock_and_dismount now RELEASES its lock internally and
-            # returns [] (the baseline contract), so locked_handles is empty
-            # and the close loop below is a harmless no-op — kept only for the
-            # PlatformIO Protocol shape and any platform that DOES hand back
-            # handles. The real cleanup here is closing the raw device handle,
-            # which also covers the path where open_raw_device or
-            # lock_and_dismount raised before the inner try/finally that
-            # normally closes dev. _Win32RawDevice.close is idempotent, so a
-            # redundant close after the inner-finally close is harmless.
+            # Cleanup. The real work is closing the raw device handle, which
+            # also covers the path where open_raw_device or lock_and_dismount
+            # raised before the inner try/finally that normally closes dev.
+            # _Win32RawDevice.close is idempotent, so a redundant close after
+            # the inner-finally close is harmless. (The old locked_handles
+            # close loop is gone: lock_and_dismount releases its locks
+            # internally and always returns [] — the loop was a permanent
+            # no-op kept for a Protocol shape nothing implements.)
             if dev is not None:
                 try:
                     dev.close()
                 except Exception:
                     pass
-            seen_handles: set[int] = set()
-            while locked_handles:
-                h = locked_handles.pop()
-                if h in seen_handles:
-                    continue
-                seen_handles.add(h)
-                try:
-                    self.platform_io.close_handle(h)
-                except Exception:
-                    pass  # best-effort; we're already in a finally
 
             # Card recovery: if the device was opened (layout wiped) but no
             # valid MBR was written back (cancel or mid-flash failure), the card

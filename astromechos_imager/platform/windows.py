@@ -280,29 +280,34 @@ def lock_and_dismount(letters: tuple[str, ...],
         h = _open_volume_handle(open_path)
         if h == INVALID_HANDLE_VALUE:
             continue   # volume vanished / no media — skip
-        last_err = None
-        locked = False
-        for _attempt in range(8):
+        try:
+            last_err = None
+            locked = False
+            for _attempt in range(8):
+                try:
+                    _ctl(h, FSCTL_LOCK_VOLUME)
+                    locked = True
+                    break
+                except OSError as e:
+                    last_err = e
+                    time.sleep(0.25)
+            if not locked:
+                _log.info("  FSCTL_LOCK_VOLUME failed for %s (%s) — dismounting "
+                          "anyway (best-effort)", open_path, last_err)
             try:
-                _ctl(h, FSCTL_LOCK_VOLUME)
-                locked = True
-                break
+                _ctl(h, FSCTL_DISMOUNT_VOLUME)
             except OSError as e:
-                last_err = e
-                time.sleep(0.25)
-        if not locked:
-            _log.info("  FSCTL_LOCK_VOLUME failed for %s (%s) — dismounting "
-                      "anyway (best-effort)", open_path, last_err)
-        try:
-            _ctl(h, FSCTL_DISMOUNT_VOLUME)
-        except OSError as e:
-            _log.info("  FSCTL_DISMOUNT_VOLUME failed for %s (%s)", open_path, e)
-        # Release the lock + close the handle — we do NOT hold it.
-        try:
-            _ctl(h, FSCTL_UNLOCK_VOLUME)
-        except OSError:
-            pass
-        kernel32().CloseHandle(h)
+                _log.info("  FSCTL_DISMOUNT_VOLUME failed for %s (%s)", open_path, e)
+            # Release the lock — we do NOT hold it.
+            try:
+                _ctl(h, FSCTL_UNLOCK_VOLUME)
+            except OSError:
+                pass
+        finally:
+            # Never leak the volume handle, whatever raises above (audit B5):
+            # today _ctl only raises OSError, but a non-OSError (or an async
+            # KeyboardInterrupt in CLI use) would otherwise skip the close.
+            kernel32().CloseHandle(h)
         _log.info("  dismounted + released %s", open_path)
 
     # Remove the drive letter(s) from Mount Manager so the shell has no

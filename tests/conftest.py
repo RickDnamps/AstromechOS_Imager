@@ -9,6 +9,36 @@ from typing import Iterator
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _no_real_disk_tools(monkeypatch: pytest.MonkeyPatch):
+    """WP8 structural anti-regression: no test may run REAL mountvol/diskpart.
+
+    Those mutate the developer machine (system-wide automount state, disk
+    formatting). Tests that need them must inject fakes — a test-level
+    ``monkeypatch.setattr(subprocess, "run", ...)`` simply overrides this
+    sentinel. Real-SD integration runs (INTEGRATION_REAL_SD set) bypass it.
+    """
+    if os.environ.get("INTEGRATION_REAL_SD"):
+        yield
+        return
+    import subprocess
+    real_run = subprocess.run
+
+    def guarded(argv, *a, **k):
+        prog = argv[0] if isinstance(argv, (list, tuple)) else argv
+        name = str(prog).lower()
+        if name.endswith(("mountvol", "mountvol.exe", "diskpart",
+                          "diskpart.exe")):
+            raise AssertionError(
+                f"test attempted a REAL '{prog}' call — inject a fake "
+                f"platform surface instead (WP8, audit defect A7)"
+            )
+        return real_run(argv, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", guarded)
+    yield
+
+
 @pytest.fixture
 def tmp_appdata(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Redirect %APPDATA% to tmp_path so tests don't pollute the user profile."""

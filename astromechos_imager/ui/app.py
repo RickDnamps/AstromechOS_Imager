@@ -128,8 +128,20 @@ def _qml_main_path() -> Path:
     return Path(__file__).resolve().parent / "qml" / "main.qml"
 
 
-def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
-    """Construct the QApplication + QML engine + WizardState. Used by main() and tests."""
+def build_app(
+    platform_win=None,
+) -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
+    """Construct the QApplication + QML engine + WizardState. Used by main() and tests.
+
+    ``platform_win`` is the WP8 test seam: the win32 surface (the
+    ``platform.windows`` module by default). UI smoke tests inject a fake so
+    pytest NEVER runs real mountvol / touches the crash marker / queries WMI
+    — before the seam existed, every ``build_app()`` smoke test mutated the
+    developer machine's automount state (audit defect A7).
+    """
+    win = platform_win
+    if win is None and sys.platform == "win32":
+        from astromechos_imager.platform import windows as win  # noqa: PLC0415
     # On Windows, suppress the shell's "Le volume ne contient pas de
     # système de fichiers connu" / "Format K:?" pop-ups that fire when
     # we read or write a removable device mid-flash. Without this our
@@ -143,12 +155,9 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # mountvol /N failed (non-elevated run) and pop-ups can still fire.
     _automount_defense_active = True
     _session_guard = None
-    if sys.platform == "win32":
+    if win is not None:
         try:
-            from astromechos_imager.platform.windows import (
-                _suppress_shell_error_dialogs_for_process,
-            )
-            _suppress_shell_error_dialogs_for_process()
+            win._suppress_shell_error_dialogs_for_process()
         except Exception:
             pass  # non-fatal — pop-ups will still appear, that's all
         # Explicit AppUserModelID so the Windows taskbar binds OUR custom .ico
@@ -184,8 +193,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             from astromechos_imager.platform.session_guard import (
                 AutomountSessionGuard,
             )
-            from astromechos_imager.platform.windows import is_elevated
-            _session_guard = AutomountSessionGuard()
+            _session_guard = AutomountSessionGuard(win=win)
             _automount_defense_active = _session_guard.acquire()
             if _session_guard.already_running:
                 # Another live instance owns the automount session — touching
@@ -204,7 +212,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
                 logging.getLogger(__name__).warning(
                     "automount defense NOT armed (mountvol /N failed; "
                     "elevated=%s) — run as administrator to suppress "
-                    "Windows format pop-ups", is_elevated(),
+                    "Windows format pop-ups", win.is_elevated(),
                 )
         except SystemExit:
             raise
@@ -238,7 +246,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # launch. The guard also holds the named mutex the Inno Setup installer
     # checks (AppMutex=Global\AstromechOS_Imager_AppMutex, Audit High #21) —
     # stashing it on app keeps the handle alive for the process lifetime.
-    if sys.platform == "win32":
+    if win is not None:
         if _session_guard is not None:
             setattr(app, "_session_guard", _session_guard)
             app.aboutToQuit.connect(lambda: _session_guard.release())
@@ -247,8 +255,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             # restore so a session that DID manage to disable automount
             # never leaves the machine without its USB drives.
             try:
-                from astromechos_imager.platform.windows import enable_automount
-                app.aboutToQuit.connect(lambda: enable_automount())
+                app.aboutToQuit.connect(lambda: win.enable_automount())
             except Exception:
                 pass
 
@@ -280,15 +287,11 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     # mounts). Selection itself is a pure state write since WP6; suspect
     # FIXED disks (external SSDs) are never auto-touched.
     release_letters = None
-    if sys.platform == "win32":
+    if win is not None:
         def release_letters(drive_id: int) -> None:
-            from astromechos_imager.platform.windows import (  # noqa: PLC0415
-                force_unmount_letter,
-                letters_on_disk,
-            )
-            letters = letters_on_disk(drive_id)
+            letters = win.letters_on_disk(drive_id)
             for letter in letters:
-                force_unmount_letter(letter)
+                win.force_unmount_letter(letter)
             if letters:
                 logging.getLogger(__name__).info(
                     "scan-strip: released letter(s) %s on disk %s",
@@ -321,7 +324,7 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     qml_main = _qml_main_path()
     engine.load(QUrl.fromLocalFile(str(qml_main)))
 
-    if sys.platform == "win32":
+    if win is not None:
         from PySide6.QtCore import QTimer
 
         def _bring_up_drive_model() -> None:
@@ -330,9 +333,8 @@ def build_app() -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
             # setContextProperty on the already-declared key refreshes the
             # QML bindings that reference driveListModel.
             try:
-                from astromechos_imager.platform.windows import WindowsPlatformIO
                 from astromechos_imager.ui.drive_list_model import DriveListModel
-                drive_model = DriveListModel(WindowsPlatformIO())
+                drive_model = DriveListModel(win.WindowsPlatformIO())
                 drive_model.start_polling()
                 ctx.setContextProperty("driveListModel", drive_model)
                 engine.driveListModel = drive_model   # keepalive

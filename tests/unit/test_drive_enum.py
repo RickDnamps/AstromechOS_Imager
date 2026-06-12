@@ -46,7 +46,11 @@ def test_excludes_drives_over_256gb(monkeypatch):
     ]
     with patch("astromechos_imager.platform.windows._wmi_query") as q:
         q.return_value = fake_drives
-        with patch("astromechos_imager.platform.windows._drive_letters_for", return_value=()):
-            with patch("astromechos_imager.platform.windows._system_drive_id", return_value=0):
-                drives = list(enumerate_removable_drives())
+        with (
+            patch("astromechos_imager.platform.windows._drive_letters_for",
+                  return_value=()),
+            patch("astromechos_imager.platform.windows._system_drive_id",
+                  return_value=0),
+        ):
+            drives = list(enumerate_removable_drives())
     assert drives == []

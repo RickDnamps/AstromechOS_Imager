@@ -22,11 +22,15 @@ fakes. Offsets passed to it are absolute device byte offsets.
 """
 from __future__ import annotations
 
+import contextlib
+
+from astromechos_imager.core.constants import SECTOR_SIZE
+
 
 class RawSectorFile:
     """Sector-cached, windowed, seekable file-like over a raw block device."""
 
-    SECTOR = 512
+    SECTOR = SECTOR_SIZE
 
     def __init__(self, raw_device, part_start: int, part_len: int):
         if part_start % self.SECTOR != 0:
@@ -104,10 +108,8 @@ class RawSectorFile:
         for idx in sorted(self._dirty):
             self._dev.write(self._base + idx * self.SECTOR,
                             bytes(self._cache[idx]))
-        try:
+        with contextlib.suppress(Exception):
             self._dev.flush()
-        except Exception:
-            pass
         self._dirty.clear()
 
     def close(self) -> None:

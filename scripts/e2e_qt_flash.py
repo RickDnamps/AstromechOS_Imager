@@ -1,4 +1,4 @@
-"""Drive the REAL Qt FlashViewModel end-to-end (the actual app interface).
+r"""Drive the REAL Qt FlashViewModel end-to-end (the actual app interface).
 
 Unlike e2e_ui_flash.py (which calls job.run() directly), this instantiates
 the real FlashViewModel and calls startWithJob(), so the flash runs on the
@@ -26,11 +26,12 @@ logging.basicConfig(
     datefmt="%H:%M:%S", stream=sys.stdout,
 )
 
-from PySide6.QtCore import QObject, QTimer, Signal  # noqa: E402
+from PySide6.QtCore import QObject, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from astromechos_imager.platform.windows import (  # noqa: E402
-    WindowsPlatformIO, enumerate_removable_drives,
+    WindowsPlatformIO,
+    enumerate_removable_drives,
 )
 from astromechos_imager.ui.flash_view_model import FlashViewModel, _build_flash_job  # noqa: E402
 

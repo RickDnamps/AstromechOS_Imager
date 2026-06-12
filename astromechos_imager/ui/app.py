@@ -1,6 +1,7 @@
 """QApplication entry point + crash hook for AstromechOS Imager."""
 from __future__ import annotations
 
+import contextlib
 import faulthandler
 import logging
 import os
@@ -23,7 +24,8 @@ def _startup_log_path() -> Path:
 _LOG_FH = None
 if getattr(sys, "frozen", False):
     try:
-        _LOG_FH = open(_startup_log_path(), "w", encoding="utf-8", buffering=1)
+        _LOG_FH = open(  # noqa: SIM115 — handle deliberately lives for the process lifetime
+            _startup_log_path(), "w", encoding="utf-8", buffering=1)
         sys.stdout = _LOG_FH
         sys.stderr = _LOG_FH
         faulthandler.enable(file=_LOG_FH)
@@ -150,15 +152,11 @@ def build_app(
     # FileNotFoundError(errno=2). SetErrorMode is process-inherited so
     # both the GUI and any subprocess we spawn benefit. Must run before
     # QGuiApplication so the flag is in force during plugin init too.
-    # True = automount is OFF for the session (or N/A off-Windows); False =
-    # mountvol /N failed (non-elevated run) and pop-ups can still fire.
-    _automount_defense_active = True
     _session_guard = None
     if win is not None:
-        try:
+        # Non-fatal if it fails — pop-ups will still appear, that's all.
+        with contextlib.suppress(Exception):
             win._suppress_shell_error_dialogs_for_process()
-        except Exception:
-            pass  # non-fatal — pop-ups will still appear, that's all
         # Explicit AppUserModelID so the Windows taskbar binds OUR custom .ico
         # to this process. Without it the taskbar falls back to the host
         # python/bootloader's generic icon (and won't group our window).
@@ -193,8 +191,7 @@ def build_app(
                 AutomountSessionGuard,
             )
             _session_guard = AutomountSessionGuard(win=win)
-            _automount_defense_active = _session_guard.acquire()
-            if _session_guard.already_running:
+            if not _session_guard.claim():
                 # Another live instance owns the automount session — touching
                 # it here would disarm that instance mid-flash (audit A4).
                 # Native MessageBox: Qt does not exist yet at this point.
@@ -207,17 +204,16 @@ def build_app(
                     0x30,  # MB_ICONWARNING
                 )
                 sys.exit(0)
-            if not _automount_defense_active:
-                logging.getLogger(__name__).warning(
-                    "automount defense NOT armed (mountvol /N failed; "
-                    "elevated=%s) — run as administrator to suppress "
-                    "Windows format pop-ups", win.is_elevated(),
-                )
+            # Arming (the mountvol spawns) runs on a BACKGROUND thread after
+            # the Qt app exists — see _arm_worker below (audit A6: the old
+            # synchronous pre-Qt call could stall the window for the full
+            # subprocess timeouts). SystemStatus optimistically reports
+            # armed until the worker reports back.
         except SystemExit:
             raise
         except Exception:
             logging.getLogger(__name__).exception("session guard failed")
-            _automount_defense_active = False
+            _session_guard = None
     # Install Qt's message handler BEFORE QGuiApplication so any warnings
     # emitted during Qt init (plugin loading, style resolution, etc.) land
     # in our startup.log instead of disappearing into a console=False stderr.
@@ -253,10 +249,8 @@ def build_app(
             # Guard construction failed — fall back to a best-effort direct
             # restore so a session that DID manage to disable automount
             # never leaves the machine without its USB drives.
-            try:
+            with contextlib.suppress(Exception):
                 app.aboutToQuit.connect(lambda: win.enable_automount())
-            except Exception:
-                pass
 
     # Register bundled fonts (Orbitron) so QML can use them by family.
     # Must happen after QGuiApplication exists, before engine.load().
@@ -305,9 +299,45 @@ def build_app(
     ctx.setContextProperty("wizardState", state)
     ctx.setContextProperty("flashViewModel", flash_vm)
     ctx.setContextProperty("theme", theme)
-    ctx.setContextProperty("automountDefenseActive", _automount_defense_active)
+    from astromechos_imager.ui.system_status import SystemStatus
+    system_status = SystemStatus()
+    ctx.setContextProperty("systemStatus", system_status)
+    engine.systemStatus = system_status   # keepalive
     from astromechos_imager import __version__ as _app_version
     ctx.setContextProperty("appVersion", _app_version)
+
+    # Arm the automount defense on a background thread (audit A6): the
+    # mountvol spawns can take seconds on a pathological system and used to
+    # run synchronously BEFORE Qt existed — dead air before any window. The
+    # QML banner tracks systemStatus.automountDefenseActive live; the
+    # scan-time letter strip re-runs after arming (see _bring_up_drive_model)
+    # to catch any card Windows managed to mount during the arming window.
+    if _session_guard is not None:
+        import threading
+
+        def _arm_worker() -> None:
+            try:
+                armed = _session_guard.arm()
+            except Exception:
+                logging.getLogger(__name__).exception("automount arming failed")
+                armed = False
+            if not armed:
+                try:
+                    elevated = win.is_elevated()
+                except Exception:
+                    elevated = False
+                logging.getLogger(__name__).warning(
+                    "automount defense NOT armed (mountvol /N failed; "
+                    "elevated=%s) — run as administrator to suppress "
+                    "Windows format pop-ups", elevated,
+                )
+            # Cross-thread set is safe: the notify signal is queued to the
+            # main thread by Qt.
+            system_status.setAutomountDefenseActive(bool(armed))
+
+        threading.Thread(
+            target=_arm_worker, name="automount-arm", daemon=True
+        ).start()
     engine.flashViewModel = flash_vm   # keepalive
     engine.themeManager = theme         # keepalive
 
@@ -370,6 +400,12 @@ def build_app(
 
                 _strip_candidate_letters()
                 drive_model.countChanged.connect(_strip_candidate_letters)
+                # Re-strip once the automount defense finishes arming (A6):
+                # arming is async, so Windows may have auto-mounted a card
+                # during the arming window without changing the drive LIST
+                # (same disk, new letter) — countChanged would never fire.
+                system_status.automountDefenseActiveChanged.connect(
+                    _strip_candidate_letters)
 
                 # CRITICAL: pause the WMI poll while a flash is in flight.
                 # refresh() runs Win32_DiskDrive + ASSOCIATORS queries ON THE

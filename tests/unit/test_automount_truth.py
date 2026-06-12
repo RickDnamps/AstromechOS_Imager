@@ -22,12 +22,30 @@ if sys.platform != "win32":  # pragma: no cover - module is win32-only
 from astromechos_imager.platform import windows as W
 
 
+class _Markers:
+    """Both marker locations, redirected into tmp_path."""
+
+    def __init__(self, path, legacy):
+        self.path = path
+        self.legacy = legacy
+
+    # Path-like passthroughs so existing tests stay readable.
+    def write_text(self, *a, **k):
+        return self.path.write_text(*a, **k)
+
+    def exists(self):
+        return self.path.exists()
+
+
 @pytest.fixture()
 def marker(tmp_path, monkeypatch):
-    """Redirect the automount marker into tmp_path."""
+    """Redirect the automount marker (and the legacy location) into tmp_path."""
     path = tmp_path / "automount_disabled.marker"
+    legacy = tmp_path / "legacy" / "automount_disabled.marker"
+    legacy.parent.mkdir()
     monkeypatch.setattr(W, "_automount_marker_path", lambda: path)
-    return path
+    monkeypatch.setattr(W, "_legacy_marker_path", lambda: legacy)
+    return _Markers(path, legacy)
 
 
 def _mock_mountvol(monkeypatch, returncode, stderr=b""):
@@ -98,3 +116,22 @@ def test_restore_if_crashed_noop_without_marker(monkeypatch, marker):
     calls = _mock_mountvol(monkeypatch, 0)
     W.restore_automount_if_crashed()
     assert calls == []
+
+
+def test_restore_honours_legacy_marker_and_migrates(monkeypatch, marker):
+    """A8 migration: a machine left automount-off by an OLD build (per-user
+    marker) must still be repaired once; the legacy marker is then removed."""
+    marker.legacy.write_text("disabled\n", encoding="ascii")
+    calls = _mock_mountvol(monkeypatch, 0)
+    W.restore_automount_if_crashed()
+    assert calls == [["mountvol", "/E"]]
+    assert not marker.legacy.exists()
+
+
+def test_marker_path_prefers_programdata(monkeypatch, tmp_path):
+    """The marker is MACHINE-WIDE (audit A8): %ProgramData% wins over the
+    per-user %LOCALAPPDATA% so every account sees the repair record."""
+    pd = tmp_path / "ProgramData"
+    monkeypatch.setenv("PROGRAMDATA", str(pd))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    assert str(W._automount_marker_path()).startswith(str(pd))

@@ -220,7 +220,10 @@ class FirstbootBundle:
         #       the master hotspot via /astromech_init.cfg + network-config,
         #       it has no USB dongle and never wires wlan1).
         if role is Role.MASTER and self.cfg.wifi_ssid and self.cfg.wifi_psk:
-            bp.write_bytes("/astromech_wlan.conf", render_wlan_conf(self.cfg.wifi_ssid, self.cfg.wifi_psk))  # type: ignore[union-attr]
+            bp.write_bytes(  # type: ignore[union-attr]
+                "/astromech_wlan.conf",
+                render_wlan_conf(self.cfg.wifi_ssid, self.cfg.wifi_psk),
+            )
         # 6.6 — Slave network-config override (Bug B fix). The Golden
         # Image bakes a stale /boot/firmware/network-config pointing wlan0
         # at the build-machine's home WiFi; left in place, the slave would

@@ -113,20 +113,27 @@ class DriveListModel(QAbstractListModel):
         if old_first != new_first:
             self.firstDriveChanged.emit()
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008 — Qt idiom
         return 0 if parent.isValid() else len(self._drives)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         if not index.isValid() or not (0 <= index.row() < len(self._drives)):
             return None
         d = self._drives[index.row()]
-        if role == Qt.UserRole + 0: return d.physical_drive_id
-        if role == Qt.UserRole + 1: return d.device_path
-        if role == Qt.UserRole + 2: return _drive_letters_str(d)
-        if role == Qt.UserRole + 3: return int(d.size_bytes)
-        if role == Qt.UserRole + 4: return _human_size(d.size_bytes)
-        if role == Qt.UserRole + 5: return d.model
-        if role == Qt.UserRole + 6: return d.serial
+        if role == Qt.UserRole + 0:
+            return d.physical_drive_id
+        if role == Qt.UserRole + 1:
+            return d.device_path
+        if role == Qt.UserRole + 2:
+            return _drive_letters_str(d)
+        if role == Qt.UserRole + 3:
+            return int(d.size_bytes)
+        if role == Qt.UserRole + 4:
+            return _human_size(d.size_bytes)
+        if role == Qt.UserRole + 5:
+            return d.model
+        if role == Qt.UserRole + 6:
+            return d.serial
         return None
 
     def roleNames(self) -> dict[int, QByteArray]:

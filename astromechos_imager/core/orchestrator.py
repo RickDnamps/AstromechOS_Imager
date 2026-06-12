@@ -2,6 +2,7 @@
 """High-level flash orchestration. Per design spec §3, §5, §6.4."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -70,7 +71,7 @@ class FlashJob:
     role: Role
     firstboot_config: FirstbootConfig
     master_pair: Ed25519Pair
-    on_progress: Callable[[DiskWriterProgress], None] = field(default=lambda p: None)
+    on_progress: Callable[[DiskWriterProgress], None] = field(default=lambda _p: None)
     cancel_event: threading.Event = field(default_factory=threading.Event)
     skip_verify: bool = False
     skip_customize: bool = False
@@ -93,17 +94,16 @@ class FlashJob:
         # written). If it stays False after open_raw_device wiped the layout the
         # card is RAW, and the outer finally restores a clean exFAT volume.
         mbr_written = False
-        # Disable Windows automount for the WHOLE Imager session. The "Format
-        # this disk?" pop-up fires when Windows auto-mounts a freshly-INSERTED
-        # card mid-session and probes its (being-overwritten) filesystem — the
-        # SLAVE is the classic victim, inserted while warm right after the
-        # Master. This is deliberately NOT re-enabled per-card: re-enabling
-        # between Master and Slave let Windows grab + probe the Slave at
-        # insertion and pop the dialog at ~5% of the write. Automount is
-        # restored ONLY when the app closes (app.aboutToQuit → enable_automount)
-        # or, after a crash, on the next launch via
-        # restore_automount_if_crashed() + the marker file. Idempotent across
-        # cards (mountvol /N again is a harmless no-op). Best-effort.
+        # Belt-and-suspenders automount disable. The PRIMARY arming happens at
+        # app launch (AutomountSessionGuard.arm on a background thread); this
+        # re-disable covers the CLI path (no GUI guard) and any session where
+        # the launch-time arming failed or was re-enabled externally. The
+        # "Format this disk?" pop-up fires when Windows auto-mounts a
+        # freshly-INSERTED card mid-session and probes its (being-overwritten)
+        # filesystem — the SLAVE is the classic victim, inserted warm right
+        # after the Master. Deliberately NOT re-enabled per-card; the session
+        # guard restores at app close / next-launch crash repair. Idempotent
+        # (mountvol /N again is a harmless no-op).
         try:
             disable = getattr(self.platform_io, "disable_automount", None)
             if disable is not None and not disable():
@@ -218,8 +218,9 @@ class FlashJob:
                                     self._write_cloud_init(bp)
                                 if not self.cancel_event.is_set():
                                     _log.info("PHASE customize: firstboot bundle")
-                                    FirstbootBundle(self.firstboot_config, self.master_pair).write_to(
-                                        bp, self.role)
+                                    FirstbootBundle(
+                                        self.firstboot_config, self.master_pair
+                                    ).write_to(bp, self.role)
                             finally:
                                 bp.close()
                         _log.info("PHASE customize: done")
@@ -274,10 +275,8 @@ class FlashJob:
                         visible = getattr(
                             self.platform_io, "make_card_visible", None)
                         if visible is not None:
-                            try:
+                            with contextlib.suppress(Exception):
                                 visible(self.target.physical_drive_id)
-                            except Exception:
-                                pass
                 return FlashJobResult(ok=True,
                                       bytes_written=write_result.bytes_written,
                                       source_sha256=write_result.source_sha256)
@@ -341,10 +340,8 @@ class FlashJob:
             # internally and always returns [] — the loop was a permanent
             # no-op kept for a Protocol shape nothing implements.)
             if dev is not None:
-                try:
+                with contextlib.suppress(Exception):
                     dev.close()
-                except Exception:
-                    pass
 
             # Card recovery: if the device was opened (layout wiped) but no
             # valid MBR was written back (cancel or mid-flash failure), the card
@@ -402,10 +399,8 @@ class FlashJob:
                     _log.info("PHASE wait-unmount: target disk released by Windows")
                 return
             for letter in letters:
-                try:
+                with contextlib.suppress(Exception):
                     force_fn(letter)
-                except Exception:  # noqa: BLE001
-                    pass
             if _t.monotonic() >= deadline:
                 _log.info(
                     "PHASE wait-unmount: disk %s still holds %s after %.0fs — "
@@ -437,10 +432,8 @@ class FlashJob:
         handle = getattr(dev, "_h", None)
         if handle is None:
             return
-        try:
+        with contextlib.suppress(Exception):
             sync(handle)
-        except Exception:
-            pass
 
     def _preflight(self) -> None:
         """Validate everything that can fail before any destructive device
@@ -499,81 +492,9 @@ class FlashJob:
         )
 
 
-@dataclass(frozen=True)
-class PairFlashResult:
-    master: FlashJobResult
-    slave: FlashJobResult
-
-
-@dataclass
-class PairFlashJob:
-    platform_io: PlatformIO
-    master_image: Path
-    master_target: DiskRef
-    slave_image: Path
-    slave_target: DiskRef
-    firstboot_config: FirstbootConfig
-    master_pair: Ed25519Pair
-    on_progress: Callable[[Role, DiskWriterProgress], None] = field(default=lambda r, p: None)
-    cancel_event: threading.Event = field(default_factory=threading.Event)
-    parallel: bool = True
-    skip_verify: bool = False
-    skip_customize: bool = False
-    # When set, BOTH child FlashJobs use the same account — a single UID-1000
-    # identity shared across Master and Slave for SSH key-trust.
-    linux_account: LinuxAccount | None = None
-
-    def _make_job(self, role: Role, image: Path, target: DiskRef) -> FlashJob:
-        return FlashJob(
-            platform_io=self.platform_io,
-            image_path=image, target=target, role=role,
-            firstboot_config=self.firstboot_config,
-            master_pair=self.master_pair,
-            on_progress=lambda p, _r=role: self.on_progress(_r, p),
-            cancel_event=self.cancel_event,
-            skip_verify=self.skip_verify, skip_customize=self.skip_customize,
-            linux_account=self.linux_account,
-        )
-
-    def run(self) -> PairFlashResult:
-        m_job = self._make_job(Role.MASTER, self.master_image, self.master_target)
-        s_job = self._make_job(Role.SLAVE, self.slave_image, self.slave_target)
-        if self.parallel:
-            # Capture each thread's result or exception so a failure surfaces
-            # via FlashJobResult.error instead of an IndexError after join.
-            from astromechos_imager.core.errors import FlashError
-
-            m_box: dict[str, object] = {}
-            s_box: dict[str, object] = {}
-
-            def _run_into(box, job):
-                try:
-                    box["result"] = job.run()
-                except BaseException as exc:  # noqa: BLE001
-                    box["exc"] = exc
-
-            t1 = threading.Thread(target=_run_into, args=(m_box, m_job),
-                                  name="pair-master", daemon=False)
-            t2 = threading.Thread(target=_run_into, args=(s_box, s_job),
-                                  name="pair-slave", daemon=False)
-            t1.start(); t2.start(); t1.join(); t2.join()
-
-            def _unbox(box: dict, role_name: str) -> FlashJobResult:
-                if "result" in box:
-                    return box["result"]  # type: ignore[return-value]
-                exc = box.get("exc")
-                wrapped = FlashError(
-                    f"unexpected error in {role_name} flash thread: {exc!r}"
-                )
-                if isinstance(exc, BaseException):
-                    wrapped.__cause__ = exc
-                return FlashJobResult(
-                    ok=False, bytes_written=0, source_sha256="", error=wrapped,
-                )
-
-            m = _unbox(m_box, "master")
-            s = _unbox(s_box, "slave")
-        else:
-            m = m_job.run()
-            s = s_job.run()
-        return PairFlashResult(master=m, slave=s)
+# NOTE (audit perfection pass): PairFlashJob/PairFlashResult (parallel
+# two-card flash) were purged. The GUI's Sequential Deployment Assistant
+# deliberately flashes ONE card per cycle; the pair path survived only in
+# the CLI and was an active trap — it never passed linux_account, so
+# pair-flashed cards shipped WITHOUT account provisioning.
+_PAIR_PURGED = True

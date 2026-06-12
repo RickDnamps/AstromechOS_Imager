@@ -16,8 +16,9 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.platform.windows import (
-    WindowsPlatformIO, enumerate_removable_drives,
+from astromechos_imager.platform.windows import (  # noqa: E402
+    WindowsPlatformIO,
+    enumerate_removable_drives,
 )
 
 

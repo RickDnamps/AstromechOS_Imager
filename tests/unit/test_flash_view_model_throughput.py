@@ -36,7 +36,7 @@ def _make_vm():
 
 
 def test_progressMaster_emits_throughput_third_arg(qtbot):
-    """``_FlashWorker._on_pair_progress`` must forward the
+    """``_FlashWorker._on_single_progress`` must forward the
     ``DiskWriterProgress.throughput_bps`` field as the THIRD argument
     of ``progressMaster``. Two-arg consumers would silently drop it."""
     from astromechos_imager.core.diskwriter import DiskWriterProgress
@@ -45,16 +45,17 @@ def test_progressMaster_emits_throughput_third_arg(qtbot):
 
     captured: list[tuple[float, str, float]] = []
 
-    # ``is_pair=True`` is the production path; the worker doesn't need
-    # to actually run() for this test — we're exercising the callback
-    # directly to bypass QThread scheduling.
-    worker = _FlashWorker(job=object(), is_pair=True)
+    class _MasterJob:
+        role = Role.MASTER
+
+    # The worker doesn't need to actually run() for this test — we're
+    # exercising the callback directly to bypass QThread scheduling.
+    worker = _FlashWorker(job=_MasterJob())
     worker.progressMaster.connect(
         lambda f, p, t: captured.append((f, p, t))
     )
 
-    worker._on_pair_progress(
-        Role.MASTER,
+    worker._on_single_progress(
         DiskWriterProgress(
             phase="decompress_write",
             bytes_done=512,
@@ -78,7 +79,9 @@ def test_masterThroughputBps_property_updates_after_emit(qtbot):
     vm = _make_vm()
 
     changed_count = [0]
-    vm.masterThroughputBpsChanged.connect(lambda: changed_count.__setitem__(0, changed_count[0] + 1))
+    vm.masterThroughputBpsChanged.connect(
+        lambda: changed_count.__setitem__(0, changed_count[0] + 1)
+    )
 
     vm._update_master(0.5, "decompress_write", 50_000_000.0)
 
@@ -139,13 +142,15 @@ def test_diskwriter_throughput_field_is_carried_via_dataclass(qtbot):
     from astromechos_imager.core.models import Role
     from astromechos_imager.ui.flash_view_model import _FlashWorker
 
+    class _SlaveJob:
+        role = Role.SLAVE
+
     vm = _make_vm()
-    worker = _FlashWorker(job=object(), is_pair=True)
+    worker = _FlashWorker(job=_SlaveJob())
     worker.progressMaster.connect(vm._update_master)
     worker.progressSlave.connect(vm._update_slave)
 
-    worker._on_pair_progress(
-        Role.SLAVE,
+    worker._on_single_progress(
         DiskWriterProgress(
             phase="verify",
             bytes_done=999,

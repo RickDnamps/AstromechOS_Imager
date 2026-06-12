@@ -43,7 +43,8 @@ import tempfile
 import threading
 import zipfile
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
+from functools import partial
 from pathlib import Path
 
 from astromechos_imager.core.bootpartition import (
@@ -152,8 +153,8 @@ def _validate_marker_from_bp(
 
     try:
         text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise MalformedRoleMarkerError(image_name, "marker is not valid UTF-8")
+    except UnicodeDecodeError as exc:
+        raise MalformedRoleMarkerError(image_name, "marker is not valid UTF-8") from exc
 
     # Audit Medium #34: deeply nested JSON raises RecursionError, NOT
     # JSONDecodeError. Catch both so the strict "everything raises
@@ -162,11 +163,11 @@ def _validate_marker_from_bp(
     try:
         obj = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise MalformedRoleMarkerError(image_name, f"invalid JSON: {exc.msg}")
+        raise MalformedRoleMarkerError(image_name, f"invalid JSON: {exc.msg}") from exc
     except (RecursionError, ValueError) as exc:
         raise MalformedRoleMarkerError(
             image_name, f"JSON parser failure ({type(exc).__name__}): {exc}"
-        )
+        ) from exc
 
     if not isinstance(obj, dict):
         raise MalformedRoleMarkerError(
@@ -226,9 +227,9 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
     name_lower = path.name.lower()
     zf: zipfile.ZipFile | None = None
     if name_lower.endswith(".xz"):
-        opener: Callable = lambda: lzma.open(path, "rb")
+        opener: Callable = partial(lzma.open, path, "rb")
     elif name_lower.endswith(".gz"):
-        opener = lambda: gzip.open(path, "rb")
+        opener = partial(gzip.open, path, "rb")
     elif name_lower.endswith(".zip"):
         zf = zipfile.ZipFile(path)
         inner = next(
@@ -240,9 +241,9 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
             raise MalformedRoleMarkerError(
                 path.name, "zip archive contains no .img member"
             )
-        opener = lambda: zf.open(inner)
+        opener = partial(zf.open, inner)
     else:
-        opener = lambda: path.open("rb")
+        opener = partial(path.open, "rb")
 
     with tempfile.NamedTemporaryFile(
         suffix=".img", delete=False, prefix="astromech_marker_"
@@ -260,22 +261,16 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
                     dst.write(chunk)
                     remaining -= len(chunk)
         finally:
-            try:
+            with suppress(Exception):
                 src.close()
-            except Exception:
-                pass
             # Audit High #5: close the outer ZipFile handle too.
             if zf is not None:
-                try:
+                with suppress(Exception):
                     zf.close()
-                except Exception:
-                    pass
         yield tmp_path
     finally:
-        try:
+        with suppress(OSError):
             tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 class _ReadOnlyBootPartitionAdapter:
@@ -333,7 +328,7 @@ def validate_image_role(
         except BootPartitionMountError as exc:
             raise MalformedRoleMarkerError(
                 path.name, f"cannot locate FAT32 partition in MBR: {exc}"
-            )
+            ) from exc
 
         PyFatFS = _import_pyfatfs()
         try:
@@ -341,16 +336,14 @@ def validate_image_role(
         except Exception as exc:  # pyfatfs has no single exported error class
             raise MalformedRoleMarkerError(
                 path.name, f"cannot mount FAT32 partition: {exc}"
-            )
+            ) from exc
         try:
             return _validate_marker_from_bp(
                 _ReadOnlyBootPartitionAdapter(fs), path.name, expected_role
             )
         finally:
-            try:
+            with suppress(Exception):
                 fs.close()
-            except Exception:
-                pass
 
 
 # ── Sidecar checksum discovery ────────────────────────────────────────────

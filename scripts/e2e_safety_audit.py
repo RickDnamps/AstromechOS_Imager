@@ -29,9 +29,9 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.platform.windows import _wmi_query, enumerate_removable_drives
+import os as _os  # noqa: E402
 
-import os as _os
+from astromechos_imager.platform.windows import _wmi_query, enumerate_removable_drives  # noqa: E402
 
 # Specific phys_id to enforce (e.g. when the operator knows exactly which
 # device they plugged). When unset, the audit only requires "exactly one
@@ -79,7 +79,7 @@ def audit_filter() -> bool:
     log("| phys_id | path | letters | size | model |")
     log("|---:|---|---|---:|---|")
     for d in drives:
-        letters = ", ".join(f"{l}:" for l in d.drive_letters) if d.drive_letters else "(none)"
+        letters = ", ".join(f"{ltr}:" for ltr in d.drive_letters) if d.drive_letters else "(none)"
         log(f"| {d.physical_drive_id} | `{d.device_path}` | {letters} | "
             f"{d.size_bytes / (1024 ** 3):.1f} GB | {d.model} |")
     log("")
@@ -97,7 +97,7 @@ def audit_filter() -> bool:
             f"to proceed — operator must replug the intended SD card.")
         return False
 
-    has_i = any(l == "I" for l in sole.drive_letters)
+    has_i = any(ltr == "I" for ltr in sole.drive_letters)
     if not has_i:
         log(f"**⚠️ Sole drive phys_id={sole.physical_drive_id} has letters "
             f"{sole.drive_letters!r} — expected at least 'I' to be present. "
@@ -164,7 +164,7 @@ def audit_images() -> bool:
             f"`{actual_hex[:16]}…` | {marker} |")
         if not match:
             ok = False
-            log(f"")
+            log("")
             log(f"  Expected full: `{expected_hex}`")
             log(f"  Got      full: `{actual_hex}`")
     log("")

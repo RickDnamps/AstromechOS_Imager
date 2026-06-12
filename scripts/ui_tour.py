@@ -18,12 +18,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, QObject, QMetaObject
+from PySide6.QtCore import QMetaObject, QObject, QTimer
 
 # Make the package importable when run as a loose script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.ui.app import build_app   # noqa: E402
+from astromechos_imager.ui.app import build_app  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "screenshots"
 OUT.mkdir(parents=True, exist_ok=True)

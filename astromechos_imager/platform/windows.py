@@ -5,6 +5,7 @@ core/platform_io.py Protocols.
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import logging
 import os
@@ -52,7 +53,7 @@ def _drive_letters_for(device_id: str) -> tuple[str, ...]:
 
 def _system_drive_id() -> int:
     """Return the PhysicalDriveN number that hosts %SystemDrive% (e.g. C:)."""
-    sys_letter = os.environ.get("SystemDrive", "C:").rstrip(":")
+    sys_letter = os.environ.get("SYSTEMDRIVE", "C:").rstrip(":")
     import win32com.client
     wmi = win32com.client.GetObject("winmgmts:\\\\.\\root\\cimv2")
     for ld in wmi.ExecQuery(f"SELECT * FROM Win32_LogicalDisk WHERE DeviceID='{sys_letter}:'"):
@@ -145,9 +146,9 @@ def enumerate_removable_drives(include_letters: bool = True) -> Iterator[DiskRef
 
 # ── Lock / dismount / raw device open ─────────────────────────────────────
 
-import struct as _struct
+import struct as _struct  # noqa: E402 — deliberate late import (section-local helper)
 
-from astromechos_imager.platform._win32 import (
+from astromechos_imager.platform._win32 import (  # noqa: E402
     DISK_GEOMETRY_EX,
     FILE_FLAG_NO_BUFFERING,
     FILE_FLAG_SEQUENTIAL_SCAN,
@@ -293,10 +294,8 @@ def lock_and_dismount(letters: tuple[str, ...],
             except OSError as e:
                 _log.info("  FSCTL_DISMOUNT_VOLUME failed for %s (%s)", open_path, e)
             # Release the lock — we do NOT hold it.
-            try:
+            with contextlib.suppress(OSError):
                 _ctl(h, FSCTL_UNLOCK_VOLUME)
-            except OSError:
-                pass
         finally:
             # Never leak the volume handle, whatever raises above (audit B5):
             # today _ctl only raises OSError, but a non-OSError (or an async
@@ -626,19 +625,15 @@ def force_unmount_letter(letter: str) -> bool:
             except OSError as exc:
                 _log.info("  force_unmount_letter(%s): dismount failed (%s)", letter, exc)
             if locked:
-                try:
+                with contextlib.suppress(OSError):
                     _ctl(h, FSCTL_UNLOCK_VOLUME)
-                except OSError:
-                    pass
         finally:
             # The volume handle must never outlive this call — this runs on
             # the unsupervised letter-strip daemon threads and in the
             # active-wait gate's hot loop (audit defect B5).
             kernel32().CloseHandle(h)
-    try:
+    with contextlib.suppress(Exception):
         kernel32().DeleteVolumeMountPointW(f"{letter}:\\")
-    except Exception:  # noqa: BLE001
-        pass
     _notify_shell_drive_removed(letter)
     return True
 
@@ -899,10 +894,8 @@ def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> b
                      physical_drive_id, exc)
         return False
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(path)
-        except OSError:
-            pass
 
 
 def synchronize_cache(h: int) -> None:
@@ -945,10 +938,8 @@ def synchronize_cache(h: int) -> None:
     err = ctypes.get_last_error()
     _log.info("  SCSI SYNCHRONIZE_CACHE not supported (err %d) — "
               "falling back to FlushFileBuffers", err)
-    try:
+    with contextlib.suppress(Exception):
         k.FlushFileBuffers(h)
-    except Exception:
-        pass
 
 
 def finalize_eject(physical_drive_id: int) -> bool:
@@ -995,14 +986,30 @@ def finalize_eject(physical_drive_id: int) -> bool:
 
 
 def _automount_marker_path():
+    """Machine-wide crash marker location (audit defect A8).
+
+    The automount setting is SYSTEM-WIDE (MountMgr registry), so the repair
+    record must be visible from EVERY account: with the old per-user
+    %LOCALAPPDATA% marker, an elevated run under a different account (UAC
+    over-the-shoulder) wrote the marker into the admin's profile and the
+    operator's next normal launch never saw it. %ProgramData% is readable
+    by everyone and writable by the elevated process we run as.
+    """
+    from pathlib import Path
+    base = (os.environ.get("PROGRAMDATA")
+            or os.environ.get("LOCALAPPDATA")
+            or os.environ.get("TEMP") or ".")
+    d = Path(base) / "AstromechOS_Imager"
+    with contextlib.suppress(OSError):
+        d.mkdir(parents=True, exist_ok=True)
+    return d / "automount_disabled.marker"
+
+
+def _legacy_marker_path():
+    """Pre-A8 per-user marker location — checked once for migration."""
     from pathlib import Path
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or "."
-    d = Path(base) / "AstromechOS_Imager"
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
-    return d / "automount_disabled.marker"
+    return Path(base) / "AstromechOS_Imager" / "automount_disabled.marker"
 
 
 def _run_mountvol(flag: str) -> bool:
@@ -1056,12 +1063,10 @@ def disable_automount() -> bool:
     """
     ok = _run_mountvol("/N")
     if ok:
-        try:
-            # PID in the marker = forensic trace for double-instance reports.
+        # PID in the marker = forensic trace for double-instance reports.
+        with contextlib.suppress(OSError):
             _automount_marker_path().write_text(
                 f"disabled pid={os.getpid()}\n", encoding="ascii")
-        except OSError:
-            pass
         _log.info("automount disabled for the flash (mountvol /N)")
     return ok
 
@@ -1075,21 +1080,26 @@ def enable_automount() -> bool:
     """
     ok = _run_mountvol("/E")
     if ok:
-        try:
+        with contextlib.suppress(OSError):
             _automount_marker_path().unlink(missing_ok=True)
-        except OSError:
-            pass
         _log.info("automount re-enabled (mountvol /E)")
     return ok
 
 
 def restore_automount_if_crashed() -> None:
-    """If a previous run died with automount disabled (marker present), restore."""
+    """If a previous run died with automount disabled (marker present), restore.
+
+    Also honours the pre-A8 per-user marker location so a machine repaired
+    by an older build's crash is still healed once, then migrates cleanly.
+    """
     try:
-        if _automount_marker_path().exists():
+        legacy = _legacy_marker_path()
+        if _automount_marker_path().exists() or legacy.exists():
             _log.info("automount marker present — a previous run left automount "
                       "disabled; restoring")
-            enable_automount()
+            if enable_automount():
+                with contextlib.suppress(OSError):
+                    legacy.unlink(missing_ok=True)
     except OSError:
         pass
 

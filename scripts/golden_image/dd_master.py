@@ -15,7 +15,13 @@ Anti-regression invariants (gravé dans le béton via marathon 2026-06-02→07):
 
 PREREQS — see ./README.md
 """
-import io, os, sys, time, threading
+import contextlib
+import io
+import os
+import sys
+import threading
+import time
+
 import paramiko
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace",
@@ -56,7 +62,7 @@ def run(c, cmd, label, timeout=60, stream=False):
     return rc
 
 
-print(f"=== A. SSH Master + detect SSD ===", flush=True)
+print("=== A. SSH Master + detect SSD ===", flush=True)
 m = paramiko.SSHClient()
 m.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 m.connect(MASTER_IP, username="astromech", password=PWD, timeout=15,
@@ -69,7 +75,8 @@ _, out, _ = m.exec_command(
 ssd_dev = out.read().decode().strip()
 if not ssd_dev:
     print("  !!! Cannot detect USB SSD — abort !!!", flush=True)
-    m.close(); sys.exit(1)
+    m.close()
+    sys.exit(1)
 print(f"  Detected SSD: /dev/{ssd_dev}", flush=True)
 SSD_PART = f"/dev/{ssd_dev}1"
 
@@ -90,7 +97,8 @@ if "is a mountpoint" not in out.read().decode():
              f"mount {SSD_PART} as exfat")
     if rc != 0:
         print("  !!! mount failed — abort !!!", flush=True)
-        m.close(); sys.exit(rc)
+        m.close()
+    sys.exit(rc)
 else:
     print("  /mnt/ssd already mounted", flush=True)
 run(m, "df -h /mnt/ssd | tail -1", "SSD mount confirmed")
@@ -104,12 +112,13 @@ sftp.close()
 if ssd_dev != "sda":
     run(m, f"sed -i 's|/dev/sda1|{SSD_PART}|g' {REMOTE_CLEANUP}", "patch device")
 
-print(f"\n=== C. pi_cleanup.sh master ===", flush=True)
+print("\n=== C. pi_cleanup.sh master ===", flush=True)
 rc = run(m, f"echo {PWD} | sudo -S bash {REMOTE_CLEANUP} master 2>&1",
          "pi_cleanup master", timeout=300, stream=True)
 if rc != 0:
     print("  !!! pi_cleanup failed — abort !!!", flush=True)
-    m.close(); sys.exit(rc)
+    m.close()
+    sys.exit(rc)
 
 print("\n=== D. Erase partial+old .img ===", flush=True)
 run(m, "ls -la /mnt/ssd/AstromechOS_*.img 2>&1 | head -5", "Current images")
@@ -127,9 +136,9 @@ run(m, "sync && echo synced", "Sync")
 run(m, f"echo {PWD} | sudo -S sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>&1", "Drop caches")
 
 # === F. DD — stream=False (blocking) + size check after ===
-print(f"\n=== F. DD Master → SSD (blocking, ~50 min) ===", flush=True)
+print("\n=== F. DD Master → SSD (blocking, ~50 min) ===", flush=True)
 print(f"Target: {TARGET}", flush=True)
-print(f"NOTE: no live progress (avoids paramiko PTY timeout); polled via 2nd SSH session", flush=True)
+print("NOTE: no live progress (avoids paramiko PTY timeout); polled via 2nd SSH session", flush=True)
 print()
 
 # Spawn a polling thread that opens a SEPARATE SSH session every 60s and
@@ -178,27 +187,29 @@ if dd_output.strip():
 
 if dd_rc != 0:
     print(f"  !!! DD FAILED (rc={dd_rc}) !!!", flush=True)
-    m.close(); sys.exit(dd_rc)
+    m.close()
+    sys.exit(dd_rc)
 
 run(m, "sync", "Post-DD sync")
 
 # === G. Size verification ===
-print(f"\n=== G. Size verification ===", flush=True)
+print("\n=== G. Size verification ===", flush=True)
 _, out, _ = m.exec_command(f"stat -c %s {TARGET}", timeout=10)
 actual = int(out.read().decode().strip())
 print(f"  actual:   {actual:,} bytes ({actual/1e9:.2f} GB)", flush=True)
 print(f"  expected: {EXPECTED_SIZE:,} bytes ({EXPECTED_SIZE/1e9:.2f} GB)", flush=True)
 if actual != EXPECTED_SIZE:
     print(f"  ❌ SIZE MISMATCH (diff: {EXPECTED_SIZE - actual:,} bytes)", flush=True)
-    m.close(); sys.exit(2)
+    m.close()
+    sys.exit(2)
 print("  ✅ size matches exactly", flush=True)
 
 run(m, f"ls -la {TARGET}", "Final listing")
 run(m, "df -h /mnt/ssd", "SSD usage post-DD")
 
 sftp = m.open_sftp()
-try: sftp.remove(REMOTE_CLEANUP)
-except Exception: pass
+with contextlib.suppress(Exception):
+    sftp.remove(REMOTE_CLEANUP)
 sftp.close()
 m.close()
 

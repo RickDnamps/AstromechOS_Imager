@@ -10,40 +10,37 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-class FakePairResult:
-    def __init__(self, master_ok=True, slave_ok=True):
-        class _R:
-            def __init__(self, ok):
-                self.ok = ok
-                self.error = None if ok else "boom"
-        self.master = _R(master_ok)
-        self.slave = _R(slave_ok)
+class FakeResult:
+    def __init__(self, ok=True):
+        self.ok = ok
+        self.error = None if ok else "boom"
 
 
-class FakePairJob:
-    """Minimal duck for PairFlashJob — has master_target attribute and run()."""
-    def __init__(self, should_fail=False):
-        self.master_target = "fake-m"
-        self.slave_target = "fake-s"
+class FakeJob:
+    """Minimal duck for FlashJob — single role, run() + on_progress + cancel_event.
+
+    Mirrors the production sequential contract: ONE job per cycle whose
+    progress routes to the channel matching its role (the pair duck died
+    with PairFlashJob).
+    """
+
+    def __init__(self, should_fail=False, role_value="master"):
+        from astromechos_imager.core.models import Role
+        self.role = Role.MASTER if role_value == "master" else Role.SLAVE
         self.on_progress = None
         self.cancel_event = threading.Event()
         self._should_fail = should_fail
 
     def run(self):
         from astromechos_imager.core.diskwriter import DiskWriterProgress
-        from astromechos_imager.core.models import Role
         for frac in (0.25, 0.5, 0.75, 1.0):
             if self.cancel_event.is_set():
                 break
-            self.on_progress(Role.MASTER, DiskWriterProgress(
+            self.on_progress(DiskWriterProgress(
                 phase="decompress_write", bytes_done=int(frac * 1_000_000),
                 bytes_total=1_000_000, throughput_bps=0.0,
             ))
-            self.on_progress(Role.SLAVE, DiskWriterProgress(
-                phase="decompress_write", bytes_done=int(frac * 1_000_000),
-                bytes_total=1_000_000, throughput_bps=0.0,
-            ))
-        return FakePairResult(master_ok=not self._should_fail, slave_ok=not self._should_fail)
+        return FakeResult(ok=not self._should_fail)
 
 
 def _make_vm(qtbot):
@@ -62,7 +59,7 @@ def test_initial_status_is_idle(qtbot):
 
 def test_start_with_fake_job_runs_to_done(qtbot):
     vm = _make_vm(qtbot)
-    job = FakePairJob()
+    job = FakeJob()
     vm.startWithJob(job)
     # Wait for the QThread to finish — generous timeout
     deadline = time.time() + 5
@@ -70,12 +67,11 @@ def test_start_with_fake_job_runs_to_done(qtbot):
         qtbot.wait(50)
     assert vm.status == "done"
     assert vm.masterProgress == 1.0
-    assert vm.slaveProgress == 1.0
 
 
 def test_start_with_failing_job_reports_error(qtbot):
     vm = _make_vm(qtbot)
-    job = FakePairJob(should_fail=True)
+    job = FakeJob(should_fail=True)
     vm.startWithJob(job)
     deadline = time.time() + 5
     while vm.status == "flashing" and time.time() < deadline:
@@ -86,7 +82,7 @@ def test_start_with_failing_job_reports_error(qtbot):
 
 def test_cancel_sets_job_cancel_event(qtbot):
     vm = _make_vm(qtbot)
-    job = FakePairJob()
+    job = FakeJob()
     vm.startWithJob(job)
     vm.cancel()
     assert job.cancel_event.is_set()
@@ -103,8 +99,8 @@ def test_cancel_sets_job_cancel_event(qtbot):
 def test_start_while_flashing_is_noop(qtbot):
     """Calling startWithJob while already flashing should be ignored."""
     vm = _make_vm(qtbot)
-    job1 = FakePairJob()
-    job2 = FakePairJob()
+    job1 = FakeJob()
+    job2 = FakeJob()
     vm.startWithJob(job1)
     assert vm.status == "flashing"
     # Try to start again — should be ignored
@@ -116,14 +112,17 @@ def test_start_while_flashing_is_noop(qtbot):
     assert vm.status == "done"
 
 
-def test_slave_progress_updated(qtbot):
-    """Verify slave progress signals are correctly connected."""
+def test_slave_role_routes_to_slave_channel(qtbot):
+    """A slave-cycle job's progress must land on slaveProgress (the
+    role-aware routing regression: a hard-wired master channel left the
+    slave bar frozen at 0% over a healthy flash)."""
     vm = _make_vm(qtbot)
-    job = FakePairJob()
+    job = FakeJob(role_value="slave")
     vm.startWithJob(job)
     deadline = time.time() + 5
     while vm.status == "flashing" and time.time() < deadline:
         qtbot.wait(50)
+    assert vm.status == "done"
     assert vm.slaveProgress == 1.0
     assert vm.slavePhase == "decompress_write"
 
@@ -142,8 +141,8 @@ class _RaisingJob:
     """
 
     def __init__(self):
-        self.master_target = "fake-m"  # PairJob duck
-        self.slave_target = "fake-s"
+        from astromechos_imager.core.models import Role
+        self.role = Role.MASTER
         self.on_progress = None
         self.cancel_event = threading.Event()
 

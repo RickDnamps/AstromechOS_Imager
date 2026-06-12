@@ -11,11 +11,15 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.platform._win32 import (
-    GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    INVALID_HANDLE_VALUE, kernel32,
+from astromechos_imager.platform import windows as W  # noqa: E402
+from astromechos_imager.platform._win32 import (  # noqa: E402
+    FILE_SHARE_READ,
+    FILE_SHARE_WRITE,
+    GENERIC_READ,
+    INVALID_HANDLE_VALUE,
+    OPEN_EXISTING,
+    kernel32,
 )
-from astromechos_imager.platform import windows as W
 
 
 def main() -> int:
@@ -25,7 +29,8 @@ def main() -> int:
                                FILE_SHARE_READ | FILE_SHARE_WRITE, None,
                                OPEN_EXISTING, 0, None)
     if h == INVALID_HANDLE_VALUE:
-        print("open err", ctypes.get_last_error()); return 2
+        print("open err", ctypes.get_last_error())
+        return 2
 
     def rd(off, n):
         p = ctypes.c_longlong(0)

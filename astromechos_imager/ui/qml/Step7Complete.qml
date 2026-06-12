@@ -170,11 +170,39 @@ Rectangle {
         Item { Layout.fillHeight: true }
     }
 
+    // Diagnostic export result — shows the ZIP path (or the error) after
+    // the operator clicks EXPORT DIAGNOSTIC.
+    Text {
+        id: diagResult
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.margins: 24
+        anchors.bottomMargin: 60
+        width: parent.width - 48
+        text: ""
+        visible: text !== ""
+        color: text.indexOf("ERROR") === 0
+            ? theme.colors.colorBorderError
+            : theme.colors.colorTextSecondary
+        font.family: Theme.fontBody
+        font.pixelSize: 11
+        elide: Text.ElideMiddle
+    }
+
     Row {
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         anchors.margins: 24
         spacing: 10
+        AstroButton {
+            text: "EXPORT DIAGNOSTIC"
+            variant: "secondary"
+            onClicked: {
+                var p = flashViewModel.exportDiagnostic()
+                diagResult.text = p.indexOf("ERROR") === 0
+                    ? p : ("Diagnostic bundle saved: " + p)
+            }
+        }
         AstroButton {
             text: "FLASH ANOTHER"
             variant: "secondary"

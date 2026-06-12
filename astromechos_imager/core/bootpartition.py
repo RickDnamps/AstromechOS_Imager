@@ -33,7 +33,7 @@ class BootPartitionLayout:
 #: Pi OS uses 0x0C (FAT32 LBA); we accept the full family for flexibility.
 _FAT_TYPES: frozenset[int] = frozenset({0x0B, 0x0C, 0x06, 0x0E})
 
-_SECTOR = 512
+from astromechos_imager.core.constants import SECTOR_SIZE as _SECTOR  # noqa: E402
 
 
 def find_first_fat32_partition(mbr_bytes: bytes) -> BootPartitionLayout:

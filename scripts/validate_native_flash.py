@@ -23,14 +23,18 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.core.bootpartition import find_first_fat32_partition
-from astromechos_imager.core.diskwriter import DiskWriterProgress
-from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
-from astromechos_imager.core.models import FirstbootConfig, Role, _utc_iso_now
-from astromechos_imager.core.orchestrator import FlashJob
-from astromechos_imager.core.raw_fat_partition import RawFatBootPartition
-from astromechos_imager.platform.windows import (
-    WindowsPlatformIO, enumerate_removable_drives,
+from astromechos_imager.core.bootpartition import find_first_fat32_partition  # noqa: E402
+from astromechos_imager.core.diskwriter import DiskWriterProgress  # noqa: E402
+from astromechos_imager.core.keygen import (  # noqa: E402
+    generate_ed25519,
+    generate_hotspot_bootstrap,
+)
+from astromechos_imager.core.models import FirstbootConfig, Role, _utc_iso_now  # noqa: E402
+from astromechos_imager.core.orchestrator import FlashJob  # noqa: E402
+from astromechos_imager.core.raw_fat_partition import RawFatBootPartition  # noqa: E402
+from astromechos_imager.platform.windows import (  # noqa: E402
+    WindowsPlatformIO,
+    enumerate_removable_drives,
 )
 
 # Default to the real 5.8 GB Master image; override with IMG=... for a fast

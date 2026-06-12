@@ -20,8 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 logging.basicConfig(level=logging.INFO, format="  %(message)s")
 
-from astromechos_imager.platform.windows import (
-    WindowsPlatformIO, enumerate_removable_drives,
+from astromechos_imager.platform.windows import (  # noqa: E402
+    WindowsPlatformIO,
+    enumerate_removable_drives,
 )
 
 

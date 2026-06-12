@@ -1,4 +1,4 @@
-"""Faithful reproduction of the REAL UI flash path (no Qt).
+r"""Faithful reproduction of the REAL UI flash path (no Qt).
 
 The Qt layer (_FlashWorker.run) does nothing but call job.run() on a worker
 thread — all device I/O lives in the job. So building the job through the
@@ -33,11 +33,12 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-from astromechos_imager.platform.windows import (
-    WindowsPlatformIO, enumerate_removable_drives,
+from astromechos_imager.core.diskwriter import DiskWriterProgress  # noqa: E402
+from astromechos_imager.platform.windows import (  # noqa: E402
+    WindowsPlatformIO,
+    enumerate_removable_drives,
 )
-from astromechos_imager.core.diskwriter import DiskWriterProgress
-from astromechos_imager.ui.flash_view_model import _build_flash_job
+from astromechos_imager.ui.flash_view_model import _build_flash_job  # noqa: E402
 
 IMG = Path(os.environ.get(
     "IMG", r"J:\R2-D2_Build\AstroMechOS_Imager\tests\fixtures\pi_os_shaped.img.gz"))

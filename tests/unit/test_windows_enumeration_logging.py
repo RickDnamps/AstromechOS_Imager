@@ -25,13 +25,15 @@ def _wmi_disk(device_id, size, model, serial, interface_type, media_type):
 
 def _enumerate(candidates, sys_id: int = 0, letters: tuple[str, ...] = ()):
     from astromechos_imager.platform.windows import enumerate_removable_drives
-    with patch("astromechos_imager.platform.windows._wmi_query",
-               return_value=candidates):
-        with patch("astromechos_imager.platform.windows._drive_letters_for",
-                   return_value=letters):
-            with patch("astromechos_imager.platform.windows._system_drive_id",
-                       return_value=sys_id):
-                return list(enumerate_removable_drives())
+    with (
+        patch("astromechos_imager.platform.windows._wmi_query",
+              return_value=candidates),
+        patch("astromechos_imager.platform.windows._drive_letters_for",
+              return_value=letters),
+        patch("astromechos_imager.platform.windows._system_drive_id",
+              return_value=sys_id),
+    ):
+        return list(enumerate_removable_drives())
 
 
 def test_enumerate_logs_wmi_candidate_count(caplog):

@@ -25,8 +25,6 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Path to a file containing OpenSSH pubkey(s), one per line")
     flash.add_argument("--no-verify", action="store_true",
                        help="Skip read-back SHA256 verification (discouraged)")
-    flash.add_argument("--sequential", action="store_true",
-                       help="Force sequential flash even when 2 SDs are present")
     # Lockstep with the GUI (audit C4): the wizard hard-locks the install
     # user to DEFAULT_INSTALL_USER ("astromech") — a CLI default of "pi"
     # produced a different account contract than a GUI flash.
@@ -101,7 +99,7 @@ def _cmd_flash(args: argparse.Namespace) -> int:
         generate_linux_account,
     )
     from astromechos_imager.core.models import FirstbootConfig, Role, _utc_iso_now
-    from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
+    from astromechos_imager.core.orchestrator import FlashJob
 
     plat = _build_platform_io()
     drives = {d.physical_drive_id: d for d in plat.enumerate_removable_drives()}
@@ -124,37 +122,33 @@ def _cmd_flash(args: argparse.Namespace) -> int:
     linux_account = generate_linux_account(
         args.install_user, args.install_password)
 
+    # Sequential-only, in lockstep with the GUI's Deployment Assistant: ONE
+    # card per invocation. The old PairFlashJob path was purged — it never
+    # passed linux_account, so pair-flashed cards shipped WITHOUT account
+    # provisioning (audit perfection pass).
     if args.master_image and args.slave_image:
-        job = PairFlashJob(
-            platform_io=plat,
-            master_image=Path(args.master_image),
-            master_target=drives[args.master_drive],
-            slave_image=Path(args.slave_image),
-            slave_target=drives[args.slave_drive],
-            firstboot_config=cfg,
-            master_pair=pair,
-            parallel=not args.sequential,
-            skip_verify=args.no_verify,
-        )
-        res = job.run()
-        return 0 if (res.master.ok and res.slave.ok) else 2
+        print("error: flash ONE card per invocation (master first, then "
+              "slave) — the parallel pair mode was removed.", file=sys.stderr)
+        return 2
+    if args.master_image:
+        role, image, target = Role.MASTER, args.master_image, drives[args.master_drive]
+    elif args.slave_image:
+        role, image, target = Role.SLAVE, args.slave_image, drives[args.slave_drive]
     else:
-        # Single role
-        if args.master_image:
-            role, image, target = Role.MASTER, args.master_image, drives[args.master_drive]
-        else:
-            role, image, target = Role.SLAVE, args.slave_image, drives[args.slave_drive]
-        single = FlashJob(
-            platform_io=plat,
-            image_path=Path(image),
-            target=target,
-            role=role,
-            firstboot_config=cfg,
-            master_pair=pair,
-            linux_account=linux_account,
-            skip_verify=args.no_verify,
-        )
-        return 0 if single.run().ok else 2
+        print("error: provide --master-image/--master-drive or "
+              "--slave-image/--slave-drive.", file=sys.stderr)
+        return 2
+    single = FlashJob(
+        platform_io=plat,
+        image_path=Path(image),
+        target=target,
+        role=role,
+        firstboot_config=cfg,
+        master_pair=pair,
+        linux_account=linux_account,
+        skip_verify=args.no_verify,
+    )
+    return 0 if single.run().ok else 2
 
 
 def main(argv: list[str] | None = None) -> int:

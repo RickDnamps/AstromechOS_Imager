@@ -27,7 +27,9 @@ def test_next_advances(qtbot):
 def test_back_decrements(qtbot):
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
-    s.next(); s.next(); s.next()  # 4
+    s.next()
+    s.next()
+    s.next()  # 4
     s.back()
     assert s.currentStep == 3
 
@@ -118,7 +120,10 @@ def test_image_path_file_url_normalized(qtbot, tmp_path):
     f = tmp_path / "y.img.xz"
     f.write_bytes(b"x" * 100)
     s.setMasterImagePath(f"file:///{str(f).replace(chr(92), '/')}")
-    assert s.masterImagePath == str(f).replace("\\", "/").lstrip("/") or s.masterImagePath.endswith("y.img.xz")
+    assert (
+        s.masterImagePath == str(f).replace("\\", "/").lstrip("/")
+        or s.masterImagePath.endswith("y.img.xz")
+    )
 
 
 def test_valid_image_path_returns_true(qtbot, tmp_path):

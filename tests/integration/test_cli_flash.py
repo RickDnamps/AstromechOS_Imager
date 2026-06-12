@@ -18,15 +18,39 @@ def _mbr(payload):
     return bytes(out)
 
 
-def test_cli_flash_pair(tmp_path, fake_platform_io, monkeypatch):
+def test_cli_flash_single_master(tmp_path, fake_platform_io, monkeypatch):
     payload = _mbr(b"X" * 200_000)
-    m = tmp_path / "master.img"; m.write_bytes(payload)
-    s = tmp_path / "slave.img"; s.write_bytes(payload)
-    keys = tmp_path / "id.pub"; keys.write_text(VALID_KEY + "\n")
+    m = tmp_path / "master.img"
+    m.write_bytes(payload)
+    keys = tmp_path / "id.pub"
+    keys.write_text(VALID_KEY + "\n")
     fake_platform_io.add_drive(2, size=len(payload) + 1024)
-    fake_platform_io.add_drive(3, size=len(payload) + 1024)
     monkeypatch.setattr("astromechos_imager.core.orchestrator._bootpartition_open",
                          lambda *a, **kw: None)
+    monkeypatch.setattr("astromechos_imager.cli.main._build_platform_io",
+                         lambda: fake_platform_io)
+    args = build_parser().parse_args([
+        "flash", "--master-image", str(m), "--master-drive", "2",
+        "--keys-file", str(keys), "--no-verify",
+        "--hotspot-psk", "test-hotspot-psk",
+    ])
+    rc = _cmd_flash(args)
+    assert rc == 0
+
+
+def test_cli_flash_refuses_pair_invocation(tmp_path, fake_platform_io, monkeypatch):
+    """The parallel pair mode was purged (it never provisioned the Linux
+    account) — supplying both images must fail loudly, not flash half-broken
+    cards."""
+    payload = _mbr(b"X" * 4096)
+    m = tmp_path / "m.img"
+    m.write_bytes(payload)
+    s = tmp_path / "s.img"
+    s.write_bytes(payload)
+    keys = tmp_path / "id.pub"
+    keys.write_text(VALID_KEY + "\n")
+    fake_platform_io.add_drive(2, size=len(payload) + 1024)
+    fake_platform_io.add_drive(3, size=len(payload) + 1024)
     monkeypatch.setattr("astromechos_imager.cli.main._build_platform_io",
                          lambda: fake_platform_io)
     args = build_parser().parse_args([
@@ -35,5 +59,4 @@ def test_cli_flash_pair(tmp_path, fake_platform_io, monkeypatch):
         "--keys-file", str(keys), "--no-verify",
         "--hotspot-psk", "test-hotspot-psk",
     ])
-    rc = _cmd_flash(args)
-    assert rc == 0
+    assert _cmd_flash(args) == 2

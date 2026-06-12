@@ -59,12 +59,13 @@ class AutomountSessionGuard:
         already = kernel32.GetLastError() == ERROR_ALREADY_EXISTS
         return handle, already
 
-    def acquire(self) -> bool:
-        """Claim the session. Returns True when the automount defense is armed.
+    def claim(self) -> bool:
+        """Claim the single-instance mutex ONLY (fast, no subprocess).
 
-        When another live instance holds the mutex, sets ``already_running``
-        and returns False WITHOUT having touched any machine state - the
-        caller must inform the operator and exit.
+        Returns True when this process owns the session. When another live
+        instance holds the mutex, sets ``already_running`` and returns False
+        WITHOUT having touched any machine state - the caller must inform
+        the operator and exit.
         """
         self._mutex_handle, self.already_running = self._claim()
         if self.already_running:
@@ -73,11 +74,29 @@ class AutomountSessionGuard:
                 "session untouched"
             )
             return False
+        return True
+
+    def arm(self) -> bool:
+        """Repair a crashed session, then disable automount for THIS session.
+
+        Spawns mountvol (up to a few seconds on a pathological system) - safe
+        to run OFF the UI thread (audit defect A6: the old synchronous
+        pre-Qt call could stall the window for the full subprocess timeouts).
+        Must be called after a successful :meth:`claim`.
+        """
+        if self.already_running:
+            return False
         # No live instance -> a present marker really means a crashed
         # session: repair it, then arm the defense for THIS session.
         self._win.restore_automount_if_crashed()
         self.defense_active = bool(self._win.disable_automount())
         return self.defense_active
+
+    def acquire(self) -> bool:
+        """claim() + arm() in one synchronous call (CLI / tests)."""
+        if not self.claim():
+            return False
+        return self.arm()
 
     def release(self) -> bool:
         """Re-enable automount at clean exit. Idempotent."""

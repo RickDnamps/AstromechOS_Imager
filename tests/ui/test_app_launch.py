@@ -62,10 +62,24 @@ def test_build_app_returns_app_engine_and_state(qtbot):
 
 
 def test_build_app_uses_injected_seam_not_real_platform(qtbot):
-    """The session guard must run through the injected surface (WP8/A7)."""
+    """The session guard must run through the injected surface (WP8/A7).
+
+    Arming is asynchronous since A6 (background thread) — wait for the
+    worker to report through the fake before asserting.
+    """
     app, engine, state, fake = _build(qtbot)
+    qtbot.waitUntil(lambda: "disable" in fake.calls, timeout=3000)
     assert "restore" in fake.calls
-    assert "disable" in fake.calls
+
+
+def test_system_status_context_property(qtbot):
+    """QML reads systemStatus.automountDefenseActive live (A6)."""
+    from astromechos_imager.ui.system_status import SystemStatus
+    app, engine, state, fake = _build(qtbot)
+    status = engine.rootContext().contextProperty("systemStatus")
+    assert isinstance(status, SystemStatus)
+    qtbot.waitUntil(lambda: "disable" in fake.calls, timeout=3000)
+    assert status.automountDefenseActive is True  # fake disable_automount -> True
 
 
 def test_splash_asset_path_resolves_in_dev():

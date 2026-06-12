@@ -14,6 +14,7 @@ ext4 rootfs pre-populated with /etc/passwd, /etc/shadow, /etc/group
 """
 from __future__ import annotations
 
+import contextlib
 import shutil
 import struct
 import subprocess
@@ -124,9 +125,7 @@ def _fixture_looks_valid(path: Path) -> bool:
     if mbr[446 + 4] != 0x0C:
         return False
     # Partition 2 must be Linux (0x83)
-    if mbr[462 + 4] != 0x83:
-        return False
-    return True
+    return mbr[462 + 4] == 0x83
 
 
 def _format_boot_fat32(img_path: Path) -> None:
@@ -138,10 +137,8 @@ def _format_boot_fat32(img_path: Path) -> None:
     try:
         pf.mkfs(str(img_path), PyFat.FAT_TYPE_FAT32, size=BOOT_SIZE)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             pf.close()
-        except Exception:
-            pass
 
 
 def _write_boot_files(img_path: Path) -> None:

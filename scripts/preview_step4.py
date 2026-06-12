@@ -16,7 +16,7 @@ from PySide6.QtCore import QTimer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.ui.app import build_app   # noqa: E402
+from astromechos_imager.ui.app import build_app  # noqa: E402
 
 
 def main() -> int:

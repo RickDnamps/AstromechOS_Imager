@@ -18,7 +18,9 @@ from PySide6.QtCore import QObject, QTimer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.ui.app import build_app   # noqa: E402
+import contextlib
+
+from astromechos_imager.ui.app import build_app  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "validation"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -77,8 +79,8 @@ def main() -> int:
         img.save(str(out))
         print(f"  saved {out.relative_to(OUT.parent.parent)}  ({img.width()}x{img.height()}, {out.stat().st_size//1024} KB)")
         if dlg is not None:
-            try: dlg.close()
-            except Exception: pass
+            with contextlib.suppress(Exception):
+                dlg.close()
         idx["i"] += 1
         QTimer.singleShot(120, do_capture)
 

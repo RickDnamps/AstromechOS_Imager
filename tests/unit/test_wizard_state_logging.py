@@ -100,7 +100,8 @@ class TestRoleCheckLogsToLogger:
         ]
         assert matching, (
             "No ERROR log record found for the role-check failure. "
-            f"All captured records: {[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
+            "All captured records: "
+            f"{[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
         )
         # ``logger.exception`` MUST attach traceback info so the JSONL
         # formatter can serialise it.

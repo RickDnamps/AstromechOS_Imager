@@ -96,7 +96,7 @@ def fake_platform_io(tmp_path):
         def __init__(self, path, size):
             self._path = path
             self.size_bytes = size
-            self._fh = open(path, "r+b")
+            self._fh = open(path, "r+b")  # noqa: SIM115 — released in close()
             self._h = 0xF000  # mimic _Win32RawDevice's handle attr (eject/sync probe it)
 
         def write(self, offset, data):

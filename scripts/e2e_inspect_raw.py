@@ -3,7 +3,7 @@
 Goal: confirm whether the FirstbootBundle was actually written to the SD by the
 orchestrator's customize step. The Windows-mounted I:\\ view may be stale due
 to auto-mount caching during the raw block write — pyfatfs reading directly
-from \\.\PHYSICALDRIVE7 will show the on-disk truth.
+from \\.\\PHYSICALDRIVE7 will show the on-disk truth.
 """
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.core.bootpartition import (
-    PyFatFsBootPartition, find_first_fat32_partition,
+from astromechos_imager.core.bootpartition import (  # noqa: E402
+    PyFatFsBootPartition,
+    find_first_fat32_partition,
 )
-from astromechos_imager.platform.windows import enumerate_removable_drives
+from astromechos_imager.platform.windows import enumerate_removable_drives  # noqa: E402
 
 
 def main() -> int:

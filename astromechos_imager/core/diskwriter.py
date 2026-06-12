@@ -6,6 +6,7 @@ A single threading.Event controls cancellation across both threads.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import queue
 import threading
@@ -66,7 +67,7 @@ class DiskWriter:
                  defer_first_block: bool = True):
         self.source = source
         self.dev = raw_device
-        self.on_progress = on_progress or (lambda p: None)
+        self.on_progress = on_progress or (lambda _p: None)
         self.cancel = cancel_event or threading.Event()
         self.defer_first_block = defer_first_block
         self._exc: BaseException | None = None
@@ -135,10 +136,8 @@ class DiskWriter:
                         break
                     except queue.Full:
                         if self.cancel.is_set():
-                            try:
+                            with contextlib.suppress(queue.Empty):
                                 q.get_nowait()
-                            except queue.Empty:
-                                pass
                         # else: consumer is alive and draining — retry.
 
         # Prefer the compressed-stream position when the source exposes
@@ -230,8 +229,10 @@ class DiskWriter:
 
         t_p = threading.Thread(target=producer, name="dw-producer", daemon=True)
         t_c = threading.Thread(target=consumer, name="dw-consumer", daemon=True)
-        t_p.start(); t_c.start()
-        t_p.join(); t_c.join()
+        t_p.start()
+        t_c.start()
+        t_p.join()
+        t_c.join()
 
         self.dev.flush()
         if self._exc is not None:
@@ -264,7 +265,7 @@ def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
 
     Raises ``HashMismatchError`` if the computed hash doesn't match.
     """
-    on_progress = on_progress or (lambda p: None)
+    on_progress = on_progress or (lambda _p: None)
     cancel = cancel_event or threading.Event()
     hasher = hashlib.sha256()
     chunk_size = 1 << 20

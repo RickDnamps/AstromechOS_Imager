@@ -21,12 +21,12 @@ from pathlib import Path
 # console without UnicodeEncodeError under Windows cp1252.
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.ui.app import build_app                       # noqa: E402
-from astromechos_imager.platform.windows import WindowsPlatformIO    # noqa: E402
+from astromechos_imager.platform.windows import WindowsPlatformIO  # noqa: E402
+from astromechos_imager.ui.app import build_app  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "e2e_audit"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -80,7 +80,7 @@ def audit_images() -> None:
         sidecar_state = "MISSING"
         if sidecar.exists():
             sb = sidecar.stat().st_size
-            sidecar_state = f"EMPTY (0 B) — verify_integrity will FAIL" if sb == 0 else f"{sb} B"
+            sidecar_state = "EMPTY (0 B) — verify_integrity will FAIL" if sb == 0 else f"{sb} B"
         log(f"  ✓ {label}: {p.name} ({size_mb:.1f} MB) — sidecar: {sidecar_state}")
 
 
@@ -92,7 +92,7 @@ def main() -> int:
     window = engine.rootObjects()[0]
     window.show()
     theme_mgr = getattr(engine, "themeManager", None)
-    flash_vm = engine.rootContext().contextProperty("flashViewModel")
+    _flash_vm = engine.rootContext().contextProperty("flashViewModel")
 
     # Seed synthetic config (Step 2 fields)
     state.setInstallUser(SYNTH["linux_user"])

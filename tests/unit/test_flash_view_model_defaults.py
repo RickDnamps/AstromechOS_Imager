@@ -210,5 +210,6 @@ def test_half_filled_wifi_raises(tmp_path, monkeypatch):
     wiz.masterImagePath = str(img)
     plat = _FakePlatformIO([_fake_drive(2)])
 
-    with pytest.raises(Exception):  # RuntimeError ducktyped from FirstbootConfig path
+    # Half WiFi config (SSID without PSK) is rejected by _build_flash_job.
+    with pytest.raises(RuntimeError, match="both SSID and PSK"):
         _build_flash_job(wiz, platform_io=plat)

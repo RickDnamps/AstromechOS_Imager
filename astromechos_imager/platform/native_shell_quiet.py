@@ -118,10 +118,7 @@ def lock_and_quiet(drive_letters: tuple[str, ...] | list[str] | str) -> bool:
     dll = _load()
     if dll is None:
         return False
-    if isinstance(drive_letters, str):
-        csv = drive_letters
-    else:
-        csv = ",".join(drive_letters)
+    csv = drive_letters if isinstance(drive_letters, str) else ",".join(drive_letters)
     st = _AstroStatus()
     rc = dll.astro_lock_and_quiet(csv.encode("ascii", "replace"), ctypes.byref(st))
     if rc != 0:

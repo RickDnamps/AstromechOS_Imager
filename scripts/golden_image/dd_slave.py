@@ -15,7 +15,13 @@ Anti-regression invariants (gravé dans le béton via marathon 2026-06-02→07):
 
 PREREQS — see ./README.md
 """
-import io, os, sys, time, threading
+import contextlib
+import io
+import os
+import sys
+import threading
+import time
+
 import paramiko
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace",
@@ -90,7 +96,9 @@ run(sl, f"echo {PWD} | sudo -S which fsck.exfat 2>&1 || apt list --installed 2>/
 rc = run(sl, f"echo {PWD} | sudo -S mount -t exfat /dev/sda1 /mnt/ssd 2>&1", "mount SSD")
 if rc != 0:
     print("  !!! mount failed — aborting", flush=True)
-    sl.close(); m.close(); sys.exit(rc)
+    sl.close()
+    m.close()
+    sys.exit(rc)
 run(sl, "ls -la /mnt/ssd/ | head -10", "list /mnt/ssd")
 
 # === C. Verify Master.img integrity (size only — sha256 too slow for 126GB) ===
@@ -105,7 +113,7 @@ try:
         print(f"  ⚠️  Master.img size MISMATCH (expected {MASTER_IMG_EXPECTED:,})", flush=True)
         print("       Will re-test after slave DD; not aborting", flush=True)
 except ValueError:
-    print(f"  ℹ️  Master.img not present (probably DD'd separately or this is slave-first cycle) — continuing", flush=True)
+    print("  ℹ️  Master.img not present (probably DD'd separately or this is slave-first cycle) — continuing", flush=True)
 
 # === D. SCP + patch pi_cleanup.sh for slave ===
 print("\n=== D. SCP + patch pi_cleanup.sh slave ===", flush=True)
@@ -121,7 +129,9 @@ rc = run(sl, f"echo {PWD} | sudo -S bash {REMOTE_CLEANUP} slave 2>&1",
          "pi_cleanup slave", timeout=300, stream=True)
 if rc != 0:
     print("  !!! pi_cleanup failed — abort !!!", flush=True)
-    sl.close(); m.close(); sys.exit(rc)
+    sl.close()
+    m.close()
+    sys.exit(rc)
 
 # === F. Erase old slave .img if any ===
 print("\n=== F. Erase old slave .img ===", flush=True)
@@ -167,7 +177,8 @@ def poll():
                 pct = int(sz) * 100 / EXPECTED_SIZE
                 print(f"  [poll {time.strftime('%H:%M:%S')}] {gb:.2f} GB ({pct:.1f}%)",
                       flush=True)
-            p_sl.close(); p_master.close()
+            p_sl.close()
+            p_master.close()
         except Exception as e:
             print(f"  [poll fail: {type(e).__name__}]", flush=True)
 
@@ -194,7 +205,9 @@ if dd_output.strip():
 
 if dd_rc != 0:
     print(f"  !!! DD FAILED (rc={dd_rc}) !!!", flush=True)
-    sl.close(); m.close(); sys.exit(dd_rc)
+    sl.close()
+    m.close()
+    sys.exit(dd_rc)
 
 run(sl, "sync", "Post-DD sync")
 
@@ -206,7 +219,9 @@ print(f"  actual:   {actual:,} bytes ({actual/1e9:.2f} GB)", flush=True)
 print(f"  expected: {EXPECTED_SIZE:,} bytes ({EXPECTED_SIZE/1e9:.2f} GB)", flush=True)
 if actual != EXPECTED_SIZE:
     print(f"  ❌ SIZE MISMATCH (diff: {EXPECTED_SIZE - actual:,} bytes)", flush=True)
-    sl.close(); m.close(); sys.exit(2)
+    sl.close()
+    m.close()
+    sys.exit(2)
 print("  ✅ size matches exactly", flush=True)
 
 run(sl, f"ls -la {TARGET}", "Final slave listing")
@@ -215,13 +230,14 @@ run(sl, "df -h /mnt/ssd", "SSD usage post-DD")
 
 # Cleanup
 sftp = sl.open_sftp()
-try: sftp.remove(REMOTE_CLEANUP)
-except Exception: pass
+with contextlib.suppress(Exception):
+    sftp.remove(REMOTE_CLEANUP)
 sftp.close()
-sl.close(); m.close()
+sl.close()
+m.close()
 
 print("\n" + "=" * 72, flush=True)
 print(f"✅ SLAVE DD v3 DONE — image at {TARGET}", flush=True)
 print(f"   Size: {actual/1e9:.2f} GB (matches mmcblk0)", flush=True)
-print(f"   Both Golden Images now on SSD; unplug+plug to PC for Phase 3", flush=True)
+print("   Both Golden Images now on SSD; unplug+plug to PC for Phase 3", flush=True)
 print("=" * 72, flush=True)

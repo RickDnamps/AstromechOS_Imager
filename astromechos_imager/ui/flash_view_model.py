@@ -1,4 +1,4 @@
-"""Bridges PairFlashJob / FlashJob to QML. Runs the job in a QThread.
+"""Bridges FlashJob to QML. Runs the job in a QThread.
 
 The exposed state machine is:
 
@@ -16,6 +16,7 @@ When no sidecar exists the digest is exposed via ``masterHash`` /
 """
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from pathlib import Path
@@ -35,19 +36,21 @@ class _FlashWorker(QObject):
     """Lives in a QThread; runs job.run() then emits 'finished'.
 
     progress* signals are (fraction 0..1, phase, throughput_bps); throughput is
-    0.0 for non-bandwidth events so the bar hides the speed badge.
+    0.0 for non-bandwidth events so the bar hides the speed badge. The two
+    channels exist because the SEQUENTIAL workflow routes a single job's
+    progress to the bar matching its role (master cycle vs slave cycle) —
+    the old PairFlashJob dual-stream consumer was purged with the class.
     """
     progressMaster = Signal(float, str, float)
     progressSlave = Signal(float, str, float)
     finished = Signal(bool, str)          # ok, error_msg
     phaseChanged = Signal(str, str)       # role_value, phase_str
 
-    def __init__(self, job, is_pair: bool):
+    def __init__(self, job):
         super().__init__()
         self._job = job
-        self._is_pair = is_pair
         # Per-channel rate-gate state, pre-seeded so updates only ever mutate
-        # existing keys (concurrent master/slave writes stay GIL-safe).
+        # existing keys (GIL-safe).
         self._last_emit = {"m": 0.0, "s": 0.0}
         self._last_phase = {"m": "", "s": ""}
 
@@ -55,27 +58,12 @@ class _FlashWorker(QObject):
     def run(self) -> None:
         # Show activity immediately during the ~1-3 s silent window before
         # DiskWriter starts firing chunks.
-        if self._is_pair:
-            self.progressMaster.emit(0.0, "preparing", 0.0)
-            self.progressSlave.emit(0.0, "preparing", 0.0)
-        else:
-            self._single_sig().emit(0.0, "preparing", 0.0)
-
+        self._single_sig().emit(0.0, "preparing", 0.0)
         try:
-            if self._is_pair:
-                self._job.on_progress = self._on_pair_progress
-            else:
-                self._job.on_progress = self._on_single_progress
+            self._job.on_progress = self._on_single_progress
             result = self._job.run()
-            if self._is_pair:
-                ok = result.master.ok and result.slave.ok
-                err = "" if ok else (
-                    str(result.master.error or "")
-                    + (("; " + str(result.slave.error)) if result.slave.error else "")
-                )
-            else:
-                ok = bool(result.ok)
-                err = "" if ok else str(getattr(result, "error", "")) or "flash failed"
+            ok = bool(result.ok)
+            err = "" if ok else str(getattr(result, "error", "")) or "flash failed"
             # finished is never gated — completion always reaches the UI (which
             # then forces the bar to 100% via the done state).
             self.finished.emit(ok, err)
@@ -86,19 +74,14 @@ class _FlashWorker(QObject):
         """True if this update should reach the UI: always on a phase change,
         else at most once per _PROGRESS_MIN_INTERVAL_S."""
         now = time.monotonic()
-        if phase != self._last_phase[key] or (now - self._last_emit[key]) >= _PROGRESS_MIN_INTERVAL_S:
+        if (
+            phase != self._last_phase[key]
+            or (now - self._last_emit[key]) >= _PROGRESS_MIN_INTERVAL_S
+        ):
             self._last_phase[key] = phase
             self._last_emit[key] = now
             return True
         return False
-
-    def _on_pair_progress(self, role: Role, p: DiskWriterProgress) -> None:
-        key = "m" if role is Role.MASTER else "s"
-        if not self._gate(key, p.phase):
-            return
-        frac = (p.bytes_done / p.bytes_total) if p.bytes_total else 0.0
-        sig = self.progressMaster if role is Role.MASTER else self.progressSlave
-        sig.emit(frac, p.phase, p.throughput_bps)
 
     def _single_is_slave(self) -> bool:
         """A single FlashJob carries its own ``role`` — route its progress to
@@ -173,10 +156,9 @@ class _HashWorker(QObject):
         except Exception as exc:
             self.finished.emit(self._role, f"ERR:{type(exc).__name__}:{exc}", False)
             return
-        if self._sidecar is None:
-            match = None
-        else:
-            match = (digest.lower() == self._sidecar[1].lower())
+        match = (
+            None if self._sidecar is None else digest.lower() == self._sidecar[1].lower()
+        )
         self.finished.emit(self._role, digest, match)
 
 
@@ -343,6 +325,14 @@ class FlashViewModel(QObject):
         self._slave_hash_sidecar_match = None
         self._user_cancelled = False
         self._cancel_event.clear()
+        # Verify-phase plumbing (audit residual): the sidecar tuples and the
+        # pending job were the only fields this reset skipped — benign in the
+        # nominal flow (overwritten per role) but an asymmetry that could
+        # leak card 1's verify context into a hand-crafted card-2 path.
+        self._pending_verify_job = None
+        self._pending_verify_roles = []
+        self._master_sidecar = None
+        self._slave_sidecar = None
         for sig in (
             self.statusChanged, self.errorMessageChanged,
             self.masterProgressChanged, self.masterPhaseChanged,
@@ -355,11 +345,55 @@ class FlashViewModel(QObject):
         ):
             sig.emit()
 
+    @Slot(result=str)
+    def exportDiagnostic(self) -> str:
+        """Write a redacted support bundle next to the operator's Downloads.
+
+        Surfaces the diagnostic feature that was fully written and tested
+        (logging_setup/diagnostic.py) but had no UI/CLI caller (audit WP9).
+        Returns the ZIP path on success, or an ``ERROR: …`` string the QML
+        label shows verbatim. PSKs/passwords are stripped by the redactor.
+        """
+        import os
+        import time as _time
+
+        from astromechos_imager.logging_setup.diagnostic import (
+            build_diagnostic_zip,
+            collect_system_info,
+        )
+        try:
+            appdata = os.environ.get("APPDATA") or str(Path.home())
+            log_dir = Path(appdata) / "AstromechOS Imager" / "logs"
+            logs = sorted(log_dir.glob("flash-*.log")) if log_dir.is_dir() else []
+            log_path = logs[-1] if logs else log_dir / "missing.log"
+            downloads = Path.home() / "Downloads"
+            out_dir = downloads if downloads.is_dir() else Path.home()
+            stamp = _time.strftime("%Y%m%d-%H%M%S")
+            target = out_dir / f"AstromechOS_Imager_diagnostic_{stamp}.zip"
+            cfg = {
+                "hostname_master": getattr(self._wizard_state, "hostnameMaster", ""),
+                "hostname_slave": getattr(self._wizard_state, "hostnameSlave", ""),
+                "repo_url": getattr(self._wizard_state, "repoUrl", ""),
+                "hotspot_ssid": getattr(self._wizard_state, "hotspotSsid", ""),
+            }
+            build_diagnostic_zip(
+                target=target,
+                log_path=log_path,
+                traceback_text=self._error_message,
+                system_info=collect_system_info(),
+                firstboot_config=cfg,
+            )
+            return str(target)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception("diagnostic export failed")
+            return f"ERROR: {type(exc).__name__}: {exc}"
+
     @Slot(QObject)
     def startWithJob(self, job_obj) -> None:
-        """job_obj should be a Python object exposing the PairFlashJob / FlashJob
-        interface. In tests we pass FakeJob; in production app.build_app() wires
-        a real factory that constructs from wizardState."""
+        """job_obj should be a Python object exposing the FlashJob interface.
+        In tests we pass FakeJob; in production app.build_app() wires a real
+        factory that constructs from wizardState."""
         if self._status == "flashing":
             return
         self._cancel_event.clear()
@@ -369,15 +403,13 @@ class FlashViewModel(QObject):
         # consult. Without this, the job has its own internal Event that
         # cancel() never reaches and the destructive write proceeds.
         if hasattr(job_obj, "cancel_event"):
-            try:
+            # Frozen dataclass instance — best-effort.
+            with contextlib.suppress(AttributeError):
                 job_obj.cancel_event = self._cancel_event
-            except AttributeError:
-                pass  # frozen dataclass instance — best-effort
         self._status = "flashing"
         self.statusChanged.emit()
-        is_pair = hasattr(job_obj, "master_target")
         self._thread = QThread()
-        self._worker = _FlashWorker(job_obj, is_pair)
+        self._worker = _FlashWorker(job_obj)
         self._worker.moveToThread(self._thread)
         self._worker.progressMaster.connect(self._update_master)
         self._worker.progressSlave.connect(self._update_slave)
@@ -387,7 +419,7 @@ class FlashViewModel(QObject):
 
     @Slot()
     def startFromWizard(self) -> None:
-        """Build the PairFlashJob/FlashJob from wizardState + platform IO, then start.
+        """Build the FlashJob from wizardState + platform IO, then start.
 
         If ``wizardState.verifyIntegrity`` is True (default), runs SHA-256
         on each compressed image first, compares to the sidecar when
@@ -662,10 +694,8 @@ class FlashViewModel(QObject):
         self._user_cancelled = True
         self._cancel_event.set()
         if self._worker is not None and hasattr(self._worker._job, "cancel_event"):
-            try:
+            with contextlib.suppress(AttributeError):
                 self._worker._job.cancel_event.set()
-            except AttributeError:
-                pass
         self._status = "cancelling"
         self.statusChanged.emit()
 
@@ -850,8 +880,8 @@ def _build_flash_job(wizard_state, platform_io=None):
         #     home-dir creation / role-marker placement target the same
         #     UID-1000 the Imager just renamed.
         #   * The ed25519 keypair lives on the *job* (master_pair=), not on
-        #     FirstbootConfig — that's the contract of FlashJob /
-        #     PairFlashJob and what FirstbootBundle consumes.
+        #     FirstbootConfig — that's the contract of FlashJob and what
+        #     FirstbootBundle consumes.
         # Stamp provenance: the generated /boot header used to read
         # "Generated by AstromechOS Imager  on " with BLANKS — the GUI never
         # set imager_version/flashed_at_iso (only the CLI did, hardcoded).
@@ -876,8 +906,7 @@ def _build_flash_job(wizard_state, platform_io=None):
         if current_role not in ("master", "slave"):
             raise RuntimeError(
                 "Cannot build flash job: wizard_state.currentRole must be "
-                "'master' or 'slave' (got %r). Screen 4 Role must run first."
-                % current_role
+                f"'master' or 'slave' (got {current_role!r}). Screen 4 Role must run first."
             )
 
         drives = {d.physical_drive_id: d for d in platform_io.enumerate_removable_drives()}

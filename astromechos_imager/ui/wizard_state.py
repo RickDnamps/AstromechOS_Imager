@@ -94,7 +94,8 @@ class WizardState(QObject):
     MIN_STEP = 1
     MAX_STEP = 7
 
-    SUPPORTED_IMAGE_EXTENSIONS = (".img", ".xz", ".gz", ".zip")  # .img.xz, .img.gz handled by stem-check
+    # .img.xz and .img.gz are handled by the stem-check.
+    SUPPORTED_IMAGE_EXTENSIONS = (".img", ".xz", ".gz", ".zip")
 
     _VALID_ROLES = ("master", "slave")
 
@@ -643,9 +644,7 @@ class WizardState(QObject):
         and matches the WPA2-PSK minimum. No newlines, no NULs."""
         if len(v) < 8:
             return False
-        if not v.isascii() or not v.isprintable():
-            return False
-        return True
+        return v.isascii() and v.isprintable()
 
     @Slot(str, result=bool)
     def isValidWifiSsid(self, v: str) -> bool:
@@ -654,18 +653,14 @@ class WizardState(QObject):
             return False
         if len(v.encode("utf-8")) > 32:
             return False
-        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in v):
-            return False
-        return True
+        return not any(ord(c) < 0x20 or ord(c) == 0x7F for c in v)
 
     @Slot(str, result=bool)
     def isValidWifiPsk(self, v: str) -> bool:
         """WPA2-PSK: 8-63 ASCII printable characters per IEEE 802.11."""
         if not (8 <= len(v) <= 63):
             return False
-        if not v.isascii() or not v.isprintable():
-            return False
-        return True
+        return v.isascii() and v.isprintable()
 
     @Property(str, notify=hotspotSsidChanged)
     def hotspotSsid(self) -> str:

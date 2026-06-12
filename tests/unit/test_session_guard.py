@@ -42,6 +42,24 @@ def test_acquire_arms_defense_when_alone():
     assert win.calls == ["restore", "disable"]
 
 
+def test_claim_alone_touches_nothing():
+    """A6 split: claim() is mutex-only — no mountvol until arm()."""
+    win = FakeWin()
+    g = _guard(win)
+    assert g.claim() is True
+    assert win.calls == []
+    assert g.arm() is True
+    assert win.calls == ["restore", "disable"]
+
+
+def test_arm_refuses_when_already_running():
+    win = FakeWin()
+    g = _guard(win, already=True)
+    assert g.claim() is False
+    assert g.arm() is False
+    assert win.calls == []
+
+
 def test_acquire_second_instance_touches_nothing():
     win = FakeWin()
     g = _guard(win, already=True)

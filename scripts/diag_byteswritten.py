@@ -15,7 +15,6 @@ mismatch (the real bug, NOT a USB bridge).
 from __future__ import annotations
 
 import gzip
-import hashlib
 import io
 import os
 import sys
@@ -25,13 +24,14 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.core.diskwriter import DiskWriter, verify_readback
-from astromechos_imager.core.imagesource import open_image
+from astromechos_imager.core.diskwriter import DiskWriter, verify_readback  # noqa: E402
+from astromechos_imager.core.imagesource import open_image  # noqa: E402
 
 GZ = Path(r"tests\fixtures\pi_os_shaped.img.gz")
 
 
-import time as _time
+import time as _time  # noqa: E402
+
 
 class FileDevice:
     """Minimal RawDevice over a regular file (sparse-capable).
@@ -43,7 +43,7 @@ class FileDevice:
     sector_size = 512
 
     def __init__(self, path, slow=0.0):
-        self._f = open(path, "r+b")
+        self._f = open(path, "r+b")  # noqa: SIM115 — closed via close()
         self._slow = slow
 
     def write(self, offset, data):

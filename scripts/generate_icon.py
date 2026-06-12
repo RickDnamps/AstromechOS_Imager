@@ -9,6 +9,7 @@ Run:  .venv/Scripts/python.exe scripts/generate_icon.py
 from __future__ import annotations
 
 from pathlib import Path
+
 from PIL import Image, ImageDraw
 
 OUT = Path(__file__).resolve().parents[1] / "images" / "AstromechOS_Imager.ico"

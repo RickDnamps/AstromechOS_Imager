@@ -25,7 +25,8 @@ def test_restore_exfat_script_assigns_letter(monkeypatch, tmp_path):
 
     def fake_run(argv, **kwargs):
         # argv = ["diskpart", "/s", <script path>]
-        captured["script"] = open(argv[2], encoding="ascii").read()
+        with open(argv[2], encoding="ascii") as fh:
+            captured["script"] = fh.read()
 
         class R:
             returncode = 0

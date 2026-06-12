@@ -171,8 +171,8 @@ Rectangle {
             // and pop "Format this disk?". Tell the operator instead of
             // silently degrading.
             Rectangle {
-                visible: typeof automountDefenseActive !== "undefined"
-                         && automountDefenseActive === false
+                visible: typeof systemStatus !== "undefined" && systemStatus
+                         && systemStatus.automountDefenseActive === false
                 anchors.top: parent.top
                 anchors.topMargin: 8
                 anchors.horizontalCenter: parent.horizontalCenter

@@ -1,6 +1,7 @@
 """Analyze the captured splash screenshot for border bands + content bounds."""
 import sys
 from pathlib import Path
+
 from PIL import Image
 
 p = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("screenshots/dark/00-splash.png")

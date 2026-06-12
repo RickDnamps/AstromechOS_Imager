@@ -18,7 +18,7 @@ import pytest
 from astromechos_imager.core.cloud_init_generator import RESIZE_TOKEN
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, LinuxAccount, Role
-from astromechos_imager.core.orchestrator import FlashJob, PairFlashJob
+from astromechos_imager.core.orchestrator import FlashJob
 
 pytestmark = pytest.mark.integration
 
@@ -62,11 +62,15 @@ def _make_pi_os_mbr() -> bytes:
     """Pi OS-style MBR: FAT32 (0x0C) boot + Linux (0x83) rootfs."""
     mbr = bytearray(512)
     mbr[510:512] = b"\x55\xAA"
-    e0 = bytearray(16); e0[4] = 0x0C
-    struct.pack_into("<I", e0, 8, 2048); struct.pack_into("<I", e0, 12, 32768)
+    e0 = bytearray(16)
+    e0[4] = 0x0C
+    struct.pack_into("<I", e0, 8, 2048)
+    struct.pack_into("<I", e0, 12, 32768)
     mbr[446:462] = bytes(e0)
-    e1 = bytearray(16); e1[4] = 0x83
-    struct.pack_into("<I", e1, 8, 34816); struct.pack_into("<I", e1, 12, 163840)
+    e1 = bytearray(16)
+    e1[4] = 0x83
+    struct.pack_into("<I", e1, 8, 34816)
+    struct.pack_into("<I", e1, 12, 163840)
     mbr[462:478] = bytes(e1)
     return bytes(mbr)
 
@@ -158,33 +162,8 @@ def test_slave_also_writes_cloudinit(tmp_path, fake_platform_io, monkeypatch):
     _assert_cloud_init(fake_boot)
 
 
-def test_pair_customizes_both_cards(tmp_path, fake_platform_io, monkeypatch):
-    fake_platform_io.add_drive(10, size=512 * 1024 + 1024)
-    fake_platform_io.add_drive(11, size=512 * 1024 + 1024)
-    fake_boot_master = FakeBootPartitionForFlash()
-    fake_boot_slave = FakeBootPartitionForFlash()
-
-    def _route_boot(platform_io=None, physical_drive_id=None, *a, **kw):
-        return fake_boot_master if physical_drive_id == 10 else fake_boot_slave
-
-    monkeypatch.setattr(
-        "astromechos_imager.core.orchestrator._bootpartition_open", _route_boot,
-    )
-    drives = {d.physical_drive_id: d for d in fake_platform_io.enumerate_removable_drives()}
-    job = PairFlashJob(
-        platform_io=fake_platform_io,
-        master_image=_img(tmp_path, "m.img.xz"), master_target=drives[10],
-        slave_image=_img(tmp_path, "s.img.xz"), slave_target=drives[11],
-        firstboot_config=_make_cfg(), master_pair=generate_ed25519(),
-        linux_account=ACC, parallel=False, skip_verify=True,
-    )
-    result = job.run()
-    assert result.master.ok and result.slave.ok, (
-        f"PairFlashJob failed: master={result.master.error!r} slave={result.slave.error!r}"
-    )
-    for fb in (fake_boot_master, fake_boot_slave):
-        _assert_cloud_init(fb)
-        assert fb.exists("/ASTROMECH_FIRSTBOOT_READY")
+# (test_pair_customizes_both_cards removed with PairFlashJob — the sequential
+# master + slave single-job tests above cover both roles' customize paths.)
 
 
 def test_without_account_resize_still_wired(tmp_path, fake_platform_io, monkeypatch):

@@ -56,7 +56,7 @@ def _peek_magic(path: Path, n: int = 8) -> bytes:
         return f.read(n)
 
 
-def _looks_like_mbr(head: bytes, path: Path) -> bool:
+def _looks_like_mbr(_head: bytes, path: Path) -> bool:
     # Bytes 510-511 of a MBR are 0x55 0xAA. Also check last 2 bytes for robustness
     # (some test fixtures place the signature at the end of the file rather than at 510).
     size = path.stat().st_size
@@ -101,9 +101,9 @@ def open_image(path: Path) -> ImageSource:
     raise ImageFormatError(f"unrecognized image format: {path}")
 
 
-import gzip
-import lzma
-import struct
+import gzip  # noqa: E402 — deliberate late import, see module layout note above
+import lzma  # noqa: E402
+import struct  # noqa: E402
 
 
 class XzSource(_BaseSource):
@@ -113,7 +113,7 @@ class XzSource(_BaseSource):
         self.uncompressed_size = None  # xz format does not always store this
 
     def __iter__(self) -> Iterator[bytes]:
-        self._fh = lzma.open(self.path, "rb")
+        self._fh = lzma.open(self.path, "rb")  # noqa: SIM115 — closed in __exit__
         while True:
             chunk = self._fh.read(self.CHUNK_SIZE)
             if not chunk:
@@ -164,7 +164,7 @@ class GzSource(_BaseSource):
         return isize
 
     def __iter__(self) -> Iterator[bytes]:
-        self._fh = gzip.open(self.path, "rb")
+        self._fh = gzip.open(self.path, "rb")  # noqa: SIM115 — closed in __exit__
         while True:
             chunk = self._fh.read(self.CHUNK_SIZE)
             if not chunk:
@@ -191,7 +191,7 @@ class GzSource(_BaseSource):
             return 0
 
 
-import zipfile
+import zipfile  # noqa: E402 — deliberate late import
 
 
 class ZipSource(_BaseSource):

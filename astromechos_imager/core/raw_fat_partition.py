@@ -18,6 +18,7 @@ rpi-imager ordering: image → userspace-FAT customize → MBR last).
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import posixpath
 import sys
@@ -64,10 +65,8 @@ class RawFatBootPartition:
         try:
             return cls(dev, part_start, part_len, _owns_device=True)
         except Exception:
-            try:
+            with contextlib.suppress(Exception):
                 dev.close()
-            except Exception:
-                pass
             raise
 
     def __init__(self, raw_device, part_start: int, part_len: int,
@@ -146,19 +145,13 @@ class RawFatBootPartition:
         # closes our RawSectorFile (which flushes its dirty sectors to the
         # device). When we opened the device ourselves (open_on_drive),
         # close it too so the FlushFileBuffers lands and the handle frees.
-        try:
+        with contextlib.suppress(Exception):
             self._pfs.close()
-        except Exception:
-            pass
         if self._owns_device:
-            try:
+            with contextlib.suppress(Exception):
                 self._device.flush()
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
                 self._device.close()
-            except Exception:
-                pass
         # We have intentionally torn everything down. pyfatfs keeps GC
         # finalizers (PyFat.__del__ / fs.base.FS.__del__) that re-run
         # close() -> our RawSectorFile.flush() at interpreter shutdown; if
@@ -168,7 +161,5 @@ class RawFatBootPartition:
         # noisy "Exception ignored in __del__ ... SetFilePointerEx failed".
         # Force the closed marker so the finalizer short-circuits. Safe: the
         # device is already gone, there is nothing left to flush.
-        try:
+        with contextlib.suppress(Exception):
             self._raw_file._closed = True
-        except Exception:
-            pass

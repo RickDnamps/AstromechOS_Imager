@@ -83,7 +83,8 @@ class MalformedRoleMarkerError(ImageRoleValidationError):
             "partition, but its contents do not match the expected format:\n\n"
             f"    {detail}\n\n"
             "Expected format:\n"
-            "    {\"role\": \"master\" | \"slave\", \"project\": \"AstromechOS\", \"version\": \"2.0\"}\n\n"
+            "    {\"role\": \"master\" | \"slave\", "
+            "\"project\": \"AstromechOS\", \"version\": \"2.0\"}\n\n"
             "How to fix: re-extract the image from a working Pi, or "
             "regenerate the marker following the documented procedure."
         )
@@ -112,7 +113,8 @@ class RoleMismatchError(ImageRoleValidationError):
 
     def __init__(self, expected: str, found: str, image_name: str) -> None:
         super().__init__(
-            f"image {image_name!r} carries role={found!r} but the selected slot expects {expected!r}"
+            f"image {image_name!r} carries role={found!r} "
+            f"but the selected slot expects {expected!r}"
         )
         self.expected = expected
         self.found = found

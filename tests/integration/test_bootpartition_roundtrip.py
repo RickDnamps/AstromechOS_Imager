@@ -10,6 +10,7 @@ event, so it is covered only by the manual E2E test plan.
 """
 from __future__ import annotations
 
+import contextlib
 import struct
 import sys
 from pathlib import Path
@@ -56,10 +57,8 @@ def _format_fat32_partition(img_path: Path, offset_bytes: int, size_bytes: int) 
             size=size_bytes,
         )
     finally:
-        try:
+        with contextlib.suppress(Exception):
             pf.close()
-        except Exception:
-            pass
 
 
 def _make_fat32_image(path: Path) -> tuple[int, int]:

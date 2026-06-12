@@ -6,6 +6,7 @@ most-recent session files and delete any older ones on each startup.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -112,10 +113,9 @@ class LogRotationManager:
         # We're about to add one new file, so purge until len < max_files.
         while len(existing) >= self.max_files:
             oldest = existing.pop(0)
-            try:
+            # Best-effort; skip if already gone.
+            with contextlib.suppress(OSError):
                 oldest.unlink()
-            except OSError:
-                pass  # Best-effort; skip if already gone
 
 
 def setup_logging(

@@ -18,7 +18,7 @@ from PySide6.QtCore import QObject, QTimer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from astromechos_imager.ui.app import build_app   # noqa: E402
+from astromechos_imager.ui.app import build_app  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "validation"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -73,9 +73,7 @@ def main() -> int:
     def capture():
         i = idx["i"]
         theme_name, scenario, _, _ = plan[i]
-        if scenario.endswith("closed") and not scenario.startswith(("login", "hotspot")):
-            name = f"step4_{theme_name}_{scenario}"
-        elif scenario.startswith(("login_open", "hotspot_open")):
+        if scenario.endswith("closed") and not scenario.startswith(("login", "hotspot")) or scenario.startswith(("login_open", "hotspot_open")):
             name = f"step4_{theme_name}_{scenario}"
         else:
             # Don't save the in-between "closed" cleanup steps

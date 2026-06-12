@@ -1,10 +1,10 @@
-"""Forensic diagnostic — what's actually on the disk after a failed run?
+﻿"""Forensic diagnostic â€” what's actually on the disk after a failed run?
 
 Inspects the raw bytes on PhysicalDrive7 at the regions we'd expect to
 differ if Windows wrote System Volume Information after auto-mounting
 via FAT32 signature scan:
-  - offset 0..512        (MBR — should be deferred-first-block content)
-  - offset 8 MB..8 MB+4K (FAT32 boot sector — source bytes vs disk bytes)
+  - offset 0..512        (MBR â€” should be deferred-first-block content)
+  - offset 8 MB..8 MB+4K (FAT32 boot sector â€” source bytes vs disk bytes)
   - search for "$Volume" / "INFO" strings inside the FAT32 partition
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ def main() -> int:
                 any_found = True
                 pos = chunk.find(needle)
                 ctx = chunk[max(0, pos - 8):pos + len(needle) + 8]
-                print(f"  ⚠️ FOUND {needle!r}  ({label})  x{count}  at +{pos} bytes")
+                print(f"  âš ï¸ FOUND {needle!r}  ({label})  x{count}  at +{pos} bytes")
                 print(f"     context: {ctx!r}")
         if not any_found:
             print("  no SVI markers detected in first 16 MB")
@@ -77,7 +77,7 @@ def main() -> int:
     finally:
         dev.close()
         if target.drive_letters:
-            pio.attach_letter_to_unmounted_volume(target.drive_letters[0])
+            pio.attach_letter_to_unmounted_volume(target.drive_letters[0], target.physical_drive_id)
 
 
 if __name__ == "__main__":

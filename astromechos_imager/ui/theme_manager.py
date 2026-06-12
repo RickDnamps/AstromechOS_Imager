@@ -11,8 +11,7 @@ across modes), so QML files still `import "Theme.js" as Theme` for those.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
-
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 # Tokens for elements that sit on the dark chrome (header + footer).
 # The chrome bg is `#0e1217` in BOTH modes, so its foregrounds must stay

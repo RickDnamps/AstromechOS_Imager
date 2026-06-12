@@ -2,9 +2,13 @@
 import hashlib
 import lzma
 import time
+
 import pytest
+
 from astromechos_imager.core.diskwriter import (
-    DiskWriter, DiskWriterProgress, verify_readback,
+    DiskWriter,
+    DiskWriterProgress,
+    verify_readback,
 )
 from astromechos_imager.core.imagesource import open_image
 

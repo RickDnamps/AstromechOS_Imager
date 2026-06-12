@@ -1,26 +1,22 @@
-"""FAT32 boot partition access (β pyfatfs primary, α drive letter fallback).
+"""FAT32 boot partition parsing + β (pyfatfs) access.
 
 Per design spec §5.6.
 
-Two implementation paths:
-  β  PyFatFsBootPartition — direct FAT32 access via pyfatfs on the raw image.
-     No Windows remount required; works on any file.
-  α  DriveLetterBootPartition — writes via the auto-mounted Windows drive letter
-     after Windows re-mounts the freshly-written partition.
-
-Auto-fallback orchestrator ``open_boot_partition`` tries β first, then α.
+Production customize writes go through the userspace-FAT writer
+(``core/raw_fat_partition.py::RawFatBootPartition``) — this module now only
+provides ``find_first_fat32_partition``/``BootPartitionLayout`` (MBR parsing,
+shared with the orchestrator) and ``PyFatFsBootPartition`` (β, kept for the
+image-fixture round-trip tests). The historical α drive-letter path was
+removed (audit WP9, zero production callers).
 """
 from __future__ import annotations
 
 import logging
 import struct
 import sys
-import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from astromechos_imager.core.errors import BootPartitionMountError, BootPartitionWriteError
-
 
 # ── MBR parsing ───────────────────────────────────────────────────────────────
 
@@ -158,122 +154,9 @@ class PyFatFsBootPartition:
             )
 
 
-# ── α path: drive letter after Windows remount ─────────────────────────────────
-
-class DriveLetterBootPartition:
-    """Writes via the auto-mounted Windows drive letter.
-
-    After ``IOCTL_DISK_UPDATE_PROPERTIES``, Windows auto-mounts a freshly
-    written FAT32 partition and assigns it a drive letter.  This adapter
-    wraps the mounted volume's root directory.
-
-    This path is only usable on Windows.  It cannot be unit-tested in
-    isolation (requires real Windows mount flow), but is exercised by the
-    manual E2E test plan.
-    """
-
-    def __init__(self, letter: str):
-        self._root = Path(f"{letter}:\\")
-        if not self._root.exists():
-            raise BootPartitionMountError(f"Drive {letter!r}: not mounted")
-
-    # ── BootPartition protocol ──────────────────────────────────────────────
-
-    def write_bytes(self, path: str, data: bytes) -> None:
-        full = self._resolve(path)
-        full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_bytes(data)
-
-    def read_bytes(self, path: str) -> bytes:
-        return self._resolve(path).read_bytes()
-
-    def mkdir(self, path: str) -> None:
-        self._resolve(path).mkdir(parents=True, exist_ok=True)
-
-    def exists(self, path: str) -> bool:
-        return self._resolve(path).exists()
-
-    def close(self) -> None:
-        pass  # nothing to release; the OS owns the mount
-
-    # ── helpers ────────────────────────────────────────────────────────────
-
-    def _resolve(self, path: str) -> Path:
-        """Convert a forward-slash relative path to an absolute Windows path."""
-        rel = path.lstrip("/").replace("/", "\\")
-        return self._root / rel
-
-
-# ── Windows drive-letter poller ────────────────────────────────────────────────
-
-def wait_for_new_drive_letter(known_before: set[str], timeout_s: float = 30.0) -> str:
-    """Poll ``GetLogicalDrives`` for a letter not in *known_before*.
-
-    Windows-only.  Called after ``IOCTL_DISK_UPDATE_PROPERTIES`` triggers an
-    automatic mount of the newly written FAT32 partition.
-
-    :param known_before: Set of drive letters present before the write.
-    :param timeout_s: Maximum time to wait before raising.
-    :raises BootPartitionMountError: If no new letter appears within *timeout_s*.
-    :returns: The first new single-character drive letter (upper-case).
-    """
-    import ctypes  # noqa: PLC0415
-
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        bits = ctypes.windll.kernel32.GetLogicalDrives()  # type: ignore[attr-defined]
-        present = {chr(ord("A") + i) for i in range(26) if bits & (1 << i)}
-        new = present - known_before
-        if new:
-            return sorted(new)[0]
-        time.sleep(0.25)
-
-    raise BootPartitionMountError(
-        f"No new drive letter appeared within {timeout_s:.0f} s "
-        f"(known before: {sorted(known_before)})"
-    )
-
-
-# ── Auto-fallback orchestrator ─────────────────────────────────────────────────
-
-def open_boot_partition(
-    raw_device_path: str,
-    layout: BootPartitionLayout,
-    known_letters_before: set[str],
-    preferred_letter: str | None = None,
-) -> "PyFatFsBootPartition | DriveLetterBootPartition":
-    """Open the boot partition, preferring the β (pyfatfs) path.
-
-    Algorithm:
-    1. If ``preferred_letter`` is provided and that letter is currently
-       mounted (the SD already had a drive letter assigned — the common
-       case for any card that ever booted), use ``DriveLetterBootPartition``
-       directly. This skips the broken "new letter detection" path
-       (Bug #2 in the audit: ``FSCTL_DISMOUNT_VOLUME`` doesn't drop the
-       letter from ``GetLogicalDrives``, so ``wait_for_new_drive_letter``
-       times out after 30 s on already-mounted SDs).
-    2. Try ``PyFatFsBootPartition`` (β). On Windows raw devices this
-       always fails (Python's ``open()`` can't determine the size of
-       ``\\\\.\\PHYSICALDRIVEn``) — the wrapper raises
-       ``BootPartitionMountError`` and we fall through.
-    3. Fall back to ``DriveLetterBootPartition`` (α) via
-       ``wait_for_new_drive_letter`` for fresh unformatted SDs that
-       arrive without any pre-existing letter.
-
-    :param raw_device_path: Path to the raw disk image or Win32 device path.
-    :param layout: Result of ``find_first_fat32_partition``.
-    :param known_letters_before: Drive letters present before the image was
-        written (used by the α fallback to detect the newly mounted letter).
-    :param preferred_letter: The target's existing drive letter, if known.
-        When set and currently mounted, used directly without auto-detect.
-    :returns: An object satisfying the ``BootPartition`` protocol.
-    :raises BootPartitionMountError: If neither β nor α can mount.
-    """
-    if preferred_letter and Path(f"{preferred_letter}:\\").exists():
-        return DriveLetterBootPartition(preferred_letter)
-    try:
-        return PyFatFsBootPartition(raw_device_path, layout)
-    except BootPartitionMountError:
-        # α fallback — only viable on Windows after IOCTL_DISK_UPDATE_PROPERTIES
-        letter = wait_for_new_drive_letter(known_letters_before)
-        return DriveLetterBootPartition(letter)
+# NOTE (audit WP9): the α path (DriveLetterBootPartition +
+# wait_for_new_drive_letter + open_boot_partition) was deleted. It had zero
+# production callers — superseded by the userspace-FAT writer
+# (core/raw_fat_partition.py::RawFatBootPartition), which never asks Windows
+# to mount anything. Only find_first_fat32_partition / BootPartitionLayout /
+# PyFatFsBootPartition (test fixtures) remain in use.

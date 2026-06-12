@@ -13,10 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from astromechos_imager.core.diskwriter import DiskWriterProgress, DiskWriteResult
-from astromechos_imager.core.models import DiskRef, FirstbootConfig, Role
+from astromechos_imager.core.diskwriter import DiskWriteResult, DiskWriterProgress
+from astromechos_imager.core.models import FirstbootConfig, Role
 from astromechos_imager.core.orchestrator import FlashJob
 
 

@@ -1,8 +1,14 @@
 # tests/unit/test_errors.py
 from astromechos_imager.core.errors import (
-    ImagerError, PreflightError, FlashError, VerifyError, CustomizationError,
-    CleanupError, WriteError, HashMismatchError, BundleSelfValidationFailedError,
-    PairAsymmetryError, EjectFailedError,
+    CleanupError,
+    CustomizationError,
+    EjectFailedError,
+    FlashError,
+    HashMismatchError,
+    PairAsymmetryError,
+    PreflightError,
+    VerifyError,
+    WriteError,
 )
 
 

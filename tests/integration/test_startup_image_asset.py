@@ -5,8 +5,9 @@ and a reasonable file-size range.  No pixel-level or OCR checks — visual
 inspection of the copyright overlay is deferred to human review.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 from PIL import Image
 
 pytestmark = pytest.mark.integration

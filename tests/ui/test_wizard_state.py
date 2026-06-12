@@ -1,4 +1,5 @@
 import os
+
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -255,20 +256,7 @@ def test_set_repo_url_emits(qtbot):
 
 
 
-def test_reuse_hotspot_default_false(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    assert s.reuseHotspot is False
-
-
-def test_set_reuse_hotspot_emits(qtbot):
-    from astromechos_imager.ui.wizard_state import WizardState
-    s = WizardState()
-    received = []
-    s.reuseHotspotChanged.connect(lambda v: received.append(v))
-    s.setReuseHotspot(True)
-    assert s.reuseHotspot is True
-    assert received == [True]
+# (reuseHotspot tests removed with the property — audit WP9.)
 
 
 # ---------------------------------------------------------------------------

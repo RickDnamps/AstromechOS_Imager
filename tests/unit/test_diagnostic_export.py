@@ -5,13 +5,10 @@ import json
 import zipfile
 from pathlib import Path
 
-import pytest
-
 from astromechos_imager.logging_setup.diagnostic import (
     build_diagnostic_zip,
     collect_system_info,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

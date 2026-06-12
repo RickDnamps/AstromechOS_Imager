@@ -30,7 +30,7 @@ if getattr(sys, "frozen", False):
     except OSError:
         pass  # last resort — better to launch without logging than to crash
 
-from PySide6.QtCore import QUrl, qInstallMessageHandler, QtMsgType
+from PySide6.QtCore import QtMsgType, QUrl, qInstallMessageHandler
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuickControls2 import QQuickStyle
@@ -40,7 +40,6 @@ from astromechos_imager.ui.flash_view_model import FlashViewModel
 from astromechos_imager.ui.messages import M
 from astromechos_imager.ui.theme_manager import ThemeManager
 from astromechos_imager.ui.wizard_state import WizardState
-
 
 _QT_MSG_LEVEL = {
     QtMsgType.QtDebugMsg: "DEBUG",
@@ -248,7 +247,7 @@ def build_app(
     # stashing it on app keeps the handle alive for the process lifetime.
     if win is not None:
         if _session_guard is not None:
-            setattr(app, "_session_guard", _session_guard)
+            app._session_guard = _session_guard
             app.aboutToQuit.connect(lambda: _session_guard.release())
         else:
             # Guard construction failed — fall back to a best-effort direct

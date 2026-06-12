@@ -21,7 +21,6 @@ from pathlib import Path
 
 import astromechos_imager  # noqa: F401 — imported for __version__ access
 
-
 # Keys stripped from firstboot_config unless include_psk=True
 _PSK_KEYS = frozenset({"hotspot_password", "password"})
 

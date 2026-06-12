@@ -1,7 +1,7 @@
 """Tests for WMI-based drive enumeration. WMI calls are mocked."""
 from unittest.mock import MagicMock, patch
+
 from astromechos_imager.platform.windows import enumerate_removable_drives
-from astromechos_imager.core.models import DiskRef
 
 
 def _wmi_disk(device_id, size, model, serial, interface_type, media_type):

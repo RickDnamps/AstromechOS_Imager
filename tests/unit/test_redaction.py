@@ -3,17 +3,13 @@ from __future__ import annotations
 
 import logging
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from astromechos_imager.logging_setup.redaction import (
     RedactionFilter,
-    _redact_ctx,
-    _redact_value,
     _sha256_fingerprint,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -48,6 +48,7 @@ def test_cancelling_status_pauses_polling_contract():
     The set lives inline in app.py's closure; this test pins the source so
     a regression is at least loud."""
     import inspect
+
     from astromechos_imager.ui import app as app_mod
     src = inspect.getsource(app_mod)
     assert '"cancelling"' in src.split("_sync_drive_polling", 1)[1].split(

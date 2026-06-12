@@ -11,8 +11,6 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _wmi_disk(device_id, size, model, serial, interface_type, media_type):
     m = MagicMock()

@@ -139,6 +139,7 @@ def _start_worker_and_collect(job, is_pair: bool, qtbot, settle_ms: int = 200):
     thread before the test ends.
     """
     from PySide6.QtCore import QThread
+
     from astromechos_imager.ui.flash_view_model import _FlashWorker
 
     # 3-tuple (fraction, phase, throughput_bps) since the throughput

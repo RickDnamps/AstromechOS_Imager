@@ -9,7 +9,10 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
-    Encoding, NoEncryption, PrivateFormat, PublicFormat,
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
 )
 
 from astromechos_imager.core.models import Ed25519Pair, HotspotBootstrap, LinuxAccount

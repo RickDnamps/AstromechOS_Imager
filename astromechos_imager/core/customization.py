@@ -152,7 +152,7 @@ def render_wlan_conf(ssid: str, psk: str) -> bytes:
         # ``wifi-sec.key-mgmt wpa-psk``). Writing it here documents
         # operator intent and pins the contract for future tooling.
         "key_mgmt = wpa-psk\n"
-    ).encode("utf-8")
+    ).encode()
 
 
 from astromechos_imager.core.errors import (  # noqa: E402

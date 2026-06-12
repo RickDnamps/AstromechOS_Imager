@@ -2,7 +2,6 @@
 from astromechos_imager.core.customization import render_init_cfg
 from astromechos_imager.core.models import FirstbootConfig, HotspotBootstrap
 
-
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExxxYYY user@host"
 
 

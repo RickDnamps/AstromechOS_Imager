@@ -2,7 +2,6 @@
 from astromechos_imager.core.customization import render_authorized_keys
 from astromechos_imager.core.models import FirstbootConfig, Role
 
-
 USER_KEY = "ssh-ed25519 AAAAUUUUSER user@laptop"
 MASTER_PUB = b"ssh-ed25519 AAAAMMMMASTER astromech-master@imager\n"
 

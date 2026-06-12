@@ -10,10 +10,10 @@ import hashlib
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
-from astromechos_imager.core.errors import WriteError, HashMismatchError
+from astromechos_imager.core.errors import HashMismatchError, WriteError
 from astromechos_imager.core.platform_io import RawDevice
 
 

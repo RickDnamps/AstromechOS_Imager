@@ -18,7 +18,6 @@ if sys.platform != "win32":  # pragma: no cover
 
 from astromechos_imager.platform import windows as W
 
-
 # ── F2: exFAT recovery script must assign a letter ──────────────────────────
 
 def test_restore_exfat_script_assigns_letter(monkeypatch, tmp_path):

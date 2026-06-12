@@ -6,13 +6,10 @@ import logging
 import time
 from pathlib import Path
 
-import pytest
-
 from astromechos_imager.logging_setup.jsonl_formatter import (
     JsonLineFormatter,
     LogRotationManager,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

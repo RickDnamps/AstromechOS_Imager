@@ -1,12 +1,13 @@
 # tests/unit/test_pair_symmetry.py
 import pytest
+
 from astromechos_imager.core.customization import (
-    FirstbootBundle, assert_pair_symmetry,
+    FirstbootBundle,
+    assert_pair_symmetry,
 )
 from astromechos_imager.core.errors import PairAsymmetryError
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, Role
-
 
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUSER user@laptop"
 

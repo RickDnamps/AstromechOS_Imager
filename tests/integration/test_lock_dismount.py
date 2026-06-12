@@ -5,6 +5,7 @@ To run manually: INTEGRATION_REAL_SD=E pytest tests/integration/test_lock_dismou
 """
 import os
 import sys
+
 import pytest
 
 pytestmark = [

@@ -1,10 +1,11 @@
 # tests/unit/test_imagesource_zip.py
 import hashlib
 import zipfile
-from pathlib import Path
+
 import pytest
-from astromechos_imager.core.imagesource import open_image, ZipSource
+
 from astromechos_imager.core.errors import ImageFormatError
+from astromechos_imager.core.imagesource import ZipSource, open_image
 
 
 def _mbr(payload: bytes) -> bytes:

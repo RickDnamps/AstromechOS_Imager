@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 from astromechos_imager.core.bootpartition import find_first_fat32_partition
 
 
 def _bootpartition_open(
-    platform_io: "PlatformIO",
+    platform_io: PlatformIO,
     physical_drive_id: int,
     mbr_bytes: bytes,
-) -> "object | None":
+) -> object | None:
     """Find the FAT32 partition in the MBR and open it via userspace FAT.
 
     Returns None if no FAT32 partition is found. The returned

@@ -15,13 +15,11 @@ so operator-facing errors can name it.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from PySide6.QtCore import QCoreApplication
 
 

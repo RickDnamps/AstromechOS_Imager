@@ -25,7 +25,6 @@ from astromechos_imager.core.image_validator import (
 )
 from astromechos_imager.core.models import Role
 
-
 # ── Filename heuristic (info-only helper) ────────────────────────────────
 
 class TestGuessRoleFromFilename:

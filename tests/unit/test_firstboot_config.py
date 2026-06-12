@@ -1,12 +1,14 @@
 # tests/unit/test_firstboot_config.py
-import pytest
-from pathlib import Path
-from astromechos_imager.core.models import FirstbootConfig, HotspotBootstrap
-from astromechos_imager.core.errors import (
-    InvalidHostnameError, InvalidAuthorizedKeysError, InvalidRepoUrlError,
-    InvalidWifiSsidError, InvalidWifiPskError,
-)
 
+import pytest
+
+from astromechos_imager.core.errors import (
+    InvalidHostnameError,
+    InvalidRepoUrlError,
+    InvalidWifiPskError,
+    InvalidWifiSsidError,
+)
+from astromechos_imager.core.models import FirstbootConfig, HotspotBootstrap
 
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExxxYYY user@host"
 

@@ -20,11 +20,10 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Property, Signal, Slot
+from PySide6.QtCore import Property, QObject, QThread, Signal, Slot
 
 from astromechos_imager.core.diskwriter import DiskWriterProgress
 from astromechos_imager.core.models import HotspotBootstrap, Role
-
 
 #: UI progress is rate-gated to this period per channel. The flash worker can
 #: fire progress per buffer (hundreds/sec); the GUI only needs ~12 Hz, and a
@@ -154,7 +153,8 @@ class _HashWorker(QObject):
     @Slot()
     def run(self) -> None:
         from astromechos_imager.core.image_validator import (
-            hash_compressed_file, HashCancelled,
+            HashCancelled,
+            hash_compressed_file,
         )
         algo = self._sidecar[0] if self._sidecar else "sha256"
         try:
@@ -780,14 +780,16 @@ def _build_flash_job(wizard_state, platform_io=None):
             else:
                 return None
 
+        from astromechos_imager.core.keygen import (
+            generate_ed25519,
+            generate_hotspot_ssid,
+            generate_linux_account,
+            load_persisted_pair,
+            save_persisted_hotspot,
+            save_persisted_pair,
+        )
         from astromechos_imager.core.models import FirstbootConfig, Role
         from astromechos_imager.core.orchestrator import FlashJob
-        from astromechos_imager.core.keygen import (
-            generate_ed25519, generate_hotspot_ssid,
-            generate_linux_account,
-            load_persisted_pair, save_persisted_pair,
-            save_persisted_hotspot,
-        )
 
         # Zero-Touch: no user-pasted keys, ever. The Master↔Slave pair is
         # auto-generated and persisted in %APPDATA% — reusing the same pair

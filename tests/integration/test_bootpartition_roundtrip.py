@@ -116,7 +116,6 @@ def fat32_image(tmp_path: Path):
 def test_pyfatfs_roundtrip(fat32_image):
     """β path: write + read back files via PyFatFsBootPartition on a FAT32 image."""
     from astromechos_imager.core.bootpartition import (  # noqa: PLC0415
-        BootPartitionLayout,
         PyFatFsBootPartition,
         find_first_fat32_partition,
     )
@@ -150,7 +149,6 @@ def test_pyfatfs_roundtrip(fat32_image):
 def test_pyfatfs_nested_directories(fat32_image):
     """β path: nested directory creation and file write."""
     from astromechos_imager.core.bootpartition import (  # noqa: PLC0415
-        BootPartitionLayout,
         PyFatFsBootPartition,
         find_first_fat32_partition,
     )
@@ -176,7 +174,6 @@ def test_pyfatfs_nested_directories(fat32_image):
 def test_pyfatfs_overwrite(fat32_image):
     """β path: overwriting an existing file replaces its content."""
     from astromechos_imager.core.bootpartition import (  # noqa: PLC0415
-        BootPartitionLayout,
         PyFatFsBootPartition,
         find_first_fat32_partition,
     )
@@ -197,7 +194,6 @@ def test_pyfatfs_overwrite(fat32_image):
 def test_pyfatfs_mounts_from_layout(fat32_image):
     """The layout returned by find_first_fat32_partition drives the correct mount offset."""
     from astromechos_imager.core.bootpartition import (  # noqa: PLC0415
-        BootPartitionLayout,
         PyFatFsBootPartition,
         find_first_fat32_partition,
     )

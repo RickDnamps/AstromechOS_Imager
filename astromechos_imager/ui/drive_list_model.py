@@ -4,13 +4,18 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import (
-    QAbstractListModel, QByteArray, QModelIndex, Property, Qt, QTimer, Signal,
+    Property,
+    QAbstractListModel,
+    QByteArray,
+    QModelIndex,
+    Qt,
+    QTimer,
+    Signal,
     Slot,
 )
 
 from astromechos_imager.core.models import DiskRef
 from astromechos_imager.core.platform_io import PlatformIO
-
 
 _log = logging.getLogger(__name__)
 
@@ -38,8 +43,6 @@ def _human_size(size_bytes: int) -> str:
     return f"{n:.1f} PB"
 
 
-# Backwards-compatible alias — older code (or tests) may reference _human().
-_human = _human_size
 
 
 def _drive_letters_str(d: DiskRef) -> str:

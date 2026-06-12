@@ -2,7 +2,7 @@
 
 This is the keystone of the "userspace FAT, never mount" customize path
 (the fix for the Windows "Format K:?" pop-up). It wraps a sector-addressed
-raw device (``\\.\PHYSICALDRIVEn``) and presents a normal Python file
+raw device (``\\.\\PHYSICALDRIVEn``) and presents a normal Python file
 object windowed to ``[part_start, part_start + part_len)``, with a
 read-modify-write 512-byte sector cache so an arbitrary-offset small write
 (a 32-byte FAT directory entry at byte 12345, say) lands correctly even

@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 
@@ -148,12 +146,6 @@ def fake_platform_io(tmp_path):
             return _FakeRawDevice(path, self.drives[phys_id].size_bytes)
 
         def close_handle(self, h):
-            pass
-
-        def update_disk_properties(self, h):
-            pass
-
-        def eject_media(self, h):
             pass
 
         def finalize_eject(self, physical_drive_id):

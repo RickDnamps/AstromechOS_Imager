@@ -18,7 +18,6 @@ Then re-run the tests to confirm they pass with the new snapshot.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 import pytest

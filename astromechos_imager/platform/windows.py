@@ -10,8 +10,8 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterator
 from ctypes import wintypes
-from typing import Iterator
 
 from astromechos_imager.core.models import DiskRef
 
@@ -145,18 +145,29 @@ def enumerate_removable_drives(include_letters: bool = True) -> Iterator[DiskRef
 
 # ── Lock / dismount / raw device open ─────────────────────────────────────
 
-from astromechos_imager.core.errors import DriveLockError, DrivePermissionError
-from astromechos_imager.platform._win32 import (
-    GENERIC_READ, GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, FILE_FLAG_WRITE_THROUGH,
-    FILE_FLAG_SEQUENTIAL_SCAN,
-    FSCTL_ALLOW_EXTENDED_DASD_IO, FSCTL_LOCK_VOLUME, FSCTL_UNLOCK_VOLUME,
-    FSCTL_DISMOUNT_VOLUME, INVALID_HANDLE_VALUE,
-    IOCTL_DISK_UPDATE_PROPERTIES, IOCTL_DISK_DELETE_DRIVE_LAYOUT,
-    IOCTL_STORAGE_EJECT_MEDIA, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
-    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, kernel32,
-)
 import struct as _struct
+
+from astromechos_imager.platform._win32 import (
+    DISK_GEOMETRY_EX,
+    FILE_FLAG_NO_BUFFERING,
+    FILE_FLAG_SEQUENTIAL_SCAN,
+    FILE_FLAG_WRITE_THROUGH,
+    FILE_SHARE_READ,
+    FILE_SHARE_WRITE,
+    FSCTL_ALLOW_EXTENDED_DASD_IO,
+    FSCTL_DISMOUNT_VOLUME,
+    FSCTL_LOCK_VOLUME,
+    FSCTL_UNLOCK_VOLUME,
+    GENERIC_READ,
+    GENERIC_WRITE,
+    INVALID_HANDLE_VALUE,
+    IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+    IOCTL_STORAGE_EJECT_MEDIA,
+    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+    OPEN_EXISTING,
+    kernel32,
+)
 
 
 def _ctl(handle: int, code: int, in_buf: bytes = b"") -> None:
@@ -170,23 +181,6 @@ def _ctl(handle: int, code: int, in_buf: bytes = b"") -> None:
     if not ok:
         err = ctypes.get_last_error()
         raise OSError(err, f"DeviceIoControl(0x{code:08X}) failed (Win32 err {err})")
-
-
-def _create_volume_handle(letter: str) -> int:
-    r"""Open \\.\X: for FSCTL operations. Returns handle or raises."""
-    k = kernel32()
-    path = f"\\\\.\\{letter}:"
-    h = k.CreateFileW(
-        path, GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE, None,
-        OPEN_EXISTING, 0, None,
-    )
-    if h == INVALID_HANDLE_VALUE:
-        err = ctypes.get_last_error()
-        if err == 5:  # ERROR_ACCESS_DENIED
-            raise DrivePermissionError(f"Cannot open volume {letter}: (need admin?)")
-        raise OSError(err, f"CreateFileW({path}) failed")
-    return h
 
 
 def _delete_mount_point(letter: str) -> bool:
@@ -687,11 +681,11 @@ def attach_letter_to_unmounted_volume(
 ) -> bool:
     r"""Assign ``letter`` to the letterless volume backed by ``physical_drive_id``.
 
-    Post-write counterpart of ``_delete_mount_point``: after the raw flash
-    completes (and we ran ``update_disk_properties``), Mount Manager
-    discovers the new partition as a "letterless" volume. We assign our
-    original drive letter back so ``DriveLetterBootPartition(letter)`` can
-    write the AstromechOS bundle through normal Win32 file I/O.
+    Post-write counterpart of ``_delete_mount_point``: once Mount Manager
+    discovers the freshly-written partition as a "letterless" volume, we can
+    hand it a drive letter again. Used by ``make_card_visible`` so a
+    successfully-flashed card shows up in Explorer without a physical
+    reinsertion (automount stays off for the whole session).
 
     The ``physical_drive_id`` filter is **safety-critical**: a naive
     "first letterless volume" scan would happily attach the letter to a
@@ -783,11 +777,6 @@ def close_handle(h: int | None) -> None:
         _log.warning("CloseHandle(0x%X) failed err=%s", h, ctypes.get_last_error())
     else:
         _log.debug("CloseHandle(0x%X) ok", h)
-
-
-def update_disk_properties(h: int) -> None:
-    """After writing partition table, force Windows to re-enumerate volumes."""
-    _ctl(h, IOCTL_DISK_UPDATE_PROPERTIES)
 
 
 def _first_free_letter() -> str | None:
@@ -926,8 +915,10 @@ def synchronize_cache(h: int) -> None:
     effort: logs and returns on any failure.
     """
     from astromechos_imager.platform._win32 import (  # noqa: PLC0415
-        IOCTL_SCSI_PASS_THROUGH_DIRECT, SCSI_IOCTL_DATA_UNSPECIFIED,
-        SCSIOP_SYNCHRONIZE_CACHE, SCSI_PASS_THROUGH_DIRECT_WITH_SENSE,
+        IOCTL_SCSI_PASS_THROUGH_DIRECT,
+        SCSI_IOCTL_DATA_UNSPECIFIED,
+        SCSI_PASS_THROUGH_DIRECT_WITH_SENSE,
+        SCSIOP_SYNCHRONIZE_CACHE,
     )
     k = kernel32()
     pkt = SCSI_PASS_THROUGH_DIRECT_WITH_SENSE()
@@ -958,11 +949,6 @@ def synchronize_cache(h: int) -> None:
         k.FlushFileBuffers(h)
     except Exception:
         pass
-
-
-def eject_media(h: int) -> None:
-    """Best-effort eject. Caller logs warning on failure."""
-    _ctl(h, IOCTL_STORAGE_EJECT_MEDIA)
 
 
 def finalize_eject(physical_drive_id: int) -> bool:
@@ -1110,7 +1096,6 @@ def restore_automount_if_crashed() -> None:
 
 # ── _Win32RawDevice + helpers ──────────────────────────────────────────────
 
-from astromechos_imager.core.platform_io import RawDevice  # noqa: E402 (Protocol, no runtime dep)
 
 
 class _Win32RawDevice:
@@ -1204,7 +1189,6 @@ class _PlainRawDevice:
     runs, the streaming handle already wiped the layout, and the FAT region
     at 8 MB is writable.
     """
-    SECTOR = 512
 
     def __init__(self, physical_drive_id: int):
         path = f"\\\\.\\PHYSICALDRIVE{physical_drive_id}"
@@ -1351,9 +1335,6 @@ class WindowsPlatformIO:
     def close_handle(self, handle):
         close_handle(handle)
 
-    def update_disk_properties(self, handle):
-        update_disk_properties(handle)
-
     def sync_cache(self, handle):
         """Flush the USB-bridge firmware write cache (SCSI SYNCHRONIZE_CACHE)."""
         synchronize_cache(handle)
@@ -1361,9 +1342,6 @@ class WindowsPlatformIO:
     def restore_readable_exfat(self, physical_drive_id):
         """Quick-format the target to clean exFAT after a cancel/failure."""
         return restore_readable_exfat(physical_drive_id)
-
-    def eject_media(self, handle):
-        eject_media(handle)
 
     def finalize_eject(self, physical_drive_id):
         """Best-effort eject on a fresh handle after the write handle closed."""

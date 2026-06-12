@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from astromechos_imager.core.keygen import generate_hotspot_ssid
 
@@ -54,7 +54,6 @@ class WizardState(QObject):
     hostnameMasterChanged = Signal(str)
     hostnameSlaveChanged = Signal(str)
     repoUrlChanged = Signal(str)
-    reuseHotspotChanged = Signal(bool)
     wifiSsidChanged = Signal(str)
     wifiPskChanged = Signal(str)
     # Step 4 Customize — UID-1000 Linux account credentials
@@ -117,7 +116,6 @@ class WizardState(QObject):
         self._hostname_master = "astromech-master"
         self._hostname_slave = "astromech-slave"
         self._repo_url = ""
-        self._reuse_hotspot = False
         # Sequential workflow state machine. Empty/zero values mean the
         # operator hasn't started any cycle yet — Screen 4 will offer a
         # free role pick. After the first successful flash, markCurrent-
@@ -254,18 +252,18 @@ class WizardState(QObject):
         thread captures the token and the queued-back ``_apply_role_status``
         drops verdicts whose token is no longer current.
         """
-        from pathlib import Path as _Path
         import threading as _threading
+        from pathlib import Path as _Path
 
-        from astromechos_imager.core.image_validator import (
-            guess_role_from_filename,
-            validate_image_role,
-        )
         from astromechos_imager.core.errors import (
             MalformedRoleMarkerError,
             MissingRoleMarkerError,
             RoleMismatchError,
             WrongProjectMarkerError,
+        )
+        from astromechos_imager.core.image_validator import (
+            guess_role_from_filename,
+            validate_image_role,
         )
         from astromechos_imager.core.models import Role
 
@@ -388,7 +386,7 @@ class WizardState(QObject):
     @staticmethod
     def _normalize_path(p: str) -> str:
         """Strip file:// scheme and decode."""
-        from urllib.parse import urlparse, unquote
+        from urllib.parse import unquote, urlparse
         if p.startswith("file://"):
             u = urlparse(p)
             # Handle Windows file:///J:/foo and file:///J:\foo cases
@@ -566,15 +564,8 @@ class WizardState(QObject):
             self._repo_url = val
             self.repoUrlChanged.emit(val)
 
-    @Property(bool, notify=reuseHotspotChanged)
-    def reuseHotspot(self) -> bool:
-        return self._reuse_hotspot
-
-    @Slot(bool)
-    def setReuseHotspot(self, val: bool) -> None:
-        if val != self._reuse_hotspot:
-            self._reuse_hotspot = val
-            self.reuseHotspotChanged.emit(val)
+    # (reuseHotspot property removed — audit WP9: vestige of the deleted
+    # MODE_BOTH flow; no QML binding, _build_flash_job never read it.)
 
     # ------------------------------------------------------------------
     # Wi-Fi (optional, wlan1 home network) — Phase 8.10
@@ -636,7 +627,8 @@ class WizardState(QObject):
         ``core/validators.validate_install_user`` (lowercase + digits +
         ``_-``, must start with letter or underscore, ≤32 chars)."""
         from astromechos_imager.core.validators import (
-            _USER_RE, InvalidInstallUserError, validate_install_user,
+            InvalidInstallUserError,
+            validate_install_user,
         )
         try:
             validate_install_user(v)

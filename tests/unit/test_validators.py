@@ -1,17 +1,28 @@
 # tests/unit/test_validators.py
-import pytest
-from hypothesis import given, strategies as st, assume
-import re, string
+import re
+import string
 
-from astromechos_imager.core.validators import (
-    validate_hostname, validate_authorized_keys, validate_install_user,
-    validate_repo_url, validate_branch_name, validate_ssid, validate_wpa2_psk,
-    OPENSSH_PUBKEY_RE,
-)
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
 from astromechos_imager.core.errors import (
-    InvalidHostnameError, InvalidAuthorizedKeysError, InvalidInstallUserError,
-    InvalidRepoUrlError, InvalidBranchNameError, InvalidHotspotSsidError,
+    InvalidAuthorizedKeysError,
+    InvalidBranchNameError,
+    InvalidHostnameError,
     InvalidHotspotPskError,
+    InvalidHotspotSsidError,
+    InvalidInstallUserError,
+    InvalidRepoUrlError,
+)
+from astromechos_imager.core.validators import (
+    validate_authorized_keys,
+    validate_branch_name,
+    validate_hostname,
+    validate_install_user,
+    validate_repo_url,
+    validate_ssid,
+    validate_wpa2_psk,
 )
 
 

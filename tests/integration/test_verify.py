@@ -1,6 +1,8 @@
 # tests/integration/test_verify.py
 import hashlib
+
 import pytest
+
 from astromechos_imager.core.diskwriter import verify_readback
 from astromechos_imager.core.errors import HashMismatchError
 

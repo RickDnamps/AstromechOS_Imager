@@ -4,17 +4,16 @@ from __future__ import annotations
 import re
 
 from astromechos_imager.core.errors import (
-    InvalidHostnameError,  # re-exported for FirstbootConfig collision check
     InvalidAuthorizedKeysError,
+    InvalidBranchNameError,
+    InvalidHostnameError,  # re-exported for FirstbootConfig collision check
+    InvalidHotspotPskError,
+    InvalidHotspotSsidError,
     InvalidInstallUserError,
     InvalidRepoUrlError,
-    InvalidBranchNameError,
-    InvalidHotspotSsidError,
-    InvalidHotspotPskError,
-    InvalidWifiSsidError,
     InvalidWifiPskError,
+    InvalidWifiSsidError,
 )
-
 
 # Strict RFC 1123, copy of firstboot_setup.sh:206
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9](?:-?[a-zA-Z0-9])*$")

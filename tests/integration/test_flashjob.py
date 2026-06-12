@@ -1,10 +1,11 @@
 # tests/integration/test_flashjob.py
 import lzma
+
 import pytest
-from pathlib import Path
-from astromechos_imager.core.orchestrator import FlashJob, FlashJobResult
+
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, Role
+from astromechos_imager.core.orchestrator import FlashJob, FlashJobResult
 
 pytestmark = pytest.mark.integration
 

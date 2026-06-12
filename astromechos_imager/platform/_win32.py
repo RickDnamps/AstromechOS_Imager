@@ -23,6 +23,7 @@ FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
 # ERROR_INVALID_HANDLE (errno 6). Derive the sentinel from ctypes so the
 # `h == INVALID_HANDLE_VALUE` checks actually fire.
 import ctypes as _ctypes  # noqa: E402
+
 INVALID_HANDLE_VALUE = _ctypes.c_void_p(-1).value  # 0xFFFFFFFFFFFFFFFF on win64
 
 # Volume control

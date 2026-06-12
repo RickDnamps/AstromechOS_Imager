@@ -1,11 +1,12 @@
 # tests/unit/test_firstboot_bundle.py
 import json
+
 import pytest
-from astromechos_imager.core.customization import FirstbootBundle, render_wlan_conf
+
+from astromechos_imager.core.customization import FirstbootBundle
 from astromechos_imager.core.errors import BundleSelfValidationFailedError
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
 from astromechos_imager.core.models import FirstbootConfig, Role
-
 
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUSER user@laptop"
 

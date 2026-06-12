@@ -2,8 +2,9 @@
 """Streaming-decompression sources. Per design spec §5.4."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import BinaryIO, Iterator, Protocol
+from typing import BinaryIO, Protocol
 
 from astromechos_imager.core.errors import ImageFormatError
 
@@ -14,7 +15,7 @@ class ImageSource(Protocol):
     uncompressed_size: int | None
 
     def __iter__(self) -> Iterator[bytes]: ...
-    def __enter__(self) -> "ImageSource": ...
+    def __enter__(self) -> ImageSource: ...
     def __exit__(self, *exc: object) -> None: ...
 
 

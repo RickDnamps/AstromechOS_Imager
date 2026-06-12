@@ -9,13 +9,13 @@ those values as Qt Properties so QML can bind directly.
 from __future__ import annotations
 
 import logging
+import sys
 
 import pytest
 
 # Ensure a QGuiApplication exists for QAbstractListModel signal machinery
 # in headless test runs (CI uses QT_QPA_PLATFORM=offscreen).
 from PySide6.QtCore import QCoreApplication
-import sys
 
 from astromechos_imager.core.models import DiskRef
 from astromechos_imager.ui.drive_list_model import DriveListModel
@@ -46,12 +46,6 @@ class _StubPlatform:
         raise NotImplementedError
 
     def close_handle(self, h):
-        pass
-
-    def update_disk_properties(self, h):
-        pass
-
-    def eject_media(self, h):
         pass
 
 

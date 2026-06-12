@@ -42,9 +42,9 @@ import re
 import tempfile
 import threading
 import zipfile
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator, Optional
 
 from astromechos_imager.core.bootpartition import (
     BootPartitionLayout,
@@ -57,7 +57,6 @@ from astromechos_imager.core.errors import (
     WrongProjectMarkerError,
 )
 from astromechos_imager.core.models import Role
-
 
 ROLE_MARKER_PATH = "/astromech_role.json"
 DEFAULT_MAX_DECOMPRESS_MB = 600  # bumped from 128 (2026-05-31) — Pi OS Trixie
@@ -306,7 +305,8 @@ def validate_image_role(
     policy: missing marker → amber warning, others → red block).
     """
     from astromechos_imager.core.bootpartition import (
-        _import_pyfatfs, BootPartitionMountError,
+        BootPartitionMountError,
+        _import_pyfatfs,
     )
 
     max_bytes = max_decompress_mb * 1024 * 1024
@@ -417,8 +417,8 @@ def hash_compressed_file(
     path: Path,
     algo: str = "sha256",
     chunk_size: int = 1 << 20,
-    progress_cb: Optional[Callable[[float], None]] = None,
-    cancel_event: Optional[threading.Event] = None,
+    progress_cb: Callable[[float], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Stream ``path`` through ``hashlib`` and return the hex digest.
 

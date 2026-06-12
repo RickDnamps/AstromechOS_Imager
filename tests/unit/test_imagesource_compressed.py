@@ -1,8 +1,9 @@
 # tests/unit/test_imagesource_compressed.py
-import gzip, lzma, hashlib
-from pathlib import Path
-from astromechos_imager.core.imagesource import open_image, XzSource, GzSource
+import gzip
+import hashlib
+import lzma
 
+from astromechos_imager.core.imagesource import GzSource, XzSource, open_image
 
 PAYLOAD = (b"R2-D2 boots fast." * 100_000)  # ~1.7 MB raw — will compress well
 

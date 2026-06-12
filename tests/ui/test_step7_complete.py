@@ -1,6 +1,7 @@
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("QT_QPA_PLATFORM") != "offscreen",
@@ -42,11 +43,12 @@ def test_step7_complete_contains_next_steps():
 
 def test_step7_complete_qml_syntax(qtbot):
     """Load the QML file in an engine to check for parse errors."""
-    from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtCore import QUrl
-    from astromechos_imager.ui.wizard_state import WizardState
+    from PySide6.QtQml import QQmlApplicationEngine
+
     from astromechos_imager.ui.flash_view_model import FlashViewModel
     from astromechos_imager.ui.theme_manager import ThemeManager
+    from astromechos_imager.ui.wizard_state import WizardState
 
     state = WizardState()
     flash_vm = FlashViewModel(state)

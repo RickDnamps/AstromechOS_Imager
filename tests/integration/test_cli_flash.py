@@ -1,6 +1,7 @@
 # tests/integration/test_cli_flash.py
+
 import pytest
-from pathlib import Path
+
 from astromechos_imager.cli.main import _cmd_flash, build_parser
 
 pytestmark = pytest.mark.integration

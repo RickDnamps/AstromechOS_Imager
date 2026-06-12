@@ -321,7 +321,7 @@ def test_bare_golden_gets_resize_and_ds_nocloud():
     toks = out.decode("ascii").split()
     assert toks.count(RESIZE_TOKEN) == 1
     assert "ds=nocloud;i=rpi-imager-99" in toks
-    assert b"\n" == out[-1:]
+    assert out[-1:] == b"\n"
     # original args preserved
     assert "root=PARTUUID=d89b055c-02" in toks
     assert "cfg80211.ieee80211_regdom=CA" in toks

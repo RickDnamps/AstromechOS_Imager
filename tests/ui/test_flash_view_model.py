@@ -1,7 +1,8 @@
 import os
-import pytest
 import threading
 import time
+
+import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("QT_QPA_PLATFORM") != "offscreen",
@@ -29,8 +30,8 @@ class FakePairJob:
         self._should_fail = should_fail
 
     def run(self):
-        from astromechos_imager.core.models import Role
         from astromechos_imager.core.diskwriter import DiskWriterProgress
+        from astromechos_imager.core.models import Role
         for frac in (0.25, 0.5, 0.75, 1.0):
             if self.cancel_event.is_set():
                 break

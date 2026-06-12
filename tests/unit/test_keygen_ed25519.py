@@ -1,5 +1,6 @@
 # tests/unit/test_keygen_ed25519.py
-from cryptography.hazmat.primitives.serialization import load_ssh_public_key, load_ssh_private_key
+from cryptography.hazmat.primitives.serialization import load_ssh_private_key, load_ssh_public_key
+
 from astromechos_imager.core.keygen import generate_ed25519
 from astromechos_imager.core.models import Ed25519Pair
 

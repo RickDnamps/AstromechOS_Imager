@@ -14,7 +14,6 @@ ext4 rootfs pre-populated with /etc/passwd, /etc/shadow, /etc/group
 """
 from __future__ import annotations
 
-import os
 import shutil
 import struct
 import subprocess
@@ -148,7 +147,6 @@ def _format_boot_fat32(img_path: Path) -> None:
 def _write_boot_files(img_path: Path) -> None:
     """Write /cmdline.txt to the FAT32 boot partition via pyfatfs."""
     _stub_pkg_resources()
-    from pyfatfs.PyFatFS import PyFatFS  # noqa: PLC0415
     from astromechos_imager.core.bootpartition import BootPartitionLayout  # noqa: PLC0415
 
     layout = BootPartitionLayout(
@@ -190,7 +188,6 @@ def _populate_rootfs_ext4(img_path: Path) -> None:
     and WSL via /mnt/...), then uses debugfs scripted commands to inject them
     into the ext4 partition at the correct offset.
     """
-    import tempfile  # noqa: PLC0415
 
     wsl_path = _win_to_wsl(img_path)
     device_arg = f"{wsl_path}?offset={ROOTFS_OFFSET}"

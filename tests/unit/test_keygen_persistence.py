@@ -1,11 +1,12 @@
 # tests/unit/test_keygen_persistence.py
-import pytest
-from pathlib import Path
 from astromechos_imager.core.keygen import (
-    generate_ed25519, generate_hotspot_bootstrap,
-    save_persisted_pair, load_persisted_pair,
-    save_persisted_hotspot, load_persisted_hotspot,
+    generate_ed25519,
+    generate_hotspot_bootstrap,
+    load_persisted_hotspot,
+    load_persisted_pair,
     persisted_pair_dir,
+    save_persisted_hotspot,
+    save_persisted_pair,
 )
 
 

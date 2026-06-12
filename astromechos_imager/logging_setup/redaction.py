@@ -21,10 +21,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import re
 from pathlib import Path, PureWindowsPath
-
 
 _OPENSSH_PRIVATE_HEADER = "-----BEGIN OPENSSH PRIVATE KEY-----"
 

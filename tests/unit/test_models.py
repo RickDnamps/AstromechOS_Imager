@@ -1,6 +1,7 @@
 # tests/unit/test_models.py
 import pytest
-from astromechos_imager.core.models import Role, HotspotBootstrap, Ed25519Pair
+
+from astromechos_imager.core.models import Ed25519Pair, HotspotBootstrap, Role
 
 
 def test_role_values():

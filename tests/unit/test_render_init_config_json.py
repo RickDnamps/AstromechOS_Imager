@@ -1,8 +1,8 @@
 # tests/unit/test_render_init_config_json.py
 import json
+
 from astromechos_imager.core.customization import render_init_config_json
 from astromechos_imager.core.models import FirstbootConfig, Role
-
 
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExxxYYY user@host"
 

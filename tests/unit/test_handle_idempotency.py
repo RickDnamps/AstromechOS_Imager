@@ -7,6 +7,7 @@ the contract: every close() reaches CloseHandle at most once per handle,
 and a None / INVALID_HANDLE_VALUE / 0 handle never reaches Win32 at all.
 """
 import sys
+
 import pytest
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only")

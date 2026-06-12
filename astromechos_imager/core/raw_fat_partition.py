@@ -53,7 +53,7 @@ class RawFatBootPartition:
 
     @classmethod
     def open_on_drive(cls, platform_io, physical_drive_id: int,
-                      part_start: int, part_len: int) -> "RawFatBootPartition":
+                      part_start: int, part_len: int) -> RawFatBootPartition:
         """Open a plain raw handle on ``physical_drive_id`` and own it.
 
         The returned partition closes the handle on ``.close()``. Used by
@@ -89,7 +89,7 @@ class RawFatBootPartition:
         pfs.fs = PyFat(encoding=FAT_OEM_ENCODING, offset=0, lazy_load=True)
         pfs.fs.set_fp(raw_file)          # parse BPB + FAT from the raw window
         pfs.fs.is_read_only = False
-        pfs.tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo
+        pfs.tz = datetime.datetime.now(datetime.UTC).astimezone().tzinfo
 
         self._pfs = pfs
         self._raw_file = raw_file

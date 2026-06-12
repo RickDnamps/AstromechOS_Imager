@@ -78,6 +78,7 @@ def test_splash_asset_path_resolves_in_dev():
 def test_splash_asset_context_property_set(qtbot):
     """The QML engine must receive splashImageUrl before main.qml loads."""
     from PySide6.QtCore import QUrl
+
     from astromechos_imager.ui.app import splash_asset_path
     app, engine, state, fake = _build(qtbot)
     val = engine.rootContext().contextProperty("splashImageUrl")

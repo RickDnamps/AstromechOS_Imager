@@ -1,10 +1,7 @@
 # tests/integration/test_pair_flash.py
-import pytest
-from pathlib import Path
-from astromechos_imager.core.orchestrator import PairFlashJob, PairFlashResult
 from astromechos_imager.core.keygen import generate_ed25519, generate_hotspot_bootstrap
-from astromechos_imager.core.models import FirstbootConfig, Role
-
+from astromechos_imager.core.models import FirstbootConfig
+from astromechos_imager.core.orchestrator import PairFlashJob, PairFlashResult
 
 VALID_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIUSER user@laptop"
 

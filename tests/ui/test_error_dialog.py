@@ -1,6 +1,7 @@
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("QT_QPA_PLATFORM") != "offscreen",
@@ -14,8 +15,8 @@ def _qml_path():
 
 
 def test_error_dialog_qml_loads(qtbot):
-    from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtCore import QUrl, SignalInstance
+    from PySide6.QtQml import QQmlApplicationEngine
     eng = QQmlApplicationEngine()
     # In PySide6 6.7+, QQmlApplicationEngine.warnings is a Signal (not a
     # callable method returning a list).  Detect which API is available.

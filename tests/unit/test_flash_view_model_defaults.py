@@ -15,7 +15,6 @@ the defaults would fail loud here instead of bricking a robot.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -52,7 +51,6 @@ def _fake_wizard(
         hostnameMaster="astromech-master",
         hostnameSlave="astromech-slave",
         repoUrl="",
-        reuseHotspot=False,
         wifiSsid=wifi_ssid,
         wifiPsk=wifi_psk,
         installUser=install_user,
@@ -109,9 +107,6 @@ def test_empty_install_user_substitutes_default(tmp_path, monkeypatch):
         "astromechos_imager.core.keygen.load_persisted_pair", lambda: None
     )
     monkeypatch.setattr(
-        "astromechos_imager.core.keygen.load_persisted_hotspot", lambda: None
-    )
-    monkeypatch.setattr(
         "astromechos_imager.core.keygen.save_persisted_pair", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
@@ -144,7 +139,7 @@ def test_username_locked_password_and_hotspot_still_override(tmp_path, monkeypat
     img = tmp_path / "img.xz"
     img.write_bytes(b"x")
     for fname in (
-        "load_persisted_pair", "load_persisted_hotspot",
+        "load_persisted_pair",
         "save_persisted_pair", "save_persisted_hotspot",
     ):
         monkeypatch.setattr(
@@ -178,7 +173,7 @@ def test_username_always_fixed_constant(tmp_path, monkeypatch):
     img = tmp_path / "img.xz"
     img.write_bytes(b"x")
     for fname in (
-        "load_persisted_pair", "load_persisted_hotspot",
+        "load_persisted_pair",
         "save_persisted_pair", "save_persisted_hotspot",
     ):
         monkeypatch.setattr(
@@ -204,7 +199,7 @@ def test_half_filled_wifi_raises(tmp_path, monkeypatch):
     img = tmp_path / "img.xz"
     img.write_bytes(b"x")
     for fname in (
-        "load_persisted_pair", "load_persisted_hotspot",
+        "load_persisted_pair",
         "save_persisted_pair", "save_persisted_hotspot",
     ):
         monkeypatch.setattr(

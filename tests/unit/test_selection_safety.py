@@ -64,9 +64,8 @@ class _FakePlatformIO:
 
 @pytest.fixture()
 def keygen_stubbed(monkeypatch):
-    for name in ("load_persisted_pair", "load_persisted_hotspot"):
-        monkeypatch.setattr(f"astromechos_imager.core.keygen.{name}",
-                            lambda: None)
+    monkeypatch.setattr(
+        "astromechos_imager.core.keygen.load_persisted_pair", lambda: None)
     for name in ("save_persisted_pair", "save_persisted_hotspot"):
         monkeypatch.setattr(f"astromechos_imager.core.keygen.{name}",
                             lambda *_a, **_k: None)
@@ -122,7 +121,8 @@ def test_cli_defaults_lockstep_with_gui():
     contract than a GUI flash."""
     from astromechos_imager.cli.main import build_parser
     from astromechos_imager.ui.flash_view_model import (
-        DEFAULT_INSTALL_PASSWORD, DEFAULT_INSTALL_USER,
+        DEFAULT_INSTALL_PASSWORD,
+        DEFAULT_INSTALL_USER,
     )
     args = build_parser().parse_args([
         "flash", "--master-image", "m", "--master-drive", "2",

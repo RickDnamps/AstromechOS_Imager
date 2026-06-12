@@ -1,5 +1,6 @@
 """Tests for DriveListModel — QAbstractListModel wrapping enumerate_removable_drives."""
 import os
+
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -18,8 +19,9 @@ def test_model_reports_drive_count(qtbot, fake_platform_io):
 
 
 def test_model_exposes_size_human(qtbot, fake_platform_io):
-    from astromechos_imager.ui.drive_list_model import DriveListModel
     from PySide6.QtCore import Qt
+
+    from astromechos_imager.ui.drive_list_model import DriveListModel
     # Use a small physical file but verify the human() helper works for MB range
     fake_platform_io.add_drive(2, size=4 * 1024 * 1024)
     m = DriveListModel(fake_platform_io)
@@ -47,10 +49,10 @@ def test_driveIdAt_returns_correct_id(qtbot, fake_platform_io):
 
 
 def test_human_size_helper_gb():
-    """Unit test _human() directly without needing a physical file."""
-    from astromechos_imager.ui.drive_list_model import _human
-    result = _human(32 * 1024 * 1024 * 1024)
+    """Unit test _human_size() directly without needing a physical file."""
+    from astromechos_imager.ui.drive_list_model import _human_size
+    result = _human_size(32 * 1024 * 1024 * 1024)
     assert "GB" in result
 
-    result_mb = _human(4 * 1024 * 1024)
+    result_mb = _human_size(4 * 1024 * 1024)
     assert "MB" in result_mb

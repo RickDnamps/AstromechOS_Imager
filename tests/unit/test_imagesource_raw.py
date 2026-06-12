@@ -1,9 +1,10 @@
 # tests/unit/test_imagesource_raw.py
 import hashlib
-from pathlib import Path
-from astromechos_imager.core.imagesource import open_image, RawSource
-from astromechos_imager.core.errors import ImageFormatError
+
 import pytest
+
+from astromechos_imager.core.errors import ImageFormatError
+from astromechos_imager.core.imagesource import RawSource, open_image
 
 
 def test_raw_detection(tmp_path):

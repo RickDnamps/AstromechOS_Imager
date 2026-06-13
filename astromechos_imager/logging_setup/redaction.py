@@ -32,12 +32,12 @@ _WIN_USER_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Audit bug Sec1: free-text log messages can leak SSID / PSK / password
-# values that never travelled through ``record.ctx`` — e.g. a session-start
-# line logging ``hotspot SSID=Astromech-1234`` would bypass every ctx-keyed
-# scrub above. These patterns are applied to ``record.msg`` (and its
-# formatted result) inside RedactionFilter so the JSONL formatter never sees
-# the raw secret, regardless of which call site emitted it.
+# Free-text log messages can leak SSID / PSK / password values that never
+# travelled through ``record.ctx`` — e.g. a session-start line logging
+# ``hotspot SSID=Astromech-1234`` would bypass every ctx-keyed scrub above.
+# These patterns are applied to ``record.msg`` (and its formatted result)
+# inside RedactionFilter so the JSONL formatter never sees the raw secret,
+# regardless of which call site emitted it.
 _LEAK_PATTERNS = [
     (re.compile(r"(SSID\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
     (re.compile(r"(psk\s*=\s*)([^\s,()]+)", re.IGNORECASE), r"\1<redacted>"),
@@ -167,10 +167,10 @@ class RedactionFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
         """Redact sensitive fields in *record.ctx*; always allow the record through.
 
-        Audit bug Sec1: also scrub ``record.msg`` for SSID / PSK /
-        password key=value patterns and bare ``Astromech-NNNN``
-        literals. Without this, callers that put secrets in the log
-        message text bypass every ctx-keyed rule above.
+        Also scrubs ``record.msg`` for SSID / PSK / password key=value
+        patterns and bare ``Astromech-NNNN`` literals. Without this,
+        callers that put secrets in the log message text would bypass
+        every ctx-keyed rule above.
         """
         ctx = getattr(record, "ctx", None)
         if isinstance(ctx, dict):

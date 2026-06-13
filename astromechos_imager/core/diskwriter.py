@@ -33,7 +33,7 @@ class DiskWriteResult:
     #: First chunk of the source that was deliberately NOT written to the
     #: device — Windows would otherwise auto-mount the freshly-written FAT32
     #: partition mid-flash and inject ``System Volume Information`` bytes,
-    #: corrupting the verify_readback comparison (audit Bug #0). Carries the
+    #: corrupting the verify_readback comparison. Carries the
     #: bytes of the MBR / boot sector / first 1 MB, hashed in-flight so the
     #: source SHA256 is unaffected. Callers (orchestrator) write this back
     #: to offset 0 AFTER verify_readback succeeds, completing the partition
@@ -56,7 +56,7 @@ class DiskWriter:
     it back at offset 0 only after ``verify_readback`` succeeds. Until
     that final write happens, Windows sees an invalid partition table
     and refuses to auto-mount the new FAT32 partition, eliminating the
-    race that corrupted our readback hashes in the E2E audit (Bug #0).
+    auto-mount race that would otherwise corrupt the readback hashes.
     """
     CHUNK_SIZE = 1 << 20
     QUEUE_MAX = 4
@@ -91,12 +91,11 @@ class DiskWriter:
                         break
                     hasher.update(chunk)
                     producer_total[0] += len(chunk)
-                    # Audit Medium #31: use a timeout-based put so the
-                    # producer wakes up periodically to re-check the
-                    # cancel flag, even if the consumer died and stopped
-                    # draining the queue. Without this, q.put(chunk) on
-                    # a full queue would block forever and t_p.join()
-                    # would hang the run() call.
+                    # Use a timeout-based put so the producer wakes up
+                    # periodically to re-check the cancel flag, even if the
+                    # consumer died and stopped draining the queue. Without
+                    # this, q.put(chunk) on a full queue would block forever
+                    # and t_p.join() would hang the run() call.
                     while not self.cancel.is_set():
                         try:
                             q.put(chunk, timeout=0.5)
@@ -111,18 +110,15 @@ class DiskWriter:
                 # cancel-aware timeout loop — NEVER drop a queued chunk to
                 # make room.
                 #
-                # The previous ``q.get_nowait()`` drop-to-fit was a real
-                # data-loss + length bug: on a SLOW device (an SD card at
-                # ~10 MB/s vs near-instant decompression) the consumer
-                # always lags, so the queue is FULL when the producer
-                # finishes — and the drop silently discarded the last
-                # data chunk that had ALREADY been folded into
-                # ``source_sha256``. Result: the device was 1 chunk
-                # (~1 MB) short, ``bytes_written`` undercounted by the
-                # same amount, and verify_readback compared a 1-MB-short
-                # readback against the full-image hash → a deterministic
-                # SHA-256 mismatch on every large flash. (It never bit on
-                # fast targets, where the queue drains before finish.)
+                # Dropping a chunk to fit the sentinel would lose data and
+                # undercount the length: on a SLOW device (an SD card at
+                # ~10 MB/s vs near-instant decompression) the consumer lags,
+                # so the queue is FULL when the producer finishes, and the
+                # last data chunk has ALREADY been folded into
+                # ``source_sha256``. Discarding it would leave the device
+                # one chunk (~1 MB) short, undercount ``bytes_written`` by
+                # the same amount, and make verify_readback compare a short
+                # readback against the full-image hash → a SHA-256 mismatch.
                 #
                 # In the normal path the consumer keeps draining until it
                 # sees the sentinel, so the blocking put always succeeds
@@ -144,10 +140,10 @@ class DiskWriter:
         # it — that's always 0..100% of a known fixed total (the .gz
         # file size on disk). For sources without it (raw .img, .xz,
         # .zip), fall back to the decompressed byte offset and rely on
-        # ``source.uncompressed_size``. Gzip's ``ISIZE`` field is
-        # ``uncompressed_size mod 2^32`` so for Pi-OS-sized images
-        # (~5.7 GB) it wraps to ~1.7 GB — the UI used to render that
-        # as "320 %" before this switch.
+        # ``source.uncompressed_size``. Preferring the compressed position
+        # avoids gzip's ``ISIZE`` field, which is ``uncompressed_size mod
+        # 2^32`` and for Pi-OS-sized images (~5.7 GB) wraps to ~1.7 GB —
+        # which would make the UI render progress past 100 %.
         use_compressed_progress = (
             callable(getattr(self.source, "compressed_position", None))
             and getattr(self.source, "compressed_size", None) is not None
@@ -222,9 +218,8 @@ class DiskWriter:
                     ))
             except BaseException as e:
                 self._exc = e
-                # Audit Medium #31: if the consumer dies, set cancel so
-                # the producer unblocks at its next iteration instead of
-                # filling the queue forever.
+                # If the consumer dies, set cancel so the producer unblocks
+                # at its next iteration instead of filling the queue forever.
                 self.cancel.set()
 
         t_p = threading.Thread(target=producer, name="dw-producer", daemon=True)
@@ -255,8 +250,7 @@ def verify_readback(dev: RawDevice, expected_sha256: str, length: int,
       - starts the disk read from offset ``len(first_block)`` (skipping
         the region the orchestrator has deliberately NOT written yet —
         the MBR region kept off-disk to prevent Windows auto-mount during
-        the write/verify window — see ``DiskWriter`` docstring and
-        audit Bug #0).
+        the write/verify window — see ``DiskWriter`` docstring).
 
     When ``first_block`` is ``None`` the function reads the full range
     from offset 0 (legacy behaviour for callers that don't use the

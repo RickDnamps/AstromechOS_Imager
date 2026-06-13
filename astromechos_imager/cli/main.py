@@ -25,9 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Path to a file containing OpenSSH pubkey(s), one per line")
     flash.add_argument("--no-verify", action="store_true",
                        help="Skip read-back SHA256 verification (discouraged)")
-    # Lockstep with the GUI (audit C4): the wizard hard-locks the install
-    # user to DEFAULT_INSTALL_USER ("astromech") — a CLI default of "pi"
-    # produced a different account contract than a GUI flash.
+    # Lockstep with the GUI: the wizard hard-locks the install user to
+    # DEFAULT_INSTALL_USER ("astromech"), so the CLI defaults to the same
+    # name to keep one account contract across both frontends.
     from astromechos_imager.ui.flash_view_model import (
         DEFAULT_INSTALL_PASSWORD,
         DEFAULT_INSTALL_USER,
@@ -65,11 +65,11 @@ def is_admin() -> bool:
 def relaunch_as_admin() -> None:
     """Re-launch the CLI with UAC elevation.
 
-    Audit Low #42: arguments must go through ``subprocess.list2cmdline``
-    so paths containing spaces, quotes, or backslashes survive the trip
-    through Windows' ``CommandLineToArgvW``. A naive
-    ``" ".join(sys.argv)`` fragments such paths and is an argv-injection
-    vector if any positional argument is operator-controlled.
+    Arguments must go through ``subprocess.list2cmdline`` so paths
+    containing spaces, quotes, or backslashes survive the trip through
+    Windows' ``CommandLineToArgvW``. A naive ``" ".join(sys.argv)``
+    fragments such paths and is an argv-injection vector if any positional
+    argument is operator-controlled.
     """
     if sys.platform != "win32":
         return
@@ -116,16 +116,15 @@ def _cmd_flash(args: argparse.Namespace) -> int:
         flashed_at_iso=_utc_iso_now(),
     )
     pair = generate_ed25519()
-    # Lockstep with the GUI (audit C4): a CLI flash that never passed
-    # linux_account wrote EMPTY_USER_DATA — no account provisioning on
-    # the flashed Trixie image, unlike every GUI flash.
+    # Lockstep with the GUI: build linux_account so the CLI provisions the
+    # UID-1000 account on the flashed Trixie image; without it the flash
+    # would write EMPTY_USER_DATA and skip account provisioning.
     linux_account = generate_linux_account(
         args.install_user, args.install_password)
 
     # Sequential-only, in lockstep with the GUI's Deployment Assistant: ONE
-    # card per invocation. The old PairFlashJob path was purged — it never
-    # passed linux_account, so pair-flashed cards shipped WITHOUT account
-    # provisioning (audit perfection pass).
+    # card per invocation. There is no parallel pair mode — each card is
+    # flashed individually so it always gets linux_account provisioning.
     if args.master_image and args.slave_image:
         print("error: flash ONE card per invocation (master first, then "
               "slave) — the parallel pair mode was removed.", file=sys.stderr)

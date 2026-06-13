@@ -202,7 +202,7 @@ def test_resetForNextCycle_emits_signals():
     assert slave_drive_received == [-1]
 
 
-# ── endSession — audit bugs C3 + H1 ──────────────────────────────────
+# ── endSession ───────────────────────────────────────────────────────
 
 
 def test_endSession_resets_all_cycle_state():

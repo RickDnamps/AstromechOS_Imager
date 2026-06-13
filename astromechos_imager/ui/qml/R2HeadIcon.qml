@@ -15,9 +15,9 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    // Audit Medium #37: bind to the live theme accent so the dome stays
-    // in the R2 family in both dark (#5e9bd6) and light (#1e5db8) modes.
-    // Callers can still override by setting strokeColor explicitly.
+    // Bind to the live theme accent so the dome stays in the R2 family in
+    // both dark (#5e9bd6) and light (#1e5db8) modes. Callers can still
+    // override by setting strokeColor explicitly.
     property color strokeColor: theme.colors.colorAccent
     property real  strokeWidth: 2.0
 

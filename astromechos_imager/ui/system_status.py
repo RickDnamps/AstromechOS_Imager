@@ -2,11 +2,10 @@
 context property).
 
 Currently carries one fact: whether the automount defense is armed. The
-session guard arms it on a background thread (audit defect A6 - the old
-synchronous pre-Qt mountvol calls could stall the window for the full
-subprocess timeouts), so the QML banner needs a property that can CHANGE
-after engine load. Signal emission from the arming thread is safe: Qt
-queues the notification to the main thread.
+session guard arms it on a background thread (the mountvol calls can stall
+for the full subprocess timeouts), so the QML banner needs a property that
+can CHANGE after engine load. Signal emission from the arming thread is
+safe: Qt queues the notification to the main thread.
 """
 from __future__ import annotations
 

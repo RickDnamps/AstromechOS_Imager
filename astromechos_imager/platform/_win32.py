@@ -122,12 +122,11 @@ def kernel32():
             ctypes.POINTER(ctypes.c_longlong), wintypes.DWORD,
         ]
         _kernel32.SetFilePointerEx.restype = wintypes.BOOL
-        # Mount Manager APIs — see rpi-imager's diskpart_util.cpp pattern:
-        # after lock+dismount+unlock+close, call DeleteVolumeMountPointW
-        # to drop the drive letter from Mount Manager state. Without this,
-        # Windows re-discovers the freshly-written partition table and
-        # auto-mounts via the OLD letter assignment, racing with verify
-        # readback and corrupting hashes (audit Bug #0).
+        # Mount Manager APIs: after lock+dismount+unlock+close, call
+        # DeleteVolumeMountPointW to drop the drive letter from Mount Manager
+        # state. Without this, Windows re-discovers the freshly-written
+        # partition table and auto-mounts via the OLD letter assignment,
+        # racing with verify readback and corrupting hashes.
         _kernel32.DeleteVolumeMountPointW.argtypes = [wintypes.LPCWSTR]
         _kernel32.DeleteVolumeMountPointW.restype = wintypes.BOOL
         # Listing volumes (used to discover the new volume GUID Windows

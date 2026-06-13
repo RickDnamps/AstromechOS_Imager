@@ -39,12 +39,12 @@ ApplicationWindow {
     // -1 while splash is showing, 0..6 = currentStep-1 once advanced.
     property int displayedStepIdx: -1
 
-    // ── Quit guard (audit defect F4) ──────────────────────────────────
-    // Closing mid-flash used to fire aboutToQuit → enable_automount WHILE
-    // the writer streamed (Windows could mount + probe the half-written
-    // card) and killed the worker thread mid-write, leaving a RAW card
-    // with no exFAT recovery. Intercept close, confirm, cancel cleanly,
-    // and only quit once the worker has wound down.
+    // ── Quit guard ────────────────────────────────────────────────────
+    // A mid-flash close must not fire aboutToQuit → enable_automount while
+    // the writer streams (Windows could mount + probe the half-written card)
+    // or kill the worker thread mid-write, which would leave a RAW card with
+    // no exFAT recovery. Intercept close, confirm, cancel cleanly, and only
+    // quit once the worker has wound down.
     property bool quitPending: false
     readonly property bool flashBusy: flashViewModel
         && (flashViewModel.status === "verifying"
@@ -208,9 +208,9 @@ ApplicationWindow {
             Item { Layout.preferredWidth: 16 }   // separator
 
             // ── Theme toggle (sun/moon) ──────────────────────────────
-            // Audit High #25: every icon-only header button now carries
-            // a tooltipText + accessibleName so screen readers, sighted
-            // keyboard users, and hover-discovery all work.
+            // Every icon-only header button carries a tooltipText +
+            // accessibleName so screen readers, sighted keyboard users, and
+            // hover-discovery all work.
             WindowCtrlButton {
                 Layout.alignment: Qt.AlignVCenter
                 glyph: theme.mode === "light" ? "☾" : "☀"
@@ -225,7 +225,7 @@ ApplicationWindow {
             // Only Close — Minimize and Maximize intentionally omitted
             // (single-purpose imaging session; no need to background it
             // or reflow the layout). The X glyph is sized up to fill the
-            // visual slot the two missing buttons used to occupy.
+            // visual slot on its own.
             WindowCtrlButton {
                 Layout.alignment: Qt.AlignVCenter
                 glyph: "×"
@@ -357,8 +357,7 @@ ApplicationWindow {
     }
     // Sequential Deployment Assistant — 7-step wizard. Component
     // names follow the role of each screen (Landing / Config / Images
-    // / Role / Flash / NextCard / Complete) rather than the legacy
-    // mode-picker numbering.
+    // / Role / Flash / NextCard / Complete).
     Component { id: step1Component; Step1Landing  {} }
     Component { id: step2Component; Step2Config   {} }
     Component { id: step3Component; Step3Images   {} }
@@ -421,10 +420,10 @@ ApplicationWindow {
         }
     }
 
-    // Audit Low #49: bigger corner grip (Win11 recommends ≥ 24 px hit
-    // targets) PLUS invisible 4-pixel resize strips on every edge, so
-    // users get the native expected resize behaviour even though
-    // FramelessWindowHint killed native edge detection.
+    // Corner grip sized to the Win11-recommended ≥ 24 px hit target, PLUS
+    // invisible 4-pixel resize strips on every edge, so users get the native
+    // expected resize behaviour even though FramelessWindowHint killed native
+    // edge detection.
     Item {
         id: resizeEdges
         anchors.fill: parent

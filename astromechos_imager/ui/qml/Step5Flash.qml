@@ -10,22 +10,22 @@ Rectangle {
     property bool isDone:      flashViewModel.status === "done"
     property bool isError:     flashViewModel.status === "error"
     // One cycle = one role. Progress rendered via shared TaskTracker +
-    // GlobalProgressBar (option 2B reusability).
+    // GlobalProgressBar.
     property bool needMaster: wizardState.currentRole === "master"
     property bool needSlave:  wizardState.currentRole === "slave"
 
     // ── Role-aware property selection ─────────────────────────────────
     // The flash pipeline routes progress/hash/sidecar into master* OR slave*
     // depending on the role flashed this cycle. The UI MUST read the matching
-    // set — reading master* during a SLAVE cycle showed "no sidecar" + a
-    // frozen bar (the slave's real values live in slave*).
+    // set: during a SLAVE cycle the real values live in slave*, so reading
+    // master* would show "no sidecar" and a frozen bar.
     function _hashProgress() { return needSlave ? (flashViewModel.slaveHashProgress || 0) : (flashViewModel.masterHashProgress || 0) }
     function _phase()        { return needSlave ? (flashViewModel.slavePhase || "")        : (flashViewModel.masterPhase || "") }
     function _progress()     { return needSlave ? (flashViewModel.slaveProgress || 0)      : (flashViewModel.masterProgress || 0) }
     function _sidecarMatch() { return needSlave ? flashViewModel.slaveHashSidecarMatch     : flashViewModel.masterHashSidecarMatch }
     function _throughput()   { return needSlave ? (flashViewModel.slaveThroughputBps || 0) : (flashViewModel.masterThroughputBps || 0) }
 
-    // ── Stage model for TaskTracker (option 1B 4-stage layout) ────────
+    // ── Stage model for TaskTracker (4-stage layout) ──────────────────
     function _buildStages() {
         if (!flashViewModel) return []
         var hp = _hashProgress()
@@ -33,7 +33,7 @@ Rectangle {
         var prog = _progress()
         var hashDone = hp >= 1.0 || isFlashing || isDone
         var verifyOn = wizardState ? wizardState.verifyIntegrity : true
-        // Stage 1: SHA-256 — option 3B (skipped state)
+        // Stage 1: SHA-256 (supports a skipped state)
         var s1 = "pending", s1det = ""
         if (!verifyOn)                              { s1 = "skipped"; s1det = "skipped" }
         else if (isError && !hashDone)              { s1 = "failed" }
@@ -45,7 +45,7 @@ Rectangle {
                   : m === false ? "✗ mismatch"
                   : "no sidecar"
         }
-        // Stage 2: Streaming & writing (option 1B — combined)
+        // Stage 2: Streaming & writing (combined)
         var s2 = "pending", s2det = ""
         var s2Active = isFlashing && (p === "preparing" || p === "waiting_unmount" || p === "decompress_write")
         var s2Done = (p === "verify" || p === "customizing" || isDone)
@@ -109,35 +109,6 @@ Rectangle {
         target: wizardState
         function onCurrentRoleChanged() { if (globalBar) globalBar.resetFloor() }
     }
-    Component {
-        id: summaryRow
-        RowLayout {
-            property string roleLabel: ""
-            property string imagePath: ""
-            property int    driveId: 0
-            Layout.fillWidth: true
-            spacing: 12
-            Text {
-                text: roleLabel
-                color: theme.colors.colorTextAccent
-                font.family: Theme.fontTitle; font.pixelSize: 10
-                font.bold: true; font.letterSpacing: 1.6
-                Layout.preferredWidth: 70
-            }
-            Text {
-                text: imagePath
-                color: theme.colors.colorTextPrimary
-                font.family: Theme.fontMono; font.pixelSize: 12
-                elide: Text.ElideMiddle
-                Layout.fillWidth: true
-            }
-            Text {
-                text: "→ " + (driveListModel ? driveListModel.labelForDriveId(driveId) : ("drive " + driveId))
-                color: theme.colors.colorTextSecondary
-                font.family: Theme.fontMono; font.pixelSize: 12
-            }
-        }
-    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 28
@@ -189,90 +160,6 @@ Rectangle {
             stages: _buildStages()
         }
 
-        // ── Integrity verification toggle (idle state only) ───────────
-        RowLayout {
-            visible: !isVerifying && !isFlashing && !isDone && !isError
-            spacing: 12
-            Layout.fillWidth: true
-            Rectangle {
-                id: shieldBox
-                Layout.preferredWidth: 18; Layout.preferredHeight: 18
-                radius: 4
-                color: wizardState.verifyIntegrity ? theme.colors.colorAccent : "transparent"
-                border.color: wizardState.verifyIntegrity ? theme.colors.colorAccent : theme.colors.colorBorderIdle
-                border.width: 1
-                Behavior on color        { ColorAnimation { duration: Theme.durFast } }
-                Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
-                Text {
-                    anchors.centerIn: parent; text: "✓"
-                    color: theme.colors.colorTextOnAccent
-                    font.family: Theme.fontTitle; font.pixelSize: 12; font.bold: true
-                    visible: wizardState.verifyIntegrity
-                }
-                MouseArea {
-                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                    onClicked: wizardState.setVerifyIntegrity(!wizardState.verifyIntegrity)
-                }
-            }
-            Text {
-                text: "🛡 VERIFY IMAGE INTEGRITY (SHA-256) BEFORE FLASH"
-                color: theme.colors.colorTextPrimary
-                font.family: Theme.fontTitle; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.4
-                Layout.fillWidth: true
-                MouseArea {
-                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                    onClicked: wizardState.setVerifyIntegrity(!wizardState.verifyIntegrity)
-                }
-            }
-        }
-
-        // ── Summary panel (idle state) ────────────────────────────────
-        Rectangle {
-            visible: !isVerifying && !isFlashing && !isDone && !isError
-            Layout.fillWidth: true
-            Layout.preferredHeight: 180
-            radius: Theme.radiusCard
-            color: theme.colors.colorSurface
-            border.color: theme.colors.colorBorderIdle
-            border.width: 1
-            Rectangle {
-                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-                anchors.margins: 1; height: 1; radius: parent.radius
-                color: Qt.rgba(1, 1, 1, 0.04)
-            }
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 18
-                spacing: 12
-                Loader {
-                    active: needMaster; visible: active; Layout.fillWidth: true; sourceComponent: summaryRow
-                    onLoaded: { item.roleLabel = "MASTER"; item.imagePath = wizardState.masterImagePath; item.driveId = wizardState.masterDriveId }
-                }
-                Loader {
-                    active: needSlave; visible: active; Layout.fillWidth: true; sourceComponent: summaryRow
-                    onLoaded: { item.roleLabel = "SLAVE"; item.imagePath = wizardState.slaveImagePath; item.driveId = wizardState.slaveDriveId }
-                }
-                Item { Layout.fillHeight: true }
-                Rectangle {
-                    Layout.fillWidth: true; height: 1
-                    color: theme.colors.colorBorderWarn; opacity: 0.4
-                }
-                RowLayout {
-                    spacing: 8
-                    Text {
-                        text: "⚠"; color: theme.colors.colorBorderWarn
-                        font.family: Theme.fontTitle; font.pixelSize: 14
-                    }
-                    Text {
-                        text: "ALL DATA ON THE TARGET DRIVE(S) WILL BE ERASED."
-                        color: theme.colors.colorBorderWarn
-                        font.family: Theme.fontTitle; font.pixelSize: 11
-                        font.bold: true; font.letterSpacing: 1.4
-                    }
-                }
-            }
-        }
-
         // ── Error message (compact) ───────────────────────────────────
         Text {
             visible: isError && flashViewModel
@@ -314,13 +201,12 @@ Rectangle {
             }
         }
         AstroButton { visible: !isVerifying && !isFlashing && !isDone; text: "← BACK"; variant: "secondary"; onClicked: wizardState.back() }
-        AstroButton { visible: !isVerifying && !isFlashing && !isDone && !isError; text: "⚡ WRITE"; variant: "danger"; horizontalPadding: 28; onClicked: confirmDialog.open() }
         AstroButton { visible: isVerifying || isFlashing; text: "CANCEL"; variant: "secondary"; onClicked: flashViewModel.cancel() }
         AstroButton { visible: isDone; text: "NEXT →"; variant: "primary"; onClicked: wizardState.next() }
     }
 
-    // ── Themed confirmation dialog (commit 8eaabc7) ──────────────────
-    // 60px tinted header (sep. ⚠ glyph); 22/24 body padding; footer 1px
+    // ── Themed confirmation dialog ───────────────────────────────────
+    // 60px tinted header (separate ⚠ glyph); 22/24 body padding; footer 1px
     // divider + 14 vpad; 2px destructive border (colorBorderError).
     Dialog {
         id: confirmDialog

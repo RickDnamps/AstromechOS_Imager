@@ -251,13 +251,11 @@ class TestRedactionFilterPassThrough:
 
 
 # ---------------------------------------------------------------------------
-# Free-text message scrub — audit bug Sec1
+# Free-text message scrub
 #
-# Before the fix, FlashViewModel.startSession logged
-# ``Sequential session started — hotspot SSID=Astromech-1234`` and the
-# JSONL session log captured the raw SSID. These tests pin the
-# ``record.msg`` scrub that prevents future SSID/PSK/password literals
-# from leaking the same way.
+# The ``record.msg`` scrub must prevent SSID/PSK/password literals from
+# leaking into log lines (e.g. a session-start message carrying the raw
+# hotspot SSID, or the JSONL session log capturing it).
 # ---------------------------------------------------------------------------
 
 
@@ -278,7 +276,7 @@ class TestFreeTextLeakScrub:
 
     def test_ssid_pattern_redacted_in_msg(self) -> None:
         """``SSID=Astromech-1234`` in a log message becomes
-        ``SSID=<redacted>``. Pins the canonical FlashViewModel leak."""
+        ``SSID=<redacted>``."""
         msg = "Sequential session started — hotspot SSID=Astromech-1234 (persists)"
         out = self._filtered_msg(msg)
         assert "Astromech-1234" not in out

@@ -54,8 +54,8 @@ class DriveListModel(QAbstractListModel):
     """Refreshes every 2 s. PlatformIO injected so tests can use FakePlatformIO.
 
     System drive exclusion is enforced at the enumerate_removable_drives() layer
-    in astromechos_imager/platform/windows.py (Phase 4.2). The system drive never
-    appears in this model, so QML does not need to disable or filter any rows.
+    in astromechos_imager/platform/windows.py. The system drive never appears in
+    this model, so QML does not need to disable or filter any rows.
 
     Exposes ``count`` + ``firstDrive*`` Qt Properties so QML can bind directly
     instead of relying on a hidden ListView delegate (Qt 6 does not instantiate
@@ -85,9 +85,9 @@ class DriveListModel(QAbstractListModel):
     def refresh(self) -> None:
         # Letterless enumeration: the per-disk ASSOCIATORS letter query makes
         # WmiPrvSE touch each lettered volume — against a RAW/ext4 card this
-        # pops "Format this disk?" every 2 s poll (audit defect A1). Letters
-        # are resolved at action time only. TypeError fallback keeps fakes
-        # and older PlatformIO implementations working.
+        # pops "Format this disk?" on every 2 s poll. Letters are resolved at
+        # action time only. TypeError fallback keeps fakes and older
+        # PlatformIO implementations working.
         try:
             new = list(self._platform.enumerate_removable_drives(
                 include_letters=False))
@@ -144,7 +144,7 @@ class DriveListModel(QAbstractListModel):
 
         USB FIXED media (external SSDs — e.g. the operator's image-source
         drive) are excluded: auto-dismounting those would detach a disk the
-        operator is actively using (audit defect C1).
+        operator is actively using.
         """
         return [
             d.physical_drive_id for d in self._drives
@@ -219,7 +219,7 @@ class DriveListModel(QAbstractListModel):
     def firstDriveSuspect(self) -> bool:
         """True when the single candidate is USB FIXED media (external
         SSD/HDD, not an SD card) — Step 4 skips auto-selection and demands
-        an explicit override (audit defect C1)."""
+        an explicit override."""
         if not self._drives:
             return False
         return bool(getattr(self._drives[0], "is_suspect_fixed", False))

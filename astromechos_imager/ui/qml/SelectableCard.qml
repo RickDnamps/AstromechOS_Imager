@@ -5,8 +5,8 @@
 //   SelectableCard {
 //       title: "Master"
 //       subtitle: "Dome — 4 GB Pi 4B"
-//       selected: wizardState.mode === "master_only"
-//       onClicked: wizardState.setMode("master_only")
+//       selected: wizardState.currentRole === "master"
+//       onClicked: wizardState.setCurrentRole("master")
 //       iconComponent: R2HeadIcon { }
 //   }
 //
@@ -31,9 +31,9 @@ Rectangle {
     property Component iconComponent: null
     signal clicked()
 
-    // Audit High #24: keyboard navigation. Cards are focusable via Tab
-    // and activate on Space / Enter — keyboard-only operators can pick
-    // a flash mode without ever touching the mouse.
+    // Keyboard navigation: cards are focusable via Tab and activate on
+    // Space / Enter, so keyboard-only operators can pick a card without
+    // ever touching the mouse.
     activeFocusOnTab: enabledLook
     focus: false
     Accessible.role: Accessible.Button

@@ -1,10 +1,9 @@
-"""WP6 (C2) - drive selection is a PURE STATE WRITE, no hardware side effect.
+"""Drive selection is a PURE STATE WRITE, no hardware side effect.
 
-Inverts the pre-WP6 contract: setMasterDriveId/setSlaveDriveId used to spawn
-a release-letters daemon thread (the audit R1 race: that thread could hold a
-GENERIC_WRITE volume handle while flash-time lock_and_dismount ran). Letters
-are now stripped for all non-suspect candidates at drive-model bring-up
-(ui/app.py); the setters must never touch the platform again.
+setMasterDriveId/setSlaveDriveId must not spawn a release-letters thread (such
+a thread could hold a GENERIC_WRITE volume handle while flash-time
+lock_and_dismount ran). Letters are stripped for all non-suspect candidates at
+drive-model bring-up (ui/app.py); the setters must never touch the platform.
 """
 from __future__ import annotations
 

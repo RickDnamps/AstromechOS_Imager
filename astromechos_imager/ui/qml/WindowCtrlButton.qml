@@ -14,9 +14,9 @@ Item {
     // Per-button glyph size override (e.g. the close × needs to be bigger
     // when it's the only window control left in the header).
     property int    glyphSize: 14
-    // Audit High #25: accessible name + tooltip text — both default to the
-    // glyph so the wrapper "just works" but callers (main.qml) should
-    // override with a human-readable label.
+    // Accessible name + tooltip text — both default to the glyph so the
+    // wrapper "just works", but callers (main.qml) should override with a
+    // human-readable label.
     property string tooltipText: glyph
     property string accessibleName: tooltipText
     signal activated()

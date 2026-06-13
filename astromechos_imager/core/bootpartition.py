@@ -3,11 +3,10 @@
 Per design spec §5.6.
 
 Production customize writes go through the userspace-FAT writer
-(``core/raw_fat_partition.py::RawFatBootPartition``) — this module now only
-provides ``find_first_fat32_partition``/``BootPartitionLayout`` (MBR parsing,
-shared with the orchestrator) and ``PyFatFsBootPartition`` (β, kept for the
-image-fixture round-trip tests). The historical α drive-letter path was
-removed (audit WP9, zero production callers).
+(``core/raw_fat_partition.py::RawFatBootPartition``); this module provides
+``find_first_fat32_partition``/``BootPartitionLayout`` (MBR parsing, shared
+with the orchestrator) and ``PyFatFsBootPartition`` (β, used by the
+image-fixture round-trip tests).
 """
 from __future__ import annotations
 
@@ -134,11 +133,9 @@ class PyFatFsBootPartition:
     def close(self) -> None:
         """Flush + close the FAT32 filesystem handle.
 
-        Audit Low #45: previously swallowed every exception silently, which
-        meant a card with unflushed FAT metadata could be reported as a
-        successful flash. We now log the exception (so it surfaces in
-        startup.log under frozen builds) but stay non-fatal — the trigger
-        marker has already been written and the operator's SD will boot.
+        A close failure is logged (so it surfaces in startup.log under
+        frozen builds) but stays non-fatal: the trigger marker has already
+        been written and the operator's SD will boot.
         """
         try:
             self._fs.close()
@@ -152,11 +149,3 @@ class PyFatFsBootPartition:
                 type(exc).__name__,
                 exc,
             )
-
-
-# NOTE (audit WP9): the α path (DriveLetterBootPartition +
-# wait_for_new_drive_letter + open_boot_partition) was deleted. It had zero
-# production callers — superseded by the userspace-FAT writer
-# (core/raw_fat_partition.py::RawFatBootPartition), which never asks Windows
-# to mount anything. Only find_first_fat32_partition / BootPartitionLayout /
-# PyFatFsBootPartition (test fixtures) remain in use.

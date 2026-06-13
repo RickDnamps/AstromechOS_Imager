@@ -75,18 +75,18 @@ class WizardState(QObject):
     slaveFilenameHintChanged = Signal(str)
     # Internal queue-back signal — fired from the role-check daemon thread,
     # auto-marshalled by Qt onto the main thread. The third argument is a
-    # generation token (audit High #12 / Medium #27): if the operator
-    # re-picks an image while the previous check is still hashing, the
-    # stale verdict carries an older token and is dropped on arrival.
+    # generation token: if the operator re-picks an image while the previous
+    # check is still hashing, the stale verdict carries an older token and is
+    # dropped on arrival.
     _roleStatusUpdated = Signal(str, str, int)   # role, status, generation
 
     # Integrity (SHA-256) toggle for Step 4
     verifyIntegrityChanged = Signal(bool)
 
-    # Sequential Deployment Assistant state machine (replaces the deleted
-    # MODE picker). cycleIndex bumps once per successful flash, completed
-    # roles accumulate, currentRole names which role this cycle flashes,
-    # and proposedNextRole derives from completedRoles for Screen 4.
+    # Sequential Deployment Assistant state machine. cycleIndex bumps once
+    # per successful flash, completed roles accumulate, currentRole names
+    # which role this cycle flashes, and proposedNextRole derives from
+    # completedRoles for Screen 4.
     cycleIndexChanged = Signal(int)
     completedRolesChanged = Signal()
     currentRoleChanged = Signal(str)
@@ -101,14 +101,11 @@ class WizardState(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        # NOTE (WP6): the former ``release_disk_letters`` hook is gone. Drive
-        # letters are now stripped for ALL non-suspect candidates at drive-
-        # model bring-up (ui/app.py) — selection is a pure state write again,
-        # with no hardware side effect. That also kills the audit R1 race
-        # (selection daemon thread vs flash-time lock_and_dismount): the
-        # flash-time live-letter merge + _wait_for_unmount gate remain the
-        # backstops for anything still lettered (e.g. an explicitly-confirmed
-        # suspect FIXED disk).
+        # Drive selection is a pure state write with no hardware side effect.
+        # Drive letters are stripped for all non-suspect candidates at drive-
+        # model bring-up (ui/app.py); the flash-time live-letter merge +
+        # _wait_for_unmount gate are the backstops for anything still lettered
+        # (e.g. an explicitly-confirmed suspect FIXED disk).
         self._step = self.MIN_STEP
         self._master_image_path = ""
         self._slave_image_path = ""
@@ -146,15 +143,13 @@ class WizardState(QObject):
         self._master_filename_hint = ""
         self._slave_filename_hint = ""
         self._verify_integrity = True   # zero-touch security default
-        # Audit High #12 / Medium #27: generation token per role so the
-        # last-write-wins race between rapidly-changed image selections
-        # can't deliver a stale verdict.
+        # Generation token per role so the last-write-wins race between
+        # rapidly-changed image selections can't deliver a stale verdict.
         self._role_check_gens: dict[str, int] = {"master": 0, "slave": 0}
-        # Audit High #13: shutdown flag set on aboutToQuit so daemon
-        # threads stop emitting signals to a soon-to-be-destroyed
-        # QObject. Best-effort: a thread already past the check will
-        # still attempt one emit, but Qt drops queued signals to dead
-        # receivers safely.
+        # Shutdown flag set on aboutToQuit so daemon threads stop emitting
+        # signals to a soon-to-be-destroyed QObject. Best-effort: a thread
+        # already past the check will still attempt one emit, but Qt drops
+        # queued signals to dead receivers safely.
         self._shutting_down = False
         try:
             from PySide6.QtCore import QCoreApplication
@@ -244,9 +239,8 @@ class WizardState(QObject):
           * no marker at all + filename agrees    → "unknown_marker_absent" (amber)
           * no marker + filename disagrees        → "mismatch" (hard block)
           * no marker + no filename hint          → "unknown_marker_absent" (amber)
-          * decompression / pyfatfs / I/O failure → "check_failed" (hard block,
-                                                    audit Low #46 — internal
-                                                    errors must not be
+          * decompression / pyfatfs / I/O failure → "check_failed" (hard block;
+                                                    internal errors must not be
                                                     silently soft-passed)
 
         Each invocation bumps the per-role generation counter; the daemon
@@ -293,7 +287,7 @@ class WizardState(QObject):
         expected = Role.MASTER if role_str == "master" else Role.SLAVE
 
         def _work() -> None:
-            # Audit High #13: shortcut if shutdown is in progress.
+            # Shortcut if shutdown is in progress.
             if self._shutting_down:
                 return
             try:
@@ -308,14 +302,13 @@ class WizardState(QObject):
                     MalformedRoleMarkerError):
                 status = "mismatch"
             except Exception:  # noqa: BLE001
-                # Audit Low #46: pyfatfs ImportError, transient I/O, etc.
-                # used to surface as the amber "unknown_marker_absent"
-                # soft-pass which operators are documented to override.
-                # That weakens the only role-safety gate before a
-                # destructive write. Promote to "check_failed", a hard
-                # block the UI flags red with a "see startup.log" hint.
-                # Route through standard logging so the traceback lands in
-                # the JSONL session log AND in startup.log (frozen builds).
+                # pyfatfs ImportError, transient I/O, etc. are a hard block,
+                # not a soft pass: an internal failure must not weaken the
+                # only role-safety gate before a destructive write. Surface
+                # "check_failed", which the UI flags red with a
+                # "see startup.log" hint. Route through standard logging so
+                # the traceback lands in the JSONL session log AND in
+                # startup.log (frozen builds).
                 logging.getLogger(__name__).exception(
                     "role check failed for %s", p_obj.name
                 )
@@ -419,15 +412,11 @@ class WizardState(QObject):
     def slaveDriveId(self) -> int:
         return self._slave_drive_id
 
-    # Note: the previous "cross-role collision check" (silently rejecting
-    # setSlaveDriveId(X) when masterDriveId == X) was a legacy of the
-    # deleted MODE_BOTH flow, which required two distinct drives written
-    # in parallel. The sequential Deployment Assistant now flashes one
-    # card per cycle and ``resetForNextCycle`` clears both ids between
-    # cycles, so reusing the same drive (most common: a single SD
-    # adapter) MUST be supported. Removing the cross-check also kills
-    # the opaque "drive -1 (unplugged?)" UI symptom that bit Phase A
-    # E2E audit Bug #2.
+    # The sequential Deployment Assistant flashes one card per cycle and
+    # ``resetForNextCycle`` clears both ids between cycles, so the master
+    # and slave drive ids may legitimately reference the same physical disk
+    # (most common: a single SD adapter reused across cycles). There is no
+    # cross-role collision check.
     @Slot(int)
     def setMasterDriveId(self, drive_id: int) -> None:
         if drive_id != self._master_drive_id:
@@ -493,10 +482,10 @@ class WizardState(QObject):
         """Companion to FlashViewModel.endSession() — clears wizard
         cycle state for the next sequential deployment.
 
-        Wired to Step 7 Complete 'FLASH ANOTHER' button (audit bugs C3
-        + H1). resetForNextCycle() only clears per-cycle drive ids; a
-        full session end must ALSO wipe completedRoles + cycleIndex so
-        Step 4 doesn't show the "✓ DONE" badge on a brand-new card.
+        Wired to the Step 7 Complete 'FLASH ANOTHER' button.
+        resetForNextCycle() only clears per-cycle drive ids; a full session
+        end must ALSO wipe completedRoles + cycleIndex so Step 4 doesn't show
+        the "✓ DONE" badge on a brand-new card.
         """
         self._cycle_index = 0
         self._completed_roles.clear()
@@ -565,11 +554,8 @@ class WizardState(QObject):
             self._repo_url = val
             self.repoUrlChanged.emit(val)
 
-    # (reuseHotspot property removed — audit WP9: vestige of the deleted
-    # MODE_BOTH flow; no QML binding, _build_flash_job never read it.)
-
     # ------------------------------------------------------------------
-    # Wi-Fi (optional, wlan1 home network) — Phase 8.10
+    # Wi-Fi (optional, wlan1 home network)
     # ------------------------------------------------------------------
 
     @Property(str, notify=wifiSsidChanged)

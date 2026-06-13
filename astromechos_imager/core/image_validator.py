@@ -60,20 +60,18 @@ from astromechos_imager.core.errors import (
 from astromechos_imager.core.models import Role
 
 ROLE_MARKER_PATH = "/astromech_role.json"
-DEFAULT_MAX_DECOMPRESS_MB = 600  # bumped from 128 (2026-05-31) — Pi OS Trixie
-# boot partition is 512 MB; 128 MB head truncated FAT32 metadata pyfatfs
-# expected to read, causing "Read a different amount of data than was
-# requested" on real Golden images (reproducible on slave but not master,
-# which happened to keep all needed FAT structures in the first 128 MB
-# after our Windows Format-Volume reconstruction). 600 MB safely covers
-# the 512 MB FAT32 partition + the 4 MB pre-partition offset + margin.
+DEFAULT_MAX_DECOMPRESS_MB = 600  # Pi OS Trixie boot partition is 512 MB.
+# The staged head must cover the whole FAT32 partition so pyfatfs can read
+# all the metadata it expects; a short head triggers "Read a different
+# amount of data than was requested". 600 MB safely covers the 512 MB
+# FAT32 partition + the 4 MB pre-partition offset + margin.
 EXPECTED_PROJECT = "AstromechOS"
 
-# Audit Medium #33 / #34: hard caps on inputs that could otherwise OOM
-# or recurse the JSON parser. The role marker is a ~100-byte file and
-# sidecar checksums are 64-char hex + filename — these limits are
-# orders of magnitude above the realistic max while still bounding any
-# adversarial or accidentally-misnamed input.
+# Hard caps on inputs that could otherwise OOM or recurse the JSON
+# parser. The role marker is a ~100-byte file and sidecar checksums are
+# 64-char hex + filename — these limits are orders of magnitude above the
+# realistic max while still bounding any adversarial or
+# accidentally-misnamed input.
 MAX_MARKER_BYTES = 64 * 1024              # 64 KB plenty for a 3-key JSON
 MAX_SIDECAR_BYTES = 8 * 1024              # 8 KB plenty for "<hex>  <file>"
 MAX_JSON_DEPTH = 8                        # marker is flat — 8 is generous
@@ -141,9 +139,9 @@ def _validate_marker_from_bp(
 
     raw = bp.read_bytes(ROLE_MARKER_PATH)
 
-    # Audit Medium #34: cap the raw blob before JSON parsing. A
-    # multi-megabyte "marker" is either a misnamed file or a deliberate
-    # OOM attempt; in both cases reject early without feeding the parser.
+    # Cap the raw blob before JSON parsing. A multi-megabyte "marker" is
+    # either a misnamed file or a deliberate OOM attempt; in both cases
+    # reject early without feeding the parser.
     if len(raw) > MAX_MARKER_BYTES:
         raise MalformedRoleMarkerError(
             image_name,
@@ -156,10 +154,10 @@ def _validate_marker_from_bp(
     except UnicodeDecodeError as exc:
         raise MalformedRoleMarkerError(image_name, "marker is not valid UTF-8") from exc
 
-    # Audit Medium #34: deeply nested JSON raises RecursionError, NOT
-    # JSONDecodeError. Catch both so the strict "everything raises
-    # MalformedRoleMarkerError" contract holds and the wizard's
-    # missing-marker amber soft-pass does not swallow a parser bomb.
+    # Deeply nested JSON raises RecursionError, NOT JSONDecodeError. Catch
+    # both so the strict "everything raises MalformedRoleMarkerError"
+    # contract holds and the wizard's missing-marker amber soft-pass does
+    # not swallow a parser bomb.
     try:
         obj = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -219,11 +217,10 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
     typically ~10 MB into the partition, comfortably inside the default
     128 MB window. The temp file is unlinked on exit.
     """
-    # Audit High #5 / #6: track both the outer ZipFile and the inner
-    # opener so the zip handle is always closed (was leaked when an inner
-    # .img was found), AND reject zips without any .img member instead
-    # of silently re-reading the zip as raw bytes (which would mislead
-    # the operator with "cannot parse MBR").
+    # Track both the outer ZipFile and the inner opener so the zip handle
+    # is always closed, and reject zips without any .img member instead of
+    # silently re-reading the zip as raw bytes (which would mislead the
+    # operator with "cannot parse MBR").
     name_lower = path.name.lower()
     zf: zipfile.ZipFile | None = None
     if name_lower.endswith(".xz"):
@@ -263,7 +260,7 @@ def _decompressed_head_as_tempfile(path: Path, max_bytes: int) -> Iterator[Path]
         finally:
             with suppress(Exception):
                 src.close()
-            # Audit High #5: close the outer ZipFile handle too.
+            # Close the outer ZipFile handle too.
             if zf is not None:
                 with suppress(Exception):
                     zf.close()
@@ -307,9 +304,9 @@ def validate_image_role(
     max_bytes = max_decompress_mb * 1024 * 1024
     with _decompressed_head_as_tempfile(path, max_bytes) as tmp_path:
         if tmp_path.stat().st_size < 512:
-            # Audit Medium #28: a sub-512-byte image is corrupted /
-            # truncated, not "marker absent". Use Malformed so the
-            # wizard hard-blocks instead of soft-passing amber.
+            # A sub-512-byte image is corrupted / truncated, not "marker
+            # absent". Use Malformed so the wizard hard-blocks instead of
+            # soft-passing amber.
             raise MalformedRoleMarkerError(
                 path.name,
                 f"image is too small for an MBR "
@@ -318,10 +315,10 @@ def validate_image_role(
 
         with open(tmp_path, "rb") as f:
             mbr = f.read(512)
-        # Audit Medium #35: narrow the catch to the specific MBR-parse
-        # error so library bugs (e.g. unexpected struct alignment) don't
-        # masquerade as "re-extract the image" advice in the recovery
-        # hint. BootPartitionMountError is the only thing
+        # Narrow the catch to the specific MBR-parse error so library bugs
+        # (e.g. unexpected struct alignment) don't masquerade as
+        # "re-extract the image" advice in the recovery hint.
+        # BootPartitionMountError is the only thing
         # find_first_fat32_partition is contracted to raise.
         try:
             layout: BootPartitionLayout = find_first_fat32_partition(mbr)
@@ -376,10 +373,10 @@ def find_sidecar_checksum(image_path: Path) -> tuple[str, str, Path] | None:
     for path, algo in candidates:
         if not path.is_file():
             continue
-        # Audit Medium #33: read at most MAX_SIDECAR_BYTES so a multi-GB
-        # misnamed sidecar can't OOM the process. Decode with utf-8-sig
-        # to swallow a PowerShell-emitted BOM (otherwise a legitimate
-        # sidecar would silently fail the regex).
+        # Read at most MAX_SIDECAR_BYTES so a multi-GB misnamed sidecar
+        # can't OOM the process. Decode with utf-8-sig to swallow a
+        # PowerShell-emitted BOM (otherwise a legitimate sidecar would
+        # silently fail the regex).
         try:
             with path.open("rb") as f:
                 blob = f.read(MAX_SIDECAR_BYTES + 1)

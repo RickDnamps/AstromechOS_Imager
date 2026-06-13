@@ -19,12 +19,12 @@ from astromechos_imager.core.errors import (
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9](?:-?[a-zA-Z0-9])*$")
 
 OPENSSH_PUBKEY_RE = re.compile(
-    # Audit High #17: tightened from the original ``\s+.+`` comment slot
-    # (which accepted ``\n``, ``\r``, and NULs and enabled embedded
-    # ``authorized_keys`` injection) to a single-line, tab-or-space
-    # delimited comment. The wrapping ``[ \t]+\S.*`` rejects any newline
-    # in the key OR the comment portion; callers should still pre-strip
-    # individual lines and reject inputs containing ``\n`` or ``\x00``.
+    # Comment slot is a single-line, tab-or-space delimited field: the
+    # trailing ``[ \t]+\S[^\r\n\x00]*`` rejects any newline, carriage
+    # return, or NUL in the key OR the comment portion, so a single match
+    # can never smuggle in a second ``authorized_keys`` entry. Callers
+    # should still pre-strip individual lines and reject inputs containing
+    # ``\n`` or ``\x00``.
     r"^(?:ssh-(?:rsa|ed25519|dss)"
     r"|ecdsa-sha2-nistp(?:256|384|521)"
     r"|sk-(?:ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com)"

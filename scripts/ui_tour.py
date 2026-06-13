@@ -34,8 +34,7 @@ def main() -> int:
     window = engine.rootObjects()[0]
     window.show()
 
-    # Seed realistic wizard state — 7-step sequential wizard. The legacy
-    # mode picker is gone; Phase B will update the QML capture plan.
+    # Seed realistic wizard state for the 7-step sequential wizard.
     # Use REAL AstromechOS images so Step 3 shows the genuine role-marker
     # validation badges (the path setters kick off the async validator). The
     # path shown is a CLEAN, release-style location (a local junction maps it
@@ -77,8 +76,8 @@ def main() -> int:
         ("02-customize",          2,  700, None),  # step 2 — Config (account/hotspot/wifi)
         ("03-images",             3, 7000, None),  # step 3 — Select Source Images (wait for role validation)
         ("04-target-drives",      4,  700, None),  # step 4 — Role / Insert SD Card
+        ("04b-write-confirm",     4,  700, "open_confirm"),  # ⚡ WRITE dialog (Step 4)
         ("05-confirm-flash",      5,  700, None),  # step 5 — Ops (verify + flash)
-        ("05b-write-confirm",     5,  700, "open_confirm"),  # ⚡ WRITE dialog
         ("06-next-card",          6,  700, "flashed_master"),  # step 6 — Master done, insert next
         ("07-complete",           7,  700, "flashed_both"),    # step 7 — both done, deployment complete
     ]

@@ -1,6 +1,5 @@
-"""WP1 — the win32 boundary tells the truth about mountvol.
+"""The win32 boundary tells the truth about mountvol.
 
-Pins the contract that made the anti-popup defense a fiction when broken:
 ``_run_mountvol`` must return True ONLY on exit code 0, ``disable_automount``
 must not drop the marker on failure, and ``enable_automount`` must KEEP the
 marker when /E fails (a failed restore must stay repairable).
@@ -119,8 +118,8 @@ def test_restore_if_crashed_noop_without_marker(monkeypatch, marker):
 
 
 def test_restore_honours_legacy_marker_and_migrates(monkeypatch, marker):
-    """A8 migration: a machine left automount-off by an OLD build (per-user
-    marker) must still be repaired once; the legacy marker is then removed."""
+    """A machine left automount-off by an older build (per-user marker) must
+    still be repaired once; the legacy marker is then removed."""
     marker.legacy.write_text("disabled\n", encoding="ascii")
     calls = _mock_mountvol(monkeypatch, 0)
     W.restore_automount_if_crashed()
@@ -129,8 +128,8 @@ def test_restore_honours_legacy_marker_and_migrates(monkeypatch, marker):
 
 
 def test_marker_path_prefers_programdata(monkeypatch, tmp_path):
-    """The marker is MACHINE-WIDE (audit A8): %ProgramData% wins over the
-    per-user %LOCALAPPDATA% so every account sees the repair record."""
+    """The marker is MACHINE-WIDE: %ProgramData% wins over the per-user
+    %LOCALAPPDATA% so every account sees the repair record."""
     pd = tmp_path / "ProgramData"
     monkeypatch.setenv("PROGRAMDATA", str(pd))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))

@@ -1,4 +1,4 @@
-"""WP5 - quit safety: thread parking + cancel-aware poll pause (R2/F4)."""
+"""Quit safety: thread parking + cancel-aware poll pause."""
 from __future__ import annotations
 
 import pytest
@@ -42,11 +42,11 @@ def test_park_overrun_thread_prunes_finished(qapp):
 
 
 def test_cancelling_status_pauses_polling_contract():
-    """Pin the pause-set the app wires in _sync_drive_polling (audit R2):
-    the WMI poll must stay paused while the worker runs its cancel cleanup
-    (diskpart exFAT restore against a RAW disk races the ASSOCIATORS query).
-    The set lives inline in app.py's closure; this test pins the source so
-    a regression is at least loud."""
+    """The WMI poll must stay paused while the worker runs its cancel
+    cleanup (diskpart exFAT restore against a RAW disk races the
+    ASSOCIATORS query). The pause-set lives inline in app.py's
+    _sync_drive_polling closure; this test pins the source so a
+    regression is at least loud."""
     import inspect
 
     from astromechos_imager.ui import app as app_mod

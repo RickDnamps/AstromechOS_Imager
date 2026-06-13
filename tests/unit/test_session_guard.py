@@ -1,9 +1,9 @@
-"""WP2 - AutomountSessionGuard: session ownership of the automount triple.
+"""AutomountSessionGuard: session ownership of the automount triple.
 
-Pins the protocol that kills audit defects A2/A4: a second live instance
-must never repair ("mountvol /E") or release the first instance's automount
-session, and a present marker only means "crashed" when no instance holds
-the mutex. Everything is faked - no kernel mutex, no mountvol.
+A second live instance must never repair ("mountvol /E") or release the
+first instance's automount session, and a present marker only means
+"crashed" when no instance holds the mutex. Everything is faked - no kernel
+mutex, no mountvol.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def test_acquire_arms_defense_when_alone():
 
 
 def test_claim_alone_touches_nothing():
-    """A6 split: claim() is mutex-only — no mountvol until arm()."""
+    """claim() is mutex-only — no mountvol until arm()."""
     win = FakeWin()
     g = _guard(win)
     assert g.claim() is True

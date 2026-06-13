@@ -5,7 +5,7 @@ Local DD on slave avoids master→slave SSH-pipe bottleneck. The Master.img from
 the previous dd_master.py run remains intact on the SSD (verified by size
 check, preserved by pi_cleanup.sh which only rm's Slave_*.img).
 
-Anti-regression invariants (gravé dans le béton via marathon 2026-06-02→07):
+Invariants:
   - EXPECTED_SIZE is None at module top → auto-detected via blockdev
     --getsize64 /dev/mmcblk0 (NEVER hardcode; breaks at SD size swap)
   - SSD mounted explicitly as exfat — flashed Pi does NOT auto-mount via fstab
@@ -29,9 +29,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 
 MASTER_IP = "192.168.2.104"
 SLAVE_IP = "192.168.4.171"
-# Anti-regression 2026-06-08: parameterize password via env var. Different
-# Imager wizard sessions can bake different installPasswords, so hardcoding
-# any single value will break the next-cycle DD.
+# Parameterize the password via env var. Different Imager wizard sessions can
+# bake different installPasswords, so hardcoding any single value will break
+# the next-cycle DD.
 PWD = os.environ.get("IMAGER_FLASH_PWD", "astropass123")
 LOCAL_CLEANUP = r"J:\R2-D2_Build\AstroMechOS_Imager\scripts\golden_image\pi_cleanup.sh"
 REMOTE_CLEANUP = "/tmp/pi_cleanup_patched.sh"
@@ -77,7 +77,7 @@ sl.connect(SLAVE_IP, username="astromech", password=PWD, sock=ch, timeout=15,
            allow_agent=False, look_for_keys=False)
 print("  Master + Slave connected", flush=True)
 
-# === A2. Auto-detect slave mmcblk0 EXACT size (anti-regression vs hardcoded) ===
+# === A2. Auto-detect slave mmcblk0 EXACT size (never hardcode) ===
 _, out, _ = sl.exec_command(
     f"echo {PWD} | sudo -S blockdev --getsize64 /dev/mmcblk0 2>&1", timeout=10)
 mmc_size_str = out.read().decode().strip().splitlines()[-1]
@@ -89,7 +89,7 @@ print(f"  Detected slave mmcblk0 size: {EXPECTED_SIZE:,} bytes ({EXPECTED_SIZE/1
 print("\n=== B. Mount SSD on slave ===", flush=True)
 run(sl, "mountpoint /mnt/ssd 2>&1 || echo NOT_MOUNTED", "check mount state")
 run(sl, f"echo {PWD} | sudo -S mkdir -p /mnt/ssd", "mkdir /mnt/ssd")
-# fsck first (exfat had unclean unmount warning earlier — be safe)
+# Confirm fsck.exfat is available before mounting (exfat can need a repair pass)
 run(sl, f"echo {PWD} | sudo -S which fsck.exfat 2>&1 || apt list --installed 2>/dev/null | grep -i exfat",
     "check fsck.exfat available")
 # Mount as exfat

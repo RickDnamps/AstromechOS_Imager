@@ -70,16 +70,15 @@ Button {
     readonly property color _fgIdle:
         variant === "primary"   ? theme.colors.colorTextOnAccent
       // Danger = filled RED background → text must be WHITE in BOTH themes.
-      // (Was colorTextPrimary, which is dark in the light theme → black text
-      // on red, unreadable. The red fill is saturated/dark enough that white
-      // reads cleanly in dark AND light.)
+      // The red fill is saturated/dark enough that white reads cleanly in
+      // dark AND light.
       : variant === "danger"    ? "#FFFFFF"
       : selected                ? theme.colors.colorAccent
       :                            theme.colors.colorAccent
 
-    // Audit Medium #38: keyboard-focusable + visible focus ring. Tab
-    // walks here, Space / Enter activate via the inherited Button
-    // behaviour (Qt Quick Controls 2 handles the key press).
+    // Keyboard-focusable + visible focus ring. Tab walks here, Space /
+    // Enter activate via the inherited Button behaviour (Qt Quick Controls 2
+    // handles the key press).
     activeFocusOnTab: true
 
     background: Rectangle {
@@ -92,9 +91,9 @@ Button {
         Behavior on color        { ColorAnimation { duration: Theme.durFast } }
         Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
 
-        // Audit Medium #38: focus-visible ring. Sits OUTSIDE the
-        // button via a negative-inset Rectangle so it never overlaps
-        // the glyph and is unmissable on Tab navigation.
+        // Focus-visible ring. Sits OUTSIDE the button via a negative-inset
+        // Rectangle so it never overlaps the glyph and is unmissable on Tab
+        // navigation.
         Rectangle {
             anchors.fill: parent
             anchors.margins: -3

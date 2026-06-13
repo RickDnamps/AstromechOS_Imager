@@ -1,4 +1,4 @@
-"""End-to-end validation of the new flash path on real hardware (Master).
+"""End-to-end validation of the flash path on real hardware (Master).
 
 Exercises the production FlashJob.run with verify ON and customize ON:
   write (deferred MBR) -> flush -> SCSI sync -> close
@@ -8,7 +8,7 @@ Exercises the production FlashJob.run with verify ON and customize ON:
 Then re-reads the FAT in userspace (no mount) to confirm the bundle landed.
 
 Pass criteria:
-  * FlashJob returns ok (verify_readback passed — the bug is fixed)
+  * FlashJob returns ok (verify_readback passed)
   * the AstromechOS bundle is readable back via userspace FAT
   * no drive letter was ever involved (no pop-up possible)
 """

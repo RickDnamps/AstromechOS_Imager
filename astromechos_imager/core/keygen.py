@@ -111,7 +111,7 @@ def generate_hotspot_bootstrap(password: str) -> HotspotBootstrap:
     )
 
 
-# ── Linux account (Cold rootfs surgery target — Phase 5.5) ────────────────
+# ── Linux account ─────────────────────────────────────────────────────────
 
 
 # SHA512-CRYPT salt alphabet per Drepper's spec — 64-char set used by
@@ -129,14 +129,12 @@ def _sha512_crypt(cleartext_password: str, salt: str | None = None,
 
         $6$<salt>$<86-char base64-encoded digest>
 
-    Replaces a hand-rolled implementation that truncated the output to
-    82 chars (it was missing the ``b64(0, C[62], C[41], 4)`` step at
-    the end of the encoding sequence). The truncated hash was rejected
-    by Linux PAM / ``chpasswd``, breaking SSH password auth on every
-    flashed Pi.
+    The full 86-char digest is required: a truncated hash is rejected by
+    Linux PAM / ``chpasswd`` and breaks SSH password auth on the flashed
+    Pi.
 
-    The salt argument is optional to preserve backwards-compatibility
-    with existing callers (e.g. ``generate_linux_account``) that rely
+    The salt argument is optional so callers (e.g.
+    ``generate_linux_account``) can rely
     on the function to mint a fresh 16-char salt per invocation. When
     a salt is supplied it is truncated to 16 chars (glibc behaviour).
 
@@ -172,9 +170,9 @@ def _sha512_crypt(cleartext_password: str, salt: str | None = None,
 def generate_linux_account(username: str, cleartext_password: str) -> LinuxAccount:
     """Build the ``LinuxAccount`` used for first-boot account setup.
 
-    The Imager writes ``username`` + the SHA512-CRYPT hash of
-    ``cleartext_password`` into ``/firstrun.sh`` so the Pi renames UID-1000
-    and sets its password on first boot.
+    Carries ``username`` + the SHA512-CRYPT hash of ``cleartext_password``;
+    the orchestrator feeds these into the cloud-init ``user-data`` chpasswd
+    entry that sets the UID-1000 password on first boot.
 
     Validation is the *caller's* responsibility (the UI wires its
     on-keystroke validators to ``core/validators.validate_install_user``
@@ -218,14 +216,14 @@ def save_persisted_pair(pair: Ed25519Pair) -> None:
 def load_persisted_pair() -> Ed25519Pair | None:
     """Reload the previously-persisted Master↔Slave keypair.
 
-    Audit Medium #29: previously a partial / truncated / hand-edited
-    keypair was wrapped into ``Ed25519Pair`` and flashed onto a card
-    whose first-boot SSH would then irreversibly fail. Now both files
-    are minimally validated before we trust them. On any inconsistency
-    we return ``None`` so the caller regenerates + re-persists a fresh
-    pair (and the existing Slave's authorized_keys will need updating
-    on its next flash, but that's the operator's signal that something
-    is wrong rather than a silent broken handshake).
+    Both files are minimally validated before they are trusted, so a
+    partial / truncated / hand-edited keypair can never be wrapped into
+    ``Ed25519Pair`` and flashed onto a card whose first-boot SSH would
+    then irreversibly fail. On any inconsistency we return ``None`` so the
+    caller regenerates + re-persists a fresh pair (the existing Slave's
+    authorized_keys then needs updating on its next flash, but that is the
+    operator's signal that something is wrong rather than a silent broken
+    handshake).
     """
     d = persisted_pair_dir()
     priv_p = d / "id_ed25519"

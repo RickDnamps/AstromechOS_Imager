@@ -1,10 +1,10 @@
 """Single owner of the {app mutex, automount setting, crash marker} triple.
 
-Before this class existed the three pieces were managed independently and
-the crash marker conflated "session crashed" with "session active" (audit
-defects A2/A4): a second Imager instance saw the first one's marker, ran
-``mountvol /E`` under its feet mid-flash, and whichever instance quit first
-re-enabled automount for the survivor. The guard makes the protocol explicit:
+Managing the three pieces independently would let the crash marker conflate
+"session crashed" with "session active": a second Imager instance could see
+the first one's marker, run ``mountvol /E`` under its feet mid-flash, and
+whichever instance quit first would re-enable automount for the survivor. The
+guard makes the protocol explicit:
 
     acquire()  claim the single-instance mutex FIRST; only when no live
                instance holds it can a present marker mean "crashed session"
@@ -80,9 +80,9 @@ class AutomountSessionGuard:
         """Repair a crashed session, then disable automount for THIS session.
 
         Spawns mountvol (up to a few seconds on a pathological system) - safe
-        to run OFF the UI thread (audit defect A6: the old synchronous
-        pre-Qt call could stall the window for the full subprocess timeouts).
-        Must be called after a successful :meth:`claim`.
+        to run OFF the UI thread; a synchronous pre-Qt call could otherwise
+        stall the window for the full subprocess timeouts. Must be called
+        after a successful :meth:`claim`.
         """
         if self.already_running:
             return False

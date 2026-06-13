@@ -38,11 +38,9 @@ class RawDevice(Protocol):
 class PlatformIO(Protocol):
     """Top-level platform facade — injected by the CLI/UI entry points.
 
-    Synced with reality (audit WP9): the orchestrator consumes the optional
-    members via ``getattr`` duck-typing, so fakes may omit them — but the
-    Protocol now DECLARES everything production actually calls, instead of
-    advertising dead members (``eject_media``, ``update_disk_properties``)
-    while omitting half the live surface.
+    The orchestrator consumes the optional members via ``getattr``
+    duck-typing, so fakes may omit them; the Protocol declares everything
+    production actually calls.
     """
 
     # ── core flash path (required) ───────────────────────────────────────

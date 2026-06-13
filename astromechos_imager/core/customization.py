@@ -33,14 +33,13 @@ def render_init_cfg(cfg: FirstbootConfig) -> bytes:
             f"branch = {cfg.repo_branch}",
         ]
     if cfg.hotspot_bootstrap is not None:
-        # Contract: keys are EXACTLY 'ssid' and 'password' — firstboot_setup.sh:377-378
-        # (and the same cfg_get + awk parser in lib_config.sh:66-71).
-        # ``key_mgmt = wpa-psk`` is declared explicitly to pin the
-        # WPA2 contract: live ``setup_master_network.sh:356,412`` and
-        # ``setup_slave_network.sh:228`` hard-code
-        # ``wifi-sec.key-mgmt wpa-psk`` already, so this field is
-        # documentary (the awk parsers only fetch ``ssid``+``password``)
-        # but completes the configuration declaration.
+        # Contract: keys are EXACTLY 'ssid' and 'password' (matched by the
+        # live cfg_get + awk parser). ``key_mgmt = wpa-psk`` is declared
+        # explicitly to pin the WPA2 contract; the live network-setup
+        # scripts hard-code ``wifi-sec.key-mgmt wpa-psk`` themselves, so
+        # this field is documentary (the awk parsers only fetch
+        # ``ssid``+``password``) but completes the configuration
+        # declaration.
         lines += [
             "",
             "[hotspot]",
@@ -129,8 +128,7 @@ def render_wlan_conf(ssid: str, psk: str) -> bytes:
     only reject embedded ``\n`` / ``\r`` / ``\x00`` which would let
     a malicious value smuggle in a second INI line.
 
-    Audit Info #51 (carried over from the shell-format version):
-    line-injection chars are still rejected ; the value side of each
+    Line-injection chars are rejected; the value side of each
     ``key = value`` pair stays verbatim because the live awk
     ``gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)`` only strips
     surrounding whitespace and accepts any character in between.
@@ -224,9 +222,9 @@ class FirstbootBundle:
                 "/astromech_wlan.conf",
                 render_wlan_conf(self.cfg.wifi_ssid, self.cfg.wifi_psk),
             )
-        # 6.6 — Slave network-config override (Bug B fix). The Golden
-        # Image bakes a stale /boot/firmware/network-config pointing wlan0
-        # at the build-machine's home WiFi; left in place, the slave would
+        # 6.6 — Slave network-config override. The Golden Image bakes a
+        # stale /boot/firmware/network-config pointing wlan0 at the
+        # build-machine's home WiFi; left in place, the slave would
         # join the operator's home WiFi on first boot and never reach the
         # master at 192.168.4.1. Overwrite with a netplan v2 wlan0 entry
         # pointing at the master rendezvous hotspot. Master-side network

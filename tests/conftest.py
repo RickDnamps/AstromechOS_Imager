@@ -9,7 +9,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_real_disk_tools(monkeypatch: pytest.MonkeyPatch):
-    """WP8 structural anti-regression: no test may run REAL mountvol/diskpart.
+    """Structural guard: no test may run REAL mountvol/diskpart.
 
     Those mutate the developer machine (system-wide automount state, disk
     formatting). Tests that need them must inject fakes — a test-level
@@ -29,7 +29,7 @@ def _no_real_disk_tools(monkeypatch: pytest.MonkeyPatch):
                           "diskpart.exe")):
             raise AssertionError(
                 f"test attempted a REAL '{prog}' call — inject a fake "
-                f"platform surface instead (WP8, audit defect A7)"
+                f"platform surface instead"
             )
         return real_run(argv, *a, **k)
 

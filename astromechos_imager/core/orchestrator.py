@@ -79,8 +79,8 @@ class FlashJob:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     skip_verify: bool = False
     skip_customize: bool = False
-    # Optional first-boot account setup. When None, only the FAT firstboot
-    # bundle is written (no /firstrun.sh).
+    # Optional first-boot account setup. When None, the FAT firstboot
+    # bundle is written without cloud-init account credentials.
     linux_account: LinuxAccount | None = None
 
     def run(self) -> FlashJobResult:
@@ -156,21 +156,20 @@ class FlashJob:
                 # open_raw_device) only clears partmgr's IN-MEMORY layout; the
                 # old table stays physically on the card for the whole write
                 # window because the deferred-MBR design writes sector 0 LAST.
-                # Field log 2026-06-12 (slave card): the volume teardown after
+                # Without this scrub the volume teardown after
                 # DELETE_DRIVE_LAYOUT makes the shell re-query the layout,
                 # disk.sys re-READS the still-valid old table from media, the
                 # old volumes re-arrive mid-write, and a sticky MountedDevices
-                # letter binding re-attaches K: to a half-overwritten (RAW)
-                # FAT — "Format this disk?" pops over a perfectly healthy
-                # flash. Zeroing the on-disk table closes that hole: a
+                # letter binding re-attaches a letter to a half-overwritten
+                # (RAW) FAT — "Format this disk?" pops over a perfectly
+                # healthy flash. Zeroing the on-disk table closes that hole: a
                 # mid-write re-read finds no partitions, so no volume can
                 # arrive and no letter can attach, sticky binding or not.
                 #
-                # History: a pre-zero attempt on 2026-06-10 POPPED the dialog
-                # — but that build stripped no letters, so the card went RAW
-                # while still LETTERED. The pre-zero is only safe AFTER
-                # lock_and_dismount + the active-wait gate guarantee zero
-                # letters on the target (both run above), which they now do.
+                # The scrub is only safe AFTER lock_and_dismount + the
+                # active-wait gate guarantee zero letters on the target (both
+                # run above) — scrubbing while the card is still lettered
+                # would take it RAW under a live letter and pop the dialog.
                 # Best-effort: a denied write here just degrades to the
                 # pre-scrub behaviour.
                 try:
@@ -194,11 +193,10 @@ class FlashJob:
                         "mid-write re-enumeration may resurrect the old "
                         "partitions and pop the format dialog", exc,
                     )
-                # STICKY-BINDING PURGE (field log 2026-06-12 #2, 0.2.1): the
-                # scrub alone was NOT enough — on REMOVABLE media a blank
-                # sector 0 still yields a whole-disk "superfloppy" RAW volume
-                # on re-enumeration, and a sticky MountedDevices binding
-                # re-letters it ("Format?" popped 42 s into the master write).
+                # STICKY-BINDING PURGE: the scrub alone is NOT enough — on
+                # REMOVABLE media a blank sector 0 still yields a whole-disk
+                # "superfloppy" RAW volume on re-enumeration, and a sticky
+                # MountedDevices binding can re-letter it mid-write.
                 # The target's old volumes were torn down by open_raw_device a
                 # moment ago, so their registry bindings are now "absent" and
                 # mountvol /R deletes them through the OS-sanctioned path.
@@ -216,7 +214,7 @@ class FlashJob:
                 # MID-FLASH LETTER WATCHDOG — belt-and-suspenders for whatever
                 # mechanism still letters the target while the device handle
                 # is open: poll COM-free every _WATCHDOG_POLL_S, strip + WARN
-                # (the warning is the forensic trail for the next field log).
+                # (the warning records the unexpected letter for diagnostics).
                 # Stopped in the inner finally, BEFORE the cancel-path exFAT
                 # restore (whose diskpart "assign" must not be raced) and
                 # before make_card_visible's deliberate letter attach.
@@ -299,8 +297,8 @@ class FlashJob:
                                 # FAT and rewrite cmdline.txt with the `resize`
                                 # token (native partition grow) +
                                 # ds=nocloud;i=<unique> (activates cloud-init and
-                                # forces a per-flash re-provision). NO init= (dead
-                                # PID-1 hack), NO firstrun.sh. Golden untouched.
+                                # forces a per-flash re-provision). No init= and
+                                # no firstrun.sh are involved. Golden untouched.
                                 if not self.cancel_event.is_set():
                                     self._write_cloud_init(bp)
                                 if not self.cancel_event.is_set():
@@ -363,8 +361,8 @@ class FlashJob:
                         # Most SD-USB bridges reject IOCTL_STORAGE_EJECT_MEDIA.
                         # Without a letter re-attach the flashed card stays
                         # present but LETTERLESS — invisible in Explorer until
-                        # physical reinsertion (the "captive reader", audit
-                        # defect F1). Give the fresh FAT32 boot volume a letter
+                        # physical reinsertion (the "captive reader"). Give the
+                        # fresh FAT32 boot volume a letter
                         # so the operator sees a healthy card. Best-effort.
                         visible = getattr(
                             self.platform_io, "make_card_visible", None)
@@ -385,10 +383,10 @@ class FlashJob:
                     error=e,
                 )
             except Exception as e:
-                # Audit High #19: bare OSError / RuntimeError from Win32 paths
-                # used to escape the FlashJobResult contract and crash the
-                # worker thread. Wrap unexpected exceptions in a generic
-                # FlashError so callers still get a result.
+                # Wrap any unexpected exception (e.g. bare OSError /
+                # RuntimeError from Win32 paths) in a generic FlashError so
+                # callers always get a FlashJobResult instead of a crashed
+                # worker thread.
                 #
                 # Format manually so the surfaced UI message is English-only
                 # — ``{e!r}`` on an OSError expands to the OS-localized
@@ -532,8 +530,8 @@ class FlashJob:
     def _preflight(self) -> None:
         """Validate everything that can fail before any destructive device
         mutation, so a problem aborts with the card untouched (PreflightError,
-        sd_state="SAFE"). Account setup is FAT firstrun.sh, so the only check
-        is that the source image exists.
+        sd_state="SAFE"). Account setup happens later via the FAT cloud-init
+        bundle, so the only check here is that the source image exists.
         """
         from astromechos_imager.core.errors import DriveNotFoundError  # noqa: PLC0415
         if not self.image_path.is_file():
@@ -586,9 +584,8 @@ class FlashJob:
         )
 
 
-# NOTE (audit perfection pass): PairFlashJob/PairFlashResult (parallel
-# two-card flash) were purged. The GUI's Sequential Deployment Assistant
-# deliberately flashes ONE card per cycle; the pair path survived only in
-# the CLI and was an active trap — it never passed linux_account, so
-# pair-flashed cards shipped WITHOUT account provisioning.
+# PairFlashJob/PairFlashResult (parallel two-card flash) are intentionally
+# absent. The GUI's Sequential Deployment Assistant flashes ONE card per
+# cycle; a pair path must not be reintroduced, as it would bypass
+# linux_account and ship cards WITHOUT account provisioning.
 _PAIR_PURGED = True

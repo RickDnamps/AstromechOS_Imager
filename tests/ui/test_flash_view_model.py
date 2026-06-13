@@ -86,8 +86,8 @@ def test_cancel_sets_job_cancel_event(qtbot):
     vm.startWithJob(job)
     vm.cancel()
     assert job.cancel_event.is_set()
-    # Audit High #10/#14: cancel() now flips status immediately to
-    # "cancelling", and _on_finished routes to "cancelled" (not "error").
+    # cancel() flips status immediately to "cancelling"; _on_finished then
+    # routes to "cancelled" (not "error").
     assert vm.status in ("cancelling", "cancelled")
     # Drain the worker thread before teardown.
     deadline = time.time() + 5
@@ -113,9 +113,9 @@ def test_start_while_flashing_is_noop(qtbot):
 
 
 def test_slave_role_routes_to_slave_channel(qtbot):
-    """A slave-cycle job's progress must land on slaveProgress (the
-    role-aware routing regression: a hard-wired master channel left the
-    slave bar frozen at 0% over a healthy flash)."""
+    """A slave-cycle job's progress must land on slaveProgress; routing
+    must be role-aware so the slave bar is not left frozen at 0% over a
+    healthy flash."""
     vm = _make_vm(qtbot)
     job = FakeJob(role_value="slave")
     vm.startWithJob(job)
@@ -135,9 +135,9 @@ class _RaisingJob:
     ``except BaseException`` branch sets the shared cancel event before
     propagating the exception so the producer can unblock. Without the
     ``_user_cancelled`` flag this looks identical to a user cancel to
-    ``_on_finished`` — a regression there used to silently route real
-    failures to status="cancelled" (no QML rendering ⇒ UI reverts to
-    idle, WRITE button reappears, operator never sees the error).
+    ``_on_finished``, which would silently route real failures to
+    status="cancelled" (no QML rendering ⇒ UI reverts to idle, WRITE
+    button reappears, operator never sees the error).
     """
 
     def __init__(self):
@@ -152,7 +152,7 @@ class _RaisingJob:
 
 
 def test_write_failure_does_not_masquerade_as_cancel(qtbot):
-    """Regression: real flash failure must surface as 'error', not 'cancelled'.
+    """A real flash failure must surface as 'error', not 'cancelled'.
 
     The cancel event is shared between the user's cancel() path and
     DiskWriter's thread-coordination signal. Routing by event alone

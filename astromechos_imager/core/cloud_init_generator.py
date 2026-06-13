@@ -72,10 +72,10 @@ RESIZE_TOKEN = "resize"
 #: Marker file dropped after the bootcmd scrub finishes successfully. cloud-init
 #: ``cc_bootcmd`` runs ``per-always`` (every boot) — like ``cc_scripts_user``
 #: did for the old ``runcmd:`` block — so the guard is still required to make
-#: the wipe a once-per-Pi operation. We KEEP the historical filename
-#: ``runcmd_done`` (not ``bootcmd_done``) for backwards-compat with any
-#: in-flight Pi that already booted under the runcmd flow on 2026-06-05/06: an
-#: in-place upgrade must see the existing marker and stay no-op. The marker is
+#: the wipe a once-per-Pi operation. The filename ``runcmd_done`` (not
+#: ``bootcmd_done``) is kept for backwards-compat with any in-flight Pi that
+#: already booted under the older runcmd flow: an in-place upgrade must see the
+#: existing marker and stay no-op. The marker is
 #: created with ``&&`` inside the guard so it is set only after every scrub
 #: step succeeded; if anything inside fails, the marker is NOT set and bootcmd
 #: retries on the next boot. ``rm -f`` is idempotent so a retry is safe.
@@ -115,8 +115,7 @@ def _build_bootcmd_guard(username: str, profile_basenames: tuple[str, ...]) -> s
     runs EARLY enough (cloud-init-local stage, uptime ~7s) that it completes
     before NetworkManager starts.
 
-    Background (verified live 2026-06-06 via SD-USB autopsy): the original
-    ``runcmd:`` implementation ran inside ``cc_scripts_user`` during
+    The older ``runcmd:`` implementation ran inside ``cc_scripts_user`` during
     ``cloud-final.service`` at uptime ~22s — racy with firstboot and (because
     the AstromechOS sister fix added ``After=cloud-final.service`` to
     ``astromech-firstboot.service``) created a startup ordering cycle through
@@ -190,7 +189,7 @@ def generate_user_data(
     Wi-Fi, SSH keys, hostname, hotspot and role stay with the AstromechOS
     firstboot bundle (Invariant #2) and are intentionally NOT emitted here.
 
-    Role-aware ``bootcmd`` (since 2026-06-06): the Golden Image bakes stale
+    Role-aware ``bootcmd``: the Golden Image bakes stale
     NetworkManager profiles AND a stale ``~/.ssh/authorized_keys`` (carrying
     the previous master's ed25519 pubkey) into UID-1000's home. Both must be
     wiped at first boot so the AstromechOS firstboot bundle's per-deployment
@@ -219,8 +218,7 @@ def generate_user_data(
     boot 1, leaving the Pi unreachable. ``rm -f`` is idempotent so a
     marker-less retry on the next boot is safe.
 
-    Why bootcmd instead of runcmd (verified live 2026-06-06 via SD-USB
-    autopsy): the prior ``runcmd:`` implementation ran during
+    Why bootcmd instead of runcmd: the prior ``runcmd:`` implementation ran during
     ``cloud-final.service`` at uptime ~22s. The AstromechOS sister fix added
     ``After=cloud-final.service`` to ``astromech-firstboot.service``, but
     ``cloud-final.service`` itself declares ``After=multi-user.target`` and

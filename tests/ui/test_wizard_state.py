@@ -99,7 +99,7 @@ def test_signal_not_emitted_on_clamp(qtbot):
 
 
 # ---------------------------------------------------------------------------
-# Task 8.4 — image paths
+# Image paths
 # ---------------------------------------------------------------------------
 
 def test_master_image_path_setter(qtbot, tmp_path):
@@ -159,7 +159,7 @@ def test_valid_image_path_rejects_wrong_ext(qtbot, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Task 8.5 — drive ID assignment
+# Drive ID assignment
 # ---------------------------------------------------------------------------
 
 def test_drive_ids_default_to_minus_one(qtbot):
@@ -183,10 +183,7 @@ def test_same_drive_for_both_roles_accepted_sequential(qtbot):
     """Sequential Deployment Assistant: one SD card adapter is the
     standard hardware setup. The same physical drive id MUST be
     accepted for both master and slave (they are flashed in separate
-    cycles with resetForNextCycle clearing between them). The legacy
-    cross-role collision rejection was a BOTH-mode artefact and
-    surfaced as the opaque 'drive -1 (unplugged?)' Step 5 symptom
-    in the Phase A E2E audit (Bug #2)."""
+    cycles with resetForNextCycle clearing between them)."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     s.setSlaveDriveId(3)
@@ -261,11 +258,8 @@ def test_set_repo_url_emits(qtbot):
 
 
 
-# (reuseHotspot tests removed with the property — audit WP9.)
-
-
 # ---------------------------------------------------------------------------
-# Phase 8.10 — wifiSsid + wifiPsk properties
+# wifiSsid + wifiPsk properties
 # ---------------------------------------------------------------------------
 
 def test_wifi_ssid_default_empty(qtbot):
@@ -357,11 +351,11 @@ def test_set_wifi_psk_change_emits_new_value(qtbot):
 # ---------------------------------------------------------------------------
 
 def test_install_user_default_empty(qtbot):
-    """Hybrid migration: UI defaults are EMPTY; non-blocking fallback
-    to ``astromech`` lives in ``flash_view_model._build_flash_job``.
-    Keeping the wizard state empty lets the placeholder text in the
-    QML field render the default visibly without forcing a 'changed'
-    notification cascade on first paint."""
+    """UI defaults are EMPTY; the non-blocking fallback to ``astromech``
+    lives in ``flash_view_model._build_flash_job``. Keeping the wizard
+    state empty lets the placeholder text in the QML field render the
+    default visibly without forcing a 'changed' notification cascade on
+    first paint."""
     from astromechos_imager.ui.wizard_state import WizardState
     s = WizardState()
     assert s.installUser == ""

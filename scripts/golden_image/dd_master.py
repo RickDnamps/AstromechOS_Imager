@@ -3,9 +3,9 @@
 SSH to the master Pi (assumed already booted with the SSD attached via USB),
 mount the SSD, run pi_cleanup.sh, then DD /dev/mmcblk0 to the SSD-attached
 .img file. Auto-detects mmcblk0 size at runtime via blockdev --getsize64
-(anti-regression: works on any SD size).
+(works on any SD size).
 
-Anti-regression invariants (gravé dans le béton via marathon 2026-06-02→07):
+Invariants:
   - EXPECTED_SIZE is None at module top → auto-detected via blockdev
     (NEVER hardcode size; breaks the moment operator swaps SD card sizes)
   - DD uses stream=False (no live PTY) — avoids paramiko readline timeout
@@ -28,10 +28,9 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
                               write_through=True, line_buffering=True)
 
 MASTER_IP = "192.168.2.104"
-# Anti-regression 2026-06-08: parameterize password via env var. Different
-# Imager wizard sessions can bake different installPasswords, so hardcoding
-# any single value will break the next-cycle DD. Default kept for back-compat
-# with operators who don't set the env var.
+# Parameterize the password via env var. Different Imager wizard sessions can
+# bake different installPasswords, so hardcoding any single value will break
+# the next-cycle DD. The default is kept for operators who don't set the env var.
 PWD = os.environ.get("IMAGER_FLASH_PWD", "astropass123")
 LOCAL_CLEANUP = r"J:\R2-D2_Build\AstroMechOS_Imager\scripts\golden_image\pi_cleanup.sh"
 REMOTE_CLEANUP = "/tmp/pi_cleanup_patched.sh"
@@ -80,7 +79,7 @@ if not ssd_dev:
 print(f"  Detected SSD: /dev/{ssd_dev}", flush=True)
 SSD_PART = f"/dev/{ssd_dev}1"
 
-# A1. Auto-detect mmcblk0 EXACT size (anti-regression vs hardcoded)
+# A1. Auto-detect mmcblk0 EXACT size (never hardcode)
 _, out, _ = m.exec_command(
     f"echo {PWD} | sudo -S blockdev --getsize64 /dev/mmcblk0 2>&1", timeout=10)
 mmc_size_str = out.read().decode().strip().splitlines()[-1]

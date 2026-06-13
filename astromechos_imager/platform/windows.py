@@ -192,8 +192,7 @@ def _delete_mount_point(letter: str) -> bool:
     letter entirely from Mount Manager state — Windows can no longer
     re-mount the freshly-written partition under the same letter, so
     it cannot inject ``System Volume Information`` bytes during the
-    verify_readback window (audit Bug #0). Pattern borrowed from
-    rpi-imager's ``diskpart_util.cpp``.
+    verify_readback window.
 
     Returns True on success, False on failure (caller logs).
     """
@@ -227,8 +226,6 @@ def lock_and_dismount(letters: tuple[str, ...],
                       physical_drive_id: int | None = None) -> list[int]:
     r"""Dismount every volume on the target, then RELEASE — return ``[]``.
 
-    This restores the proven baseline recipe (commit 67138da) after the
-    held-lock experiment regressed real flashes into ERROR_ACCESS_DENIED.
     The write authorisation does NOT come from a held FSCTL_LOCK_VOLUME — it
     comes from (a) DISMOUNTING the volume so the shell drops it, (b)
     DeleteVolumeMountPointW removing the drive letter from Mount Manager, and
@@ -297,20 +294,19 @@ def lock_and_dismount(letters: tuple[str, ...],
             with contextlib.suppress(OSError):
                 _ctl(h, FSCTL_UNLOCK_VOLUME)
         finally:
-            # Never leak the volume handle, whatever raises above (audit B5):
-            # today _ctl only raises OSError, but a non-OSError (or an async
+            # Never leak the volume handle, whatever raises above: today _ctl
+            # only raises OSError, but a non-OSError (or an async
             # KeyboardInterrupt in CLI use) would otherwise skip the close.
             kernel32().CloseHandle(h)
         _log.info("  dismounted + released %s", open_path)
 
     # Remove the drive letter(s) from Mount Manager so the shell has no
-    # letter to render "Format K:?" against (baseline pop-up suppression).
+    # letter to render "Format K:?" against (pop-up suppression).
     #
-    # Bug fix 2026-06-11 (field: K: stayed visible through the whole Master
-    # flash): ``letters`` comes from the WMI scan and is STALE — the operator
-    # inserts the card AFTER the drive list was captured (wizard Step 4), so
-    # the live letter Windows just assigned is not in the list and was never
-    # deleted. Re-enumerate the letters LIVE from Mount Manager for this
+    # ``letters`` comes from the WMI scan and can be STALE — the operator may
+    # insert the card AFTER the drive list was captured (wizard Step 4), so
+    # the live letter Windows just assigned is not in the list and would never
+    # be deleted. Re-enumerate the letters LIVE from Mount Manager for this
     # physical disk and merge them with the caller's list before deleting.
     live_letters: list[str] = []
     if physical_drive_id is not None:
@@ -571,9 +567,9 @@ def _notify_shell_drive_removed(letter: str) -> None:
 
     DeleteVolumeMountPointW removes the Mount-Manager binding but never
     notifies the shell — Explorer keeps a stale drive icon that errors on
-    click ("captive reader", audit defect F3). Prefer the native DLL's
-    quiet dance; fall back to a direct SHChangeNotify so a missing
-    astro_flash.dll no longer degrades to a silent no-op.
+    click ("captive reader"). Prefer the native DLL's quiet dance; fall back
+    to a direct SHChangeNotify so a missing astro_flash.dll still notifies
+    the shell instead of degrading to a silent no-op.
     """
     try:
         from astromechos_imager.platform import native_shell_quiet  # noqa: PLC0415
@@ -630,14 +626,14 @@ def force_unmount_letter(letter: str) -> bool:
         finally:
             # The volume handle must never outlive this call — this runs on
             # the unsupervised letter-strip daemon threads and in the
-            # active-wait gate's hot loop (audit defect B5).
+            # active-wait gate's hot loop.
             kernel32().CloseHandle(h)
-    # CHECKED delete with retries (field log 2026-06-12): the scan-time
-    # strip races AutoPlay's probe of a freshly-inserted card, and a raw
-    # ctypes DeleteVolumeMountPointW failure is a silent FALSE return, not
-    # an exception — the old contextlib.suppress never noticed. A letter
-    # binding that survives here re-attaches on the next volume arrival
-    # (sticky-binding "Format?" pop-up risk), so failures must be loud.
+    # CHECKED delete with retries: the scan-time strip races AutoPlay's probe
+    # of a freshly-inserted card, and a raw ctypes DeleteVolumeMountPointW
+    # failure is a silent FALSE return, not an exception — a contextlib.suppress
+    # would never notice. A letter binding that survives here re-attaches on
+    # the next volume arrival (sticky-binding "Format?" pop-up risk), so
+    # failures must be loud.
     deleted = False
     for _attempt in range(3):
         if _delete_mount_point(letter):
@@ -808,7 +804,7 @@ def disk_ids_for_path(path: str) -> list[int]:
     Safety primitive for the flash preflight: the target disk must NEVER be
     the disk the source image lives on (the operator's USB SSD passes the
     removable-candidate filter — flashing it would destroy the very image
-    being written, audit defect C1). Best-effort: returns [] on any failure
+    being written). Best-effort: returns [] on any failure
     so the guard degrades open rather than blocking legitimate flashes.
     """
     try:
@@ -829,8 +825,8 @@ def make_card_visible(physical_drive_id: int, timeout_s: float = 10.0) -> bool:
 
     With automount disabled for the whole session and every letter binding
     purged during the flash, a successfully-flashed card ends up present but
-    LETTERLESS — invisible in Explorer until physically reinserted (audit
-    defect F1, the "captive reader"). Most SD-USB bridges also reject
+    LETTERLESS — invisible in Explorer until physically reinserted (the
+    "captive reader"). Most SD-USB bridges also reject
     IOCTL_STORAGE_EJECT_MEDIA, so eject can't save us. Re-attach a free
     letter to the card's parseable (FAT32 boot) volume instead; the ext4
     rootfs stays letterless, so no format pop-up can fire. Best-effort.
@@ -878,10 +874,10 @@ def restore_readable_exfat(physical_drive_id: int, timeout_s: float = 90.0) -> b
         # card, not one branded by this tool.
         'format fs=exfat quick label="NO NAME"',
         # "assign" is REQUIRED here: automount is disabled for the entire
-        # Imager session (session guard at app launch), so the old rationale
-        # — "Windows auto-mounts the fresh exFAT volume on its own" — no
-        # longer holds. Without it the recovered card stays letterless and
-        # invisible, and the operator concludes it is bricked (audit F2).
+        # Imager session (session guard at app launch), so Windows will NOT
+        # auto-mount the fresh exFAT volume on its own. Without it the
+        # recovered card stays letterless and invisible, and the operator
+        # concludes it is bricked.
         "assign",
         "exit",
         "",
@@ -1002,14 +998,14 @@ def finalize_eject(physical_drive_id: int) -> bool:
 
 
 def _automount_marker_path():
-    """Machine-wide crash marker location (audit defect A8).
+    """Machine-wide crash marker location.
 
     The automount setting is SYSTEM-WIDE (MountMgr registry), so the repair
-    record must be visible from EVERY account: with the old per-user
-    %LOCALAPPDATA% marker, an elevated run under a different account (UAC
-    over-the-shoulder) wrote the marker into the admin's profile and the
-    operator's next normal launch never saw it. %ProgramData% is readable
-    by everyone and writable by the elevated process we run as.
+    record must be visible from EVERY account: a per-user %LOCALAPPDATA%
+    marker written by an elevated run under a different account (UAC
+    over-the-shoulder) would land in the admin's profile and the operator's
+    next normal launch would never see it. %ProgramData% is readable by
+    everyone and writable by the elevated process we run as.
     """
     from pathlib import Path
     base = (os.environ.get("PROGRAMDATA")
@@ -1022,7 +1018,7 @@ def _automount_marker_path():
 
 
 def _legacy_marker_path():
-    """Pre-A8 per-user marker location — checked once for migration."""
+    """Legacy per-user marker location — checked once for migration."""
     from pathlib import Path
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or "."
     return Path(base) / "AstromechOS_Imager" / "automount_disabled.marker"
@@ -1105,10 +1101,9 @@ def enable_automount() -> bool:
 def purge_stale_mount_points() -> bool:
     r"""``mountvol /R`` — delete letter bindings of volumes ABSENT from the system.
 
-    Field log 2026-06-12 #2 (0.2.1, master card): a sticky
-    ``HKLM\SYSTEM\MountedDevices`` binding re-letters a volume the moment it
-    (re-)arrives, even with automount off and even after the on-disk
-    partition table was scrubbed (removable media exposes a whole-disk
+    A sticky ``HKLM\SYSTEM\MountedDevices`` binding re-letters a volume the
+    moment it (re-)arrives, even with automount off and even after the
+    on-disk partition table was scrubbed (removable media exposes a whole-disk
     "superfloppy" RAW volume when sector 0 is blank). The strip's
     ``DeleteVolumeMountPointW`` races AutoPlay and can silently leave the
     registry binding behind.
@@ -1117,9 +1112,8 @@ def purge_stale_mount_points() -> bool:
     target's volumes down: at that instant the card's old volumes are "no
     longer in the system", so ``mountvol /R`` deletes their registry
     bindings through the OS-sanctioned cleanup path (no direct registry
-    edit — a previous raw MountedDevices edit experiment re-triggered the
-    dialog). With the bindings gone AND automount off, a mid-write volume
-    arrival can never take a drive letter.
+    edit, which would re-trigger the dialog). With the bindings gone AND
+    automount off, a mid-write volume arrival can never take a drive letter.
 
     Side effect: stale bindings of OTHER absent devices (long-unplugged
     USB sticks) are purged too — they simply get a fresh letter on next
@@ -1134,7 +1128,7 @@ def purge_stale_mount_points() -> bool:
 def restore_automount_if_crashed() -> None:
     """If a previous run died with automount disabled (marker present), restore.
 
-    Also honours the pre-A8 per-user marker location so a machine repaired
+    Also honours the legacy per-user marker location so a machine repaired
     by an older build's crash is still healed once, then migrates cleanly.
     """
     try:
@@ -1197,9 +1191,9 @@ class _Win32RawDevice:
         _seek(h, offset)
         # NO_BUFFERING requires a sector/page-aligned destination buffer.
         # A misaligned buffer can return stale bridge-cached bytes right
-        # after a multi-GB write (the deterministic verify_readback bug).
-        # rpi-imager uses qMallocAligned(size, 4096) (downloadthread.cpp:1882);
-        # over-allocate and read into the 4096-aligned interior.
+        # after a multi-GB write, corrupting the verify readback. Mirror
+        # rpi-imager's qMallocAligned(size, 4096): over-allocate and read
+        # into the 4096-aligned interior.
         align = 4096
         backing = (ctypes.c_char * (length + align))()
         aligned = (ctypes.addressof(backing) + align - 1) & ~(align - 1)
@@ -1427,7 +1421,7 @@ class WindowsPlatformIO:
     def attach_letter_to_unmounted_volume(
         self, letter: str, physical_drive_id: int, timeout_s: float = 15.0,
     ) -> bool:
-        """Re-attach the original drive letter after the Bug #0 dismount dance.
+        """Re-attach the original drive letter after the dismount dance.
 
         Safety: filters letterless volumes by physical drive id so we never
         attach the operator's letter to a Windows Recovery partition or any

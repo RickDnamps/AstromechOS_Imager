@@ -31,7 +31,7 @@ from astromechos_imager.ui.app import build_app  # noqa: E402
 OUT = Path(__file__).resolve().parents[1] / "screenshots" / "e2e_audit"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# Synthetic test credentials per Eric's brief
+# Synthetic test credentials
 SYNTH = {
     "linux_user": "testuser",
     "linux_pwd":  "TestPassword456",
@@ -107,8 +107,7 @@ def main() -> int:
     state.setSlaveImagePath(str(SLAVE_IMG))
     # Real platform_io target — drive 7 = I:. Sequential workflow uses
     # the SAME physical drive for both cycles (single SD adapter is the
-    # standard hardware setup); the legacy cross-role rejection has
-    # been removed.
+    # standard hardware setup); both roles may share one physical drive.
     state.setMasterDriveId(7)
     state.setSlaveDriveId(7)
 

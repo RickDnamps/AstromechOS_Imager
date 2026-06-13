@@ -21,9 +21,9 @@ Rectangle {
     // block during "checking" so the operator can't skip ahead while
     // the async role-marker read is still in flight — otherwise a
     // mismatch verdict that lands after the wizard has already moved
-    // on never gets surfaced (operator-reported regression). The
-    // "unknown_marker_absent" state remains a soft pass because the
-    // FlashJob self-validates before writing the trigger.
+    // on would never get surfaced. The "unknown_marker_absent" state
+    // remains a soft pass because the FlashJob self-validates before
+    // writing the trigger.
     readonly property var hardBlockStates: ["mismatch", "check_failed"]
     readonly property bool masterRoleBlocks: hardBlockStates.indexOf(wizardState.masterImageRoleStatus) >= 0
     readonly property bool slaveRoleBlocks:  hardBlockStates.indexOf(wizardState.slaveImageRoleStatus)  >= 0
@@ -47,17 +47,12 @@ Rectangle {
     //
     // The badge reads ``status`` and ``filenameHint`` DIRECTLY from
     // ``wizardState`` via declarative bindings keyed off ``isMaster``.
-    // The earlier imperative pattern (Loader.onLoaded { item.status = … }
-    // + a Connections block that updated parent.item.status) had a
-    // race: the validator emits ``"checking"`` synchronously and
-    // ``"ok"`` from a daemon thread BEFORE the Loader finishes
-    // instantiating the badge, so the Connections handlers ran with
-    // ``parent.item === null`` and silently dropped both updates. The
-    // operator then saw an EMPTY badge until Back+Next forced a
-    // re-instantiation that picked up the now-current status.
-    // Declarative bindings on wizardState properties dodge the race
-    // entirely — Qt re-evaluates the moment the property changes,
-    // regardless of when the badge was created.
+    // Declarative bindings dodge the instantiation race that an imperative
+    // assignment pattern would hit: the validator can emit ``"checking"``
+    // synchronously and ``"ok"`` from a daemon thread before the Loader
+    // finishes instantiating the badge. Qt re-evaluates the bindings the
+    // moment the property changes, regardless of when the badge was created,
+    // so no update is ever dropped.
     Component {
         id: roleBadge
         RowLayout {
@@ -72,10 +67,10 @@ Rectangle {
                 isMaster ? wizardState.masterFilenameHint
                          : wizardState.slaveFilenameHint
 
-            // Audit High #26 + Low #43: status dot uses theme tokens
-            // (WCAG-compliant on both dark and light cards) and the
-            // pulse animation restores opacity=1 on stop, so the badge
-            // can never freeze mid-fade after status leaves "checking".
+            // Status dot uses theme tokens (WCAG-compliant on both dark and
+            // light cards) and the pulse animation restores opacity=1 on
+            // stop, so the badge can never freeze mid-fade after status
+            // leaves "checking".
             Rectangle {
                 id: statusDot
                 width: 8; height: 8; radius: 4

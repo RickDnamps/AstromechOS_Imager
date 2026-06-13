@@ -1,4 +1,4 @@
-"""WP3 - the 2 s UI poll never touches drive letters (audit defect A1).
+"""The 2 s UI poll never touches drive letters.
 
 The per-disk ASSOCIATORS letter query materialises Win32_LogicalDisk inside
 WmiPrvSE - out of our process, beyond SetErrorMode - and touching a lettered

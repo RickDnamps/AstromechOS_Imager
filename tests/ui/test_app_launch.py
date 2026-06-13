@@ -18,7 +18,7 @@ class _FakePlatformIO:
 
 
 def _fake_win():
-    """WP8 fake of the platform.windows surface build_app() consumes.
+    """Fake of the platform.windows surface build_app() consumes.
 
     Records every call so tests can assert the seam is actually used —
     and the conftest sentinel guarantees no real mountvol ever runs.
@@ -62,10 +62,10 @@ def test_build_app_returns_app_engine_and_state(qtbot):
 
 
 def test_build_app_uses_injected_seam_not_real_platform(qtbot):
-    """The session guard must run through the injected surface (WP8/A7).
+    """The session guard must run through the injected surface.
 
-    Arming is asynchronous since A6 (background thread) — wait for the
-    worker to report through the fake before asserting.
+    Arming is asynchronous (background thread) — wait for the worker to
+    report through the fake before asserting.
     """
     app, engine, state, fake = _build(qtbot)
     qtbot.waitUntil(lambda: "disable" in fake.calls, timeout=3000)
@@ -73,7 +73,7 @@ def test_build_app_uses_injected_seam_not_real_platform(qtbot):
 
 
 def test_system_status_context_property(qtbot):
-    """QML reads systemStatus.automountDefenseActive live (A6)."""
+    """QML reads systemStatus.automountDefenseActive live."""
     from astromechos_imager.ui.system_status import SystemStatus
     app, engine, state, fake = _build(qtbot)
     status = engine.rootContext().contextProperty("systemStatus")

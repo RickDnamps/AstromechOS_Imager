@@ -19,12 +19,12 @@ Rectangle {
     id: root
     color: theme.colors.colorBg
 
-    // Live count from the C++ model — the hidden ListView pattern was
-    // dropped because Qt 6 does not instantiate a delegate with
-    // width=0/height=0/visible=false, so the delegate's Component.onCompleted
-    // never fired and the firstDrive* properties stayed at their defaults
-    // even when a card was plugged in. DriveListModel now exposes a `count`
-    // Property + dedicated firstDrive* Properties for direct binding.
+    // Live count from the C++ model via direct Properties. A hidden-ListView
+    // capture pattern can't be used here: Qt 6 does not instantiate a
+    // delegate with width=0/height=0/visible=false, so the delegate's
+    // Component.onCompleted never fires and the captured values stay at their
+    // defaults even when a card is plugged in. DriveListModel exposes a
+    // `count` Property + dedicated firstDrive* Properties for direct binding.
     readonly property int driveCount: driveListModel ? driveListModel.count : 0
     readonly property bool hasOneCard: driveCount === 1
     readonly property bool tooManyCards: driveCount >= 2
@@ -45,24 +45,32 @@ Rectangle {
 
     // Read-only bindings to the live drive model — these track the model
     // automatically and stay correct when a card is inserted/removed
-    // mid-step, which the old hidden-ListView capture pattern did not.
+    // mid-step.
     readonly property int    firstDriveId:      driveListModel ? driveListModel.firstDriveId      : -1
     readonly property string firstDriveLetters: driveListModel ? driveListModel.firstDriveLetters : ""
     readonly property string firstDriveModel:   driveListModel ? driveListModel.firstDriveModel   : ""
     readonly property string firstDriveSize:    driveListModel ? driveListModel.firstDriveSize    : ""
     // USB FIXED media (external SSD/HDD — e.g. the operator's image-source
-    // drive) — eligible to LIST but never auto-selected (audit defect C1).
+    // drive) — eligible to LIST but never auto-selected.
     readonly property bool   firstDriveSuspect: driveListModel
         && driveListModel.firstDriveSuspect !== undefined
         ? driveListModel.firstDriveSuspect : false
 
     // The drive id currently held by WizardState for the imposed role —
     // the NEXT gate requires it to match the LIVE first drive, so a card
-    // swap (pull A, insert B) can never flash a stale id (audit defect C3).
+    // swap (pull A, insert B) can never flash a stale id.
     readonly property int selectedDriveId:
         wizardState.currentRole === "master" ? wizardState.masterDriveId
         : wizardState.currentRole === "slave" ? wizardState.slaveDriveId
         : -1
+
+    // True once a single live card is detected and its id matches the one
+    // armed on the wizard state — a card swap leaves the stale id behind and
+    // re-arms this to false. Gates both the WRITE button and the inline
+    // confirm block (SHA toggle + erase warning).
+    readonly property bool cardArmed: hasOneCard
+        && selectedDriveId !== -1
+        && selectedDriveId === firstDriveId
 
     function _assignRole(role) {
         wizardState.setCurrentRole(role)
@@ -77,9 +85,9 @@ Rectangle {
     // The role is imposed (master first, then slave), so auto-SELECT it — the
     // operator just hits NEXT. The opposite card is disabled + dimmed. Re-runs
     // when the card is inserted after the step loads AND when the single
-    // drive's id changes (card swap) — the old role-only guard left a stale
-    // drive id behind a swapped card (audit defect C3). Suspect FIXED disks
-    // are never auto-selected; the operator must click the explicit override.
+    // drive's id changes (card swap), so a swapped card never leaves a stale
+    // drive id armed. Suspect FIXED disks are never auto-selected; the
+    // operator must click the explicit override.
     function _autoSelectImposed() {
         if (!hasOneCard || imposedRole === "" || firstDriveSuspect) return
         if (wizardState.currentRole !== imposedRole
@@ -196,11 +204,11 @@ Rectangle {
             }
 
             // Suspect USB FIXED disk — looks like an external SSD/HDD, not
-            // an SD card (audit defect C1: the operator's 256 GB image-source
-            // SSD passes the eligibility filter). Never auto-selected; the
-            // operator must explicitly override. Some SD readers behind
-            // USB-SATA bridges legitimately report "Fixed", hence the
-            // override instead of a hard block.
+            // an SD card (e.g. a large image-source SSD that passes the
+            // eligibility filter). Never auto-selected; the operator must
+            // explicitly override. Some SD readers behind USB-SATA bridges
+            // legitimately report "Fixed", hence the override instead of a
+            // hard block.
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: 12
@@ -325,9 +333,9 @@ Rectangle {
 
                     // MASTER card
                     Rectangle {
-                        // Audit bug H2: a completed role card is
-                        // visually de-emphasised and the MouseArea is
-                        // disabled so the operator can't re-flash it.
+                        // A completed role card is visually de-emphasised and
+                        // its MouseArea is disabled so the operator can't
+                        // re-flash it.
                         property bool masterDone: wizardState.completedRoles.indexOf("master") >= 0
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
@@ -394,8 +402,8 @@ Rectangle {
                         MouseArea {
                             anchors.fill: parent
                             // Selectable ONLY when MASTER is the imposed role
-                            // for this card (covers Audit bug H2: a done role
-                            // is never the imposed one, so it stays disabled).
+                            // for this card. A completed role is never the
+                            // imposed one, so it stays disabled.
                             enabled: root.imposedRole === "master"
                             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: root._assignRole("master")
@@ -404,7 +412,8 @@ Rectangle {
 
                     // SLAVE card
                     Rectangle {
-                        // Audit bug H2: parallel treatment with MASTER.
+                        // Parallel treatment with MASTER: a completed role
+                        // card is de-emphasised and its MouseArea disabled.
                         property bool slaveDone: wizardState.completedRoles.indexOf("slave") >= 0
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
@@ -497,9 +506,66 @@ Rectangle {
                 Item { Layout.fillHeight: true }
             }
 
-            // (No hidden ListView here — DriveListModel exposes count +
-            // firstDrive* Properties directly. See the readonly bindings
-            // at the top of this file.)
+            // DriveListModel exposes count + firstDrive* Properties
+            // directly. See the readonly bindings at the top of this file.
+        }
+
+        // ── Inline confirm controls (SHA toggle + erase warning) ──────
+        // The integrity toggle and destructive-write warning sit beside the
+        // card pick so WRITE is reachable without an extra screen. Shown
+        // only once a valid target card is armed.
+        ColumnLayout {
+            Layout.fillWidth: true
+            visible: root.cardArmed
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+                Rectangle {
+                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                    radius: 4
+                    color: wizardState.verifyIntegrity ? theme.colors.colorAccent : "transparent"
+                    border.color: wizardState.verifyIntegrity ? theme.colors.colorAccent : theme.colors.colorBorderIdle
+                    border.width: 1
+                    Behavior on color        { ColorAnimation { duration: Theme.durFast } }
+                    Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
+                    Text {
+                        anchors.centerIn: parent; text: "✓"
+                        color: theme.colors.colorTextOnAccent
+                        font.family: Theme.fontTitle; font.pixelSize: 12; font.bold: true
+                        visible: wizardState.verifyIntegrity
+                    }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: wizardState.setVerifyIntegrity(!wizardState.verifyIntegrity)
+                    }
+                }
+                Text {
+                    text: "🛡 VERIFY IMAGE INTEGRITY (SHA-256) BEFORE FLASH"
+                    color: theme.colors.colorTextPrimary
+                    font.family: Theme.fontTitle; font.pixelSize: 11; font.bold: true; font.letterSpacing: 1.4
+                    Layout.fillWidth: true
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: wizardState.setVerifyIntegrity(!wizardState.verifyIntegrity)
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 8
+                Text {
+                    text: "⚠"; color: theme.colors.colorBorderWarn
+                    font.family: Theme.fontTitle; font.pixelSize: 14
+                }
+                Text {
+                    text: "ALL DATA ON THE TARGET DRIVE WILL BE ERASED."
+                    color: theme.colors.colorBorderWarn
+                    font.family: Theme.fontTitle; font.pixelSize: 11
+                    font.bold: true; font.letterSpacing: 1.4
+                }
+            }
         }
     }
 
@@ -510,21 +576,101 @@ Rectangle {
         spacing: 10
         AstroButton { text: "← BACK"; variant: "secondary"; onClicked: wizardState.back() }
         AstroButton {
-            text: "NEXT →"
-            variant: "primary"
+            text: "⚡ WRITE"
+            variant: "danger"
+            horizontalPadding: 28
             // selectedDriveId must equal the LIVE first drive id: a card
-            // swap (pull A, insert B) used to leave the stale id A armed
-            // while the row displayed B (audit defect C3). Also blocks the
-            // un-overridden suspect-FIXED case (selectedDriveId stays -1).
-            enabled: hasOneCard
-                && selectedDriveId !== -1
-                && selectedDriveId === firstDriveId
-            onClicked: {
-                if (flashViewModel.status === "error") {
-                    flashViewModel.resetForNextCycle()
+            // swap (pull A, insert B) leaves the stale id A armed while the
+            // row displays B. Also blocks the un-overridden suspect-FIXED
+            // case (selectedDriveId stays -1).
+            enabled: root.cardArmed
+            onClicked: confirmDialog.open()
+        }
+    }
+
+    // ── Destructive-write confirmation ────────────────────────────────
+    // The operator confirms and launches the flash from the card-pick
+    // screen. On accept it kicks the flash worker and advances to the Ops
+    // progress screen.
+    Dialog {
+        id: confirmDialog
+        objectName: "confirmDialog"   // found by scripts/ui_tour.py for the screenshot
+        modal: true
+        anchors.centerIn: parent
+        width: 520
+        padding: 0
+        background: Rectangle {
+            radius: Theme.radiusCard
+            color: theme.colors.colorSurface
+            border.color: theme.colors.colorBorderError
+            border.width: 2
+        }
+        header: Rectangle {
+            implicitHeight: 60
+            color: Qt.rgba(theme.colors.colorBorderError.r,
+                           theme.colors.colorBorderError.g,
+                           theme.colors.colorBorderError.b, 0.07)
+            radius: Theme.radiusCard
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 24; anchors.rightMargin: 24
+                spacing: 12
+                Text {
+                    text: "⚠"; color: theme.colors.colorBorderError
+                    font.family: Theme.fontTitle; font.pixelSize: 20; font.bold: true
                 }
-                wizardState.next()
+                Text {
+                    Layout.fillWidth: true
+                    text: "ERASE TARGET DRIVE?"
+                    color: theme.colors.colorBorderError
+                    font.family: Theme.fontTitle; font.pixelSize: 14
+                    font.bold: true; font.letterSpacing: 1.6
+                }
             }
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                height: 1; color: theme.colors.colorDivider
+            }
+        }
+        contentItem: Text {
+            text: wizardState.verifyIntegrity
+                ? "Image checksum will be verified, then the selected target SD card will be ERASED and rewritten. This action is irreversible — confirm the drive letter above matches the card you intend to flash."
+                : "The selected target SD card will be ERASED and rewritten with the chosen image. This action is irreversible — confirm the drive letter above matches the card you intend to flash."
+            color: theme.colors.colorTextPrimary
+            font.family: Theme.fontBody; font.pixelSize: 13
+            wrapMode: Text.Wrap; lineHeight: 1.35
+            leftPadding: 24; rightPadding: 24
+            topPadding: 22; bottomPadding: 22
+        }
+        footer: Rectangle {
+            implicitHeight: 72
+            color: "transparent"
+            Rectangle {
+                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                height: 1; color: theme.colors.colorDivider
+            }
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 20; anchors.rightMargin: 20
+                anchors.topMargin: 14; anchors.bottomMargin: 14
+                spacing: 12
+                Item { Layout.fillWidth: true }
+                AstroButton {
+                    text: "CANCEL"; variant: "secondary"
+                    onClicked: confirmDialog.reject()
+                }
+                AstroButton {
+                    text: "⚡ ERASE & WRITE"; variant: "danger"
+                    horizontalPadding: 24; Layout.minimumWidth: 180
+                    onClicked: confirmDialog.accept()
+                }
+            }
+        }
+        onAccepted: {
+            if (flashViewModel.status === "error")
+                flashViewModel.resetForNextCycle()
+            flashViewModel.startFromWizard()
+            wizardState.next()
         }
     }
 }

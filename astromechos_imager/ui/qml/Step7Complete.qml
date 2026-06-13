@@ -8,31 +8,28 @@ Rectangle {
     color: theme.colors.colorBg
 
     // Sequential Deployment Assistant: derived from the role-completion
-    // history rather than the deleted mode picker.
+    // history.
     property bool needMaster: wizardState.completedRoles.indexOf("master") >= 0
     property bool needSlave:  wizardState.completedRoles.indexOf("slave")  >= 0
     property bool bothDone:   needMaster && needSlave
 
-    // Audit bug C2: the next-steps list must reflect what was ACTUALLY
-    // completed. The old fixed list told the operator to "insert each
-    // card" even when only one role had been flashed.
+    // Next-steps list reflects what was actually flashed this session:
+    // the full two-card path versus the single-card (partial) path.
     property var nextStepsModel: {
         if (wizardState.completedRoles.length >= 2) {
             return [
-                "Eject both SD cards (auto-eject already attempted)",
-                "Insert each card into its Pi 4B (Master → dome, Slave → body)",
-                "Power on both Pis — first boot takes ~3 min, then the robot reboots itself",
-                "Join the robot's Wi-Fi: look for a network named \"Astromech-XXXX\". The 4-char suffix is taken from the Master Pi's CPU ID, so it WILL differ from the bootstrap name shown earlier here. Sign in with the Private Robot Hotspot Password you set in this Imager.",
-                "Open http://192.168.4.1:5000 in a browser → the AstromechOS dashboard. Its admin actions use the dashboard's OWN password (default \"astro\"), which you change inside the dashboard — the Imager never sets it.",
+                "Insert each card into its Pi 4B (Master → dome, Slave → body).",
+                "Power on both — first boot takes ~3 min, then a self-reboot.",
+                "Join Wi-Fi \"Astromech-XXXX\" (suffix from the Master's CPU ID) with your hotspot password.",
+                "Open http://192.168.4.1:5000 for the dashboard (default admin password \"astro\").",
             ]
         }
         var role = wizardState.completedRoles[0] || "master"
-        var roleName = role === "master" ? "MASTER (dome Pi)" : "SLAVE (body Pi)"
-        var missing  = role === "master" ? "SLAVE (body)"     : "MASTER (dome)"
+        var roleName = role === "master" ? "MASTER (dome)" : "SLAVE (body)"
+        var missing  = role === "master" ? "SLAVE (body)"  : "MASTER (dome)"
         return [
-            "Eject the SD card (auto-eject already attempted)",
-            "Insert the " + roleName + " card into its Pi 4B",
-            "Re-run the Imager to flash the " + missing + " card when ready",
+            "Insert the " + roleName + " card into its Pi 4B.",
+            "Re-run the Imager to flash the " + missing + " card when ready.",
         ]
     }
 
@@ -79,9 +76,8 @@ Rectangle {
                 spacing: 2
                 Layout.alignment: Qt.AlignVCenter
                 Text {
-                    // Audit bug C2: distinguish partial vs full
-                    // deployment so the operator isn't told the
-                    // session is fully done after only one role.
+                    // Distinguish partial vs full deployment so the operator
+                    // isn't told the session is fully done after only one role.
                     text: root.bothDone ? "DEPLOYMENT COMPLETE" : "PARTIAL DEPLOYMENT"
                     color: theme.colors.colorTextPrimary
                     font.family: Theme.fontTitle
@@ -168,25 +164,22 @@ Rectangle {
         }
 
         Item { Layout.fillHeight: true }
-    }
 
-    // Diagnostic export result — shows the ZIP path (or the error) after
-    // the operator clicks EXPORT DIAGNOSTIC.
-    Text {
-        id: diagResult
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.margins: 24
-        anchors.bottomMargin: 60
-        width: parent.width - 48
-        text: ""
-        visible: text !== ""
-        color: text.indexOf("ERROR") === 0
-            ? theme.colors.colorBorderError
-            : theme.colors.colorTextSecondary
-        font.family: Theme.fontBody
-        font.pixelSize: 11
-        elide: Text.ElideMiddle
+        // Diagnostic export result (ZIP path or error). Kept in the layout
+        // flow above the reserved action-bar zone so it never overlaps the
+        // buttons.
+        Text {
+            id: diagResult
+            Layout.fillWidth: true
+            text: ""
+            visible: text !== ""
+            color: text.indexOf("ERROR") === 0
+                ? theme.colors.colorBorderError
+                : theme.colors.colorTextSecondary
+            font.family: Theme.fontBody
+            font.pixelSize: 11
+            elide: Text.ElideMiddle
+        }
     }
 
     Row {
@@ -207,11 +200,10 @@ Rectangle {
             text: "FLASH ANOTHER"
             variant: "secondary"
             onClicked: {
-                // Audit bugs C3 + H1: a fresh sequential session must
-                // wipe completedRoles AND mint a fresh bootstrap SSID.
-                // wizardState.endSession() does both (regenerates
-                // hotspotSsid) so the next pair never reuses the previous
-                // robot's wlan0 rendezvous.
+                // A fresh sequential session must wipe completedRoles AND
+                // mint a fresh bootstrap SSID. wizardState.endSession() does
+                // both (it regenerates hotspotSsid) so the next pair never
+                // reuses the previous robot's wlan0 rendezvous.
                 wizardState.endSession()
                 wizardState.goto(1)
             }

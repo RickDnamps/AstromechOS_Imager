@@ -1,10 +1,10 @@
-"""WP4 - no more captive reader: every exit path leaves the card visible.
+"""No captive reader: every exit path leaves the card visible.
 
-Pins the three F-defects from the audit: (F1) flash success re-attaches a
-drive letter when eject is rejected by the SD bridge, (F2) the cancel/failure
-exFAT recovery script carries "assign" (automount is off for the whole
-session - nothing else will ever give the recovered card a letter), (F3)
-force_unmount_letter notifies the shell so Explorer drops the dead icon.
+Three behaviours are pinned: flash success re-attaches a drive letter when
+eject is rejected by the SD bridge; the cancel/failure exFAT recovery script
+carries "assign" (automount is off for the whole session - nothing else will
+ever give the recovered card a letter); force_unmount_letter notifies the
+shell so Explorer drops the dead icon.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if sys.platform != "win32":  # pragma: no cover
 
 from astromechos_imager.platform import windows as W
 
-# ── F2: exFAT recovery script must assign a letter ──────────────────────────
+# ── exFAT recovery script must assign a letter ──────────────────────────────
 
 def test_restore_exfat_script_assigns_letter(monkeypatch, tmp_path):
     captured = {}
@@ -46,7 +46,7 @@ def test_restore_exfat_script_assigns_letter(monkeypatch, tmp_path):
         'format fs=exfat quick label="NO NAME"')
 
 
-# ── F1: success path re-attaches a letter when eject fails ───────────────────
+# ── success path re-attaches a letter when eject fails ───────────────────────
 
 def test_first_free_letter_skips_used(monkeypatch):
     # Bitmask with A,B,C,D,E used -> first free is F
@@ -116,7 +116,7 @@ def test_flashjob_success_calls_make_card_visible_when_eject_fails():
     assert pio.visible_called_with == 7
 
 
-# ── F3: force_unmount_letter notifies the shell ──────────────────────────────
+# ── force_unmount_letter notifies the shell ──────────────────────────────────
 
 def test_force_unmount_notifies_shell(monkeypatch):
     notified = []

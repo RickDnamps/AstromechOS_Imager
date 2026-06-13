@@ -1,4 +1,4 @@
-"""Step 7 Complete — partial vs full deployment recap (audit bug C2).
+"""Step 7 Complete — partial vs full deployment recap.
 
 The Step 7 QML screen builds its "next steps" list and its headline
 text from ``wizardState.completedRoles``. Pure-Python tests can't

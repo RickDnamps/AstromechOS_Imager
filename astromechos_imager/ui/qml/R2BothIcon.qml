@@ -13,8 +13,8 @@ Shape {
     layer.enabled: true
     layer.samples: 4
 
-    // Audit Medium #37: bind to the live theme accent so the silhouette
-    // stays in the R2 family in both dark and light modes.
+    // Bind to the live theme accent so the silhouette stays in the R2
+    // family in both dark and light modes.
     property color strokeColor: theme.colors.colorAccent
     property real  strokeWidth: 2.0
 

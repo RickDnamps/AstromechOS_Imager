@@ -11,8 +11,7 @@ The progress-bar / flashing state isn't captured here because the safe way
 to drive it from outside QML is to inject Q_PROPERTY values directly into
 the FlashViewModel, and the production app emits state via Signals from a
 worker thread — racing those from a single thread isn't reliable in a
-synthetic harness. The progress bar in the real Slave run rendered without
-visible glitches per the run's CSV (200+ events delivered without gaps).
+synthetic harness.
 
 Output:
     screenshots/e2e_audit/ux/<filename>.png

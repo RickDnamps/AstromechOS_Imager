@@ -68,9 +68,8 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
             onClicked: {
-                // Step 1 is a pure splash now — SSID is minted by
-                // Step 2 Config NEXT (after the operator-typed PSK is
-                // validated). Audit bug C1.
+                // Step 1 is a pure splash — the bootstrap SSID is minted at
+                // wizard-state init and shown read-only in Step 2 Config.
                 wizardState.next()
             }
         }

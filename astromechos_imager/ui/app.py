@@ -134,11 +134,10 @@ def build_app(
 ) -> tuple[QGuiApplication, QQmlApplicationEngine, WizardState]:
     """Construct the QApplication + QML engine + WizardState. Used by main() and tests.
 
-    ``platform_win`` is the WP8 test seam: the win32 surface (the
+    ``platform_win`` is the win32 test seam: the win32 surface (the
     ``platform.windows`` module by default). UI smoke tests inject a fake so
-    pytest NEVER runs real mountvol / touches the crash marker / queries WMI
-    — before the seam existed, every ``build_app()`` smoke test mutated the
-    developer machine's automount state (audit defect A7).
+    pytest NEVER runs real mountvol / touches the crash marker / queries WMI /
+    mutates the developer machine's automount state.
     """
     win = platform_win
     if win is None and sys.platform == "win32":
@@ -172,16 +171,14 @@ def build_app(
         # it now (crash-safe restore of the Windows auto-mount setting), then
         # immediately disable automount for THIS app session.
         #
-        # Bug fix 2026-06-11 (field: K: visible in Explorer + "Format?" popup
-        # while flashing the MASTER): FlashJob only disabled automount when the
-        # operator clicked Flash — but the wizard tells the operator to INSERT
-        # the cards earlier (Step 4), while automount was still ON. Windows
-        # assigned the letter (and persisted the volume↔letter binding in
-        # MountedDevices) at insertion, before any FlashJob defense ran.
-        # Disabling at app launch closes that window: a card inserted at ANY
-        # point of the wizard never gets a drive letter, so Explorer has
-        # nothing to render, probe, or pop a format dialog against.
-        # Restore points unchanged: aboutToQuit below + the crash marker.
+        # Automount is disabled at app launch (not at Flash time) because the
+        # wizard tells the operator to INSERT the cards earlier, at Step 4.
+        # If automount were still ON then, Windows would assign the letter
+        # (and persist the volume↔letter binding in MountedDevices) at
+        # insertion. Disabling at launch closes that window: a card inserted
+        # at ANY point of the wizard never gets a drive letter, so Explorer
+        # has nothing to render, probe, or pop a format dialog against.
+        # Restore points: aboutToQuit below + the crash marker.
         # The AutomountSessionGuard owns the {mutex, marker, automount}
         # triple: it claims the single-instance mutex FIRST, so a present
         # marker can only mean a genuinely crashed session (a second live
@@ -193,7 +190,7 @@ def build_app(
             _session_guard = AutomountSessionGuard(win=win)
             if not _session_guard.claim():
                 # Another live instance owns the automount session — touching
-                # it here would disarm that instance mid-flash (audit A4).
+                # it here would disarm that instance mid-flash.
                 # Native MessageBox: Qt does not exist yet at this point.
                 import ctypes
                 ctypes.windll.user32.MessageBoxW(
@@ -205,10 +202,9 @@ def build_app(
                 )
                 sys.exit(0)
             # Arming (the mountvol spawns) runs on a BACKGROUND thread after
-            # the Qt app exists — see _arm_worker below (audit A6: the old
-            # synchronous pre-Qt call could stall the window for the full
-            # subprocess timeouts). SystemStatus optimistically reports
-            # armed until the worker reports back.
+            # the Qt app exists — see _arm_worker below, so the subprocess
+            # timeouts can't stall the window. SystemStatus optimistically
+            # reports armed until the worker reports back.
         except SystemExit:
             raise
         except Exception:
@@ -239,8 +235,8 @@ def build_app(
     # "Format this disk?". This is the single normal-exit restore point; a
     # crash is covered by the marker file + the guard's repair on the next
     # launch. The guard also holds the named mutex the Inno Setup installer
-    # checks (AppMutex=Global\AstromechOS_Imager_AppMutex, Audit High #21) —
-    # stashing it on app keeps the handle alive for the process lifetime.
+    # checks (AppMutex=Global\AstromechOS_Imager_AppMutex) — stashing it on
+    # app keeps the handle alive for the process lifetime.
     if win is not None:
         if _session_guard is not None:
             app._session_guard = _session_guard
@@ -263,11 +259,10 @@ def build_app(
     if icon_path is not None and icon_path.is_file():
         app.setWindowIcon(QIcon(str(icon_path)))
     if getattr(sys, "frozen", False):
-        # Audit High #20: when the startup-log open above failed (disk full,
-        # ACL denied), sys.stderr stays None and an unconditional write here
-        # would raise AttributeError BEFORE the QML window appears —
-        # exactly the symptom the log was meant to diagnose. Guard via the
-        # same fallback pattern as _qt_message_handler.
+        # When the startup-log open above failed (disk full, ACL denied),
+        # sys.stderr stays None and an unconditional write here would raise
+        # AttributeError BEFORE the QML window appears. Guard via the same
+        # fallback pattern as _qt_message_handler.
         sink = sys.stderr if sys.stderr is not None else sys.__stderr__
         if sink is not None:
             sink.write(f"[boot] frozen={sys.frozen} MEIPASS={getattr(sys, '_MEIPASS', None)}\n")
@@ -277,8 +272,8 @@ def build_app(
     # Windows: detach every drive letter of a disk (COM-free, callable from
     # daemon threads). Used by the scan-time strip below — cards inserted
     # BEFORE launch keep their letters (automount-off only blocks NEW
-    # mounts). Selection itself is a pure state write since WP6; suspect
-    # FIXED disks (external SSDs) are never auto-touched.
+    # mounts). Selection itself is a pure state write; suspect FIXED disks
+    # (external SSDs) are never auto-touched.
     release_letters = None
     if win is not None:
         def release_letters(drive_id: int) -> None:
@@ -306,12 +301,12 @@ def build_app(
     from astromechos_imager import __version__ as _app_version
     ctx.setContextProperty("appVersion", _app_version)
 
-    # Arm the automount defense on a background thread (audit A6): the
-    # mountvol spawns can take seconds on a pathological system and used to
-    # run synchronously BEFORE Qt existed — dead air before any window. The
-    # QML banner tracks systemStatus.automountDefenseActive live; the
-    # scan-time letter strip re-runs after arming (see _bring_up_drive_model)
-    # to catch any card Windows managed to mount during the arming window.
+    # Arm the automount defense on a background thread: the mountvol spawns
+    # can take seconds on a pathological system, so running them off the main
+    # thread avoids dead air before any window. The QML banner tracks
+    # systemStatus.automountDefenseActive live; the scan-time letter strip
+    # re-runs after arming (see _bring_up_drive_model) to catch any card
+    # Windows managed to mount during the arming window.
     if _session_guard is not None:
         import threading
 
@@ -357,10 +352,10 @@ def build_app(
         from PySide6.QtCore import QTimer
 
         def _bring_up_drive_model() -> None:
-            # Audit Medium #36: log failures (don't silently swallow) so a
-            # blank Step 3 is distinguishable from "no card / WMI broken".
-            # setContextProperty on the already-declared key refreshes the
-            # QML bindings that reference driveListModel.
+            # Log failures (don't silently swallow) so a blank Step 3 is
+            # distinguishable from "no card / WMI broken". setContextProperty
+            # on the already-declared key refreshes the QML bindings that
+            # reference driveListModel.
             try:
                 from astromechos_imager.ui.drive_list_model import DriveListModel
                 drive_model = DriveListModel(win.WindowsPlatformIO())
@@ -373,7 +368,7 @@ def build_app(
                 # their letters (automount-off only blocks NEW mounts), and a
                 # crashed-session repair (mountvol /E) may have just remounted
                 # one — a lettered RAW/ext4 volume is what Explorer/WmiPrvSE
-                # probe and answer with "Format this disk?" (audit defect A1).
+                # probe and answer with "Format this disk?".
                 # USB FIXED disks (external SSDs) are never auto-touched.
                 # Win32 calls run on a daemon thread (COM-free helpers), and
                 # re-stripping an already-letterless disk is a cheap no-op.
@@ -400,7 +395,7 @@ def build_app(
 
                 _strip_candidate_letters()
                 drive_model.countChanged.connect(_strip_candidate_letters)
-                # Re-strip once the automount defense finishes arming (A6):
+                # Re-strip once the automount defense finishes arming:
                 # arming is async, so Windows may have auto-mounted a card
                 # during the arming window without changing the drive LIST
                 # (same disk, new letter) — countChanged would never fire.
@@ -421,7 +416,7 @@ def build_app(
                 # idle/done/error/cancelled.
                 def _sync_drive_polling() -> None:
                     try:
-                        # "cancelling" included (audit R2): cancel() flips the
+                        # "cancelling" is included because cancel() flips the
                         # status immediately while the worker is still running
                         # its cleanup (diskpart exFAT restore on a RAW disk) —
                         # resuming the WMI poll there races diskpart and can

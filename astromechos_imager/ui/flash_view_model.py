@@ -37,9 +37,8 @@ class _FlashWorker(QObject):
 
     progress* signals are (fraction 0..1, phase, throughput_bps); throughput is
     0.0 for non-bandwidth events so the bar hides the speed badge. The two
-    channels exist because the SEQUENTIAL workflow routes a single job's
-    progress to the bar matching its role (master cycle vs slave cycle) —
-    the old PairFlashJob dual-stream consumer was purged with the class.
+    channels exist because the sequential workflow routes a single job's
+    progress to the bar matching its role (master cycle vs slave cycle).
     """
     progressMaster = Signal(float, str, float)
     progressSlave = Signal(float, str, float)
@@ -87,13 +86,11 @@ class _FlashWorker(QObject):
         """A single FlashJob carries its own ``role`` — route its progress to
         the MATCHING channel.
 
-        Regression guard: this used to hard-emit ``progressMaster`` for every
-        single job. After Step5Flash started reading ``slaveProgress`` for the
-        slave cycle (role-aware sidecar fix), that mismatch left the slave
-        progress bar frozen at 0% while the write ran fine at full device
-        speed — operators read the frozen bar as a hang and cancelled a
-        healthy flash, and the cancel cleanup wiped the partial card. Routing
-        by role keeps worker channel == UI channel.
+        Step5Flash reads ``slaveProgress`` for a slave cycle and
+        ``masterProgress`` for a master cycle, so the worker MUST emit on the
+        channel matching the job's role. Routing by role keeps worker
+        channel == UI channel, so the progress bar tracks the live write
+        instead of freezing at 0%.
         """
         role = getattr(self._job, "role", None)
         return (role is Role.SLAVE) or (getattr(role, "value", role) == "slave")
@@ -148,9 +145,9 @@ class _HashWorker(QObject):
                 cancel_event=self._cancel,
             )
         except HashCancelled:
-            # Audit High #8 / #10: distinguish a user-initiated cancel from
-            # a sidecar mismatch. The orchestrator looks for the literal
-            # ``"CANCELLED"`` sentinel in the digest slot.
+            # Distinguish a user-initiated cancel from a sidecar mismatch.
+            # The orchestrator looks for the literal ``"CANCELLED"`` sentinel
+            # in the digest slot.
             self.finished.emit(self._role, "CANCELLED", False)
             return
         except Exception as exc:
@@ -325,10 +322,8 @@ class FlashViewModel(QObject):
         self._slave_hash_sidecar_match = None
         self._user_cancelled = False
         self._cancel_event.clear()
-        # Verify-phase plumbing (audit residual): the sidecar tuples and the
-        # pending job were the only fields this reset skipped — benign in the
-        # nominal flow (overwritten per role) but an asymmetry that could
-        # leak card 1's verify context into a hand-crafted card-2 path.
+        # Verify-phase plumbing: clear the sidecar tuples and the pending job
+        # so card 1's verify context can never leak into the next card.
         self._pending_verify_job = None
         self._pending_verify_roles = []
         self._master_sidecar = None
@@ -349,10 +344,9 @@ class FlashViewModel(QObject):
     def exportDiagnostic(self) -> str:
         """Write a redacted support bundle next to the operator's Downloads.
 
-        Surfaces the diagnostic feature that was fully written and tested
-        (logging_setup/diagnostic.py) but had no UI/CLI caller (audit WP9).
-        Returns the ZIP path on success, or an ``ERROR: …`` string the QML
-        label shows verbatim. PSKs/passwords are stripped by the redactor.
+        Builds the diagnostic ZIP via logging_setup/diagnostic.py. Returns
+        the ZIP path on success, or an ``ERROR: …`` string the QML label
+        shows verbatim. PSKs/passwords are stripped by the redactor.
         """
         import os
         import time as _time
@@ -398,10 +392,10 @@ class FlashViewModel(QObject):
             return
         self._cancel_event.clear()
         self._user_cancelled = False
-        # Audit High #9: route the view-model's cancel event into the job so
-        # cancel() flips the same flag that DiskWriter / verify_readback
-        # consult. Without this, the job has its own internal Event that
-        # cancel() never reaches and the destructive write proceeds.
+        # Route the view-model's cancel event into the job so cancel() flips
+        # the same flag that DiskWriter / verify_readback consult. Without
+        # this, the job has its own internal Event that cancel() never reaches
+        # and the destructive write proceeds.
         if hasattr(job_obj, "cancel_event"):
             # Frozen dataclass instance — best-effort.
             with contextlib.suppress(AttributeError):
@@ -430,7 +424,7 @@ class FlashViewModel(QObject):
         Build-time failures (e.g. drive removed since Step 3, keygen
         I/O error, missing image file) surface as an ``error`` status
         with the exception message — the WRITE button never becomes a
-        silent no-op (Audit High #18).
+        silent no-op.
         """
         try:
             job = _build_flash_job(self._wizard_state)
@@ -487,10 +481,9 @@ class FlashViewModel(QObject):
         ):
             sig.emit()
 
-        # Sequential workflow flashes ONE role per cycle — derive the
-        # queue from wizard_state.currentRole rather than the deleted
-        # mode picker. Empty role is a guard against test entry that
-        # skips Screen 4; defaults to "master" so something hashes.
+        # Sequential workflow flashes ONE role per cycle — derive the queue
+        # from wizard_state.currentRole. Empty role is a guard against test
+        # entry that skips Screen 4; defaults to "master" so something hashes.
         current_role = getattr(self._wizard_state, "currentRole", "") or "master"
         queue: list[str] = [current_role]
         self._pending_verify_job = job
@@ -563,10 +556,10 @@ class FlashViewModel(QObject):
             self._hash_worker = None
 
         if digest == "CANCELLED":
-            # Audit High #8 / #10: user-initiated cancel during hashing.
-            # Distinct from a sidecar mismatch — go to a clean "cancelled"
-            # state rather than telling the operator their file looks
-            # corrupted (which is what _fail_verify would say).
+            # User-initiated cancel during hashing. Distinct from a sidecar
+            # mismatch — go to a clean "cancelled" state rather than telling
+            # the operator their file looks corrupted (which is what
+            # _fail_verify would say).
             self._pending_verify_job = None
             self._pending_verify_roles = []
             self._status = "cancelled"
@@ -618,7 +611,7 @@ class FlashViewModel(QObject):
             else:
                 # Defensive: match==False should imply sidecar was found.
                 # If we somehow got here without a cached sidecar tuple,
-                # fall back to the legacy message rather than crash.
+                # fall back to the simpler message rather than crash.
                 self._fail_verify(
                     f"SHA-256 mismatch on {role} image — file looks corrupted"
                 )
@@ -647,13 +640,12 @@ class FlashViewModel(QObject):
     ) -> None:
         """Surface a SHA-256 mismatch with operator-actionable detail.
 
-        The legacy message ("file looks corrupted") routinely sent
-        operators down the wrong rabbit hole — blaming the
-        customization step, the SD card, or the writer when the actual
-        cause was a stale ``.sha256`` sidecar that no longer matched a
-        regenerated golden image. This helper names the sidecar file,
-        shows both digests (truncated to 16 chars for readability), and
-        gives the operator two concrete remediations:
+        A bare "file looks corrupted" message sends operators down the
+        wrong path — blaming the customization step, the SD card, or the
+        writer when the actual cause is usually a stale ``.sha256`` sidecar
+        that no longer matches a regenerated golden image. This helper names
+        the sidecar file, shows both digests (truncated to 16 chars for
+        readability), and gives the operator two concrete remediations:
 
           1. Regenerate the sidecar via ``sha256sum`` if the image is
              trusted (the common case after a golden rebuild).
@@ -683,11 +675,9 @@ class FlashViewModel(QObject):
     def cancel(self) -> None:
         """Request cancellation of the current verify / flash phase.
 
-        Audit High #10 / #14: previously this flipped events without any UI
-        feedback, so the operator kept seeing "VERIFYING" or "FLASHING" for
-        seconds and would spam-click. Now the status flips to ``cancelling``
-        immediately; the worker finish handler transitions to ``cancelled``
-        once the in-flight chunk completes.
+        The status flips to ``cancelling`` immediately so the operator gets
+        instant feedback; the worker finish handler transitions to
+        ``cancelled`` once the in-flight chunk completes.
         """
         if self._status not in ("verifying", "flashing"):
             return  # nothing to cancel
@@ -779,9 +769,7 @@ def _build_flash_job(wizard_state, platform_io=None):
     """Build a FlashJob from wizard_state fields for the current cycle.
 
     Sequential Deployment Assistant: each cycle flashes ONE role
-    (master OR slave) — driven by ``wizard_state.currentRole``. The
-    deleted MODE picker would have collapsed to ``master_only`` /
-    ``slave_only`` in the old flow; ``currentRole`` is its successor.
+    (master OR slave) — driven by ``wizard_state.currentRole``.
 
     Step 2 Config fields are NON-BLOCKING: empty strings on
     ``installUser`` / ``installPassword`` / ``hotspotPassword`` are
@@ -798,8 +786,8 @@ def _build_flash_job(wizard_state, platform_io=None):
     Returns None if construction fails because no platform IO is
     available (non-Windows host without an injected fake). Otherwise
     re-raises construction errors so the WRITE button never becomes a
-    silent no-op (Audit High #18). This function is module-level so it
-    can be unit-tested with a fake wizard_state.
+    silent no-op. This function is module-level so it can be unit-tested
+    with a fake wizard_state.
     """
     try:
         import sys
@@ -829,8 +817,8 @@ def _build_flash_job(wizard_state, platform_io=None):
         ed25519 = existing if existing is not None else generate_ed25519()
         if existing is None:
             # First run — persist the freshly-generated pair so future flashes
-            # (master_only, slave_only) reuse the same keys and keep the pair
-            # symmetric across cards.
+            # (the master and slave cycles) reuse the same keys and keep the
+            # pair symmetric across cards.
             save_persisted_pair(ed25519)
 
         # Non-blocking fallback: empty UI fields trigger the module-level
@@ -876,15 +864,14 @@ def _build_flash_job(wizard_state, platform_io=None):
         #   * authorized_keys=[] — validator permits empty (the Master is
         #     reached by password at first login; the Slave gets the Master's
         #     public key injected by render_authorized_keys at write time).
-        #   * install_user reflects the COLD-surgery username so firstboot's
-        #     home-dir creation / role-marker placement target the same
-        #     UID-1000 the Imager just renamed.
+        #   * install_user is the fixed UID-1000 account name so firstboot's
+        #     home-dir creation / role-marker placement target the account
+        #     cloud-init's chpasswd reconfigures.
         #   * The ed25519 keypair lives on the *job* (master_pair=), not on
         #     FirstbootConfig — that's the contract of FlashJob and what
         #     FirstbootBundle consumes.
-        # Stamp provenance: the generated /boot header used to read
-        # "Generated by AstromechOS Imager  on " with BLANKS — the GUI never
-        # set imager_version/flashed_at_iso (only the CLI did, hardcoded).
+        # imager_version / flashed_at_iso stamp provenance into the generated
+        # /boot header.
         from astromechos_imager import __version__ as _imager_version
         from astromechos_imager.core.models import _utc_iso_now
         firstboot = FirstbootConfig(
@@ -912,8 +899,8 @@ def _build_flash_job(wizard_state, platform_io=None):
         drives = {d.physical_drive_id: d for d in platform_io.enumerate_removable_drives()}
 
         def _guard_target_is_not_source(drive, image_path_s: str) -> None:
-            """SAFETY STOP (audit defect C1): the target disk must never be
-            the disk hosting the source image. The operator's USB SSD passes
+            """SAFETY STOP: the target disk must never be the disk hosting
+            the source image. The operator's USB SSD passes
             the removable-candidate filter (USB + under the 256 GiB cap);
             flashing it would destroy the very image being written. Degrades
             open: an unresolvable path blocks nothing."""

@@ -17,7 +17,7 @@
 $ErrorActionPreference = 'Stop'
 $DestDir = 'J:\R2-D2_Build\images'
 $SrcDrive = 'I:'
-$Date = '12-06-2026'
+$Date = '13-06-2026'
 
 Write-Host ""
 Write-Host "=== I: contents ===" -ForegroundColor Cyan

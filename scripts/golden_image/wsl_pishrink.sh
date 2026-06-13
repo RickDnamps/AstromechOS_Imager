@@ -6,8 +6,11 @@
 # missing, then runs pishrink with the canonical AstroMechOS_Imager
 # flags:
 #     -a : parallel pigz compression (all CPU cores)
-#     -s : SKIP autoexpand setup (Imager handles resize via cmdline.txt)
 #     -z : gzip output (.img.gz)
+#   NO -s : keep pishrink's autoexpand -- it grows the ext4 FILESYSTEM to
+#           fill the card on first boot. The Imager's cmdline 'resize' token
+#           only grows the PARTITION, not the FS; an early build wrongly used
+#           -s and shipped a full partition with an un-grown ext4 (wasted space).
 #
 # Input image must be at /mnt/k/<filename>. Output replaces the .img
 # with .img.gz at the same path.
@@ -98,21 +101,21 @@ echo "  Dependencies: $(which parted e2fsck resize2fs dumpe2fs losetup tune2fs |
 
 # ── Run pishrink ──────────────────────────────────────────────────────
 echo ""
-echo "=== Running pishrink -a -s -z on ${FILENAME} ==="
+echo "=== Running pishrink -a -z on ${FILENAME} ==="
 echo "    -a : parallel pigz compression (all cores)"
-echo "    -s : SKIP autoexpand setup"
-echo "         The AstroMechOS_Imager injects the native Trixie resize"
-echo "         tokens (resize + ds=nocloud;i=...) into cmdline.txt at"
-echo "         flash time. We don't want pishrink's /etc/rc.local hack"
-echo "         on top of that."
 echo "    -z : gzip output (.img.gz)"
+echo "    NO -s : keep pishrink's autoexpand -- it is what grows the ext4"
+echo "            FILESYSTEM to fill the card on first boot. The Imager's"
+echo "            cmdline 'resize' token only grows the PARTITION, not the"
+echo "            filesystem; an early build wrongly used -s and shipped a"
+echo "            full-size partition with an un-grown ext4 (wasted space)."
 echo ""
 echo "  Expected steps: e2fsck → resize2fs → parted shrink → truncate"
 echo "                  → pigz parallel compress"
 echo "  ETA: ~5-15 min depending on image size"
 echo ""
 
-pishrink -a -s -z "$IMG"
+pishrink -a -z "$IMG"
 
 # ── Report final ──────────────────────────────────────────────────────
 echo ""

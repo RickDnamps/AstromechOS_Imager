@@ -120,3 +120,11 @@ Write-Host "============================================" -ForegroundColor Green
 Write-Host "=== BOTH DONE ===" -ForegroundColor Green
 Write-Host "============================================" -ForegroundColor Green
 Get-ChildItem "$DestDir\AstromechOS_*$Date*" | Sort-Object Name | Format-Table Name, @{N='Size_GB';E={[math]::Round($_.Length/1GB,2)}}, LastWriteTime -AutoSize
+
+# Release WSL's auto-mount of the SSD (/mnt/i) so the operator can unplug the SSD
+# without Windows popping "Please insert a disk into drive I:" — that dialog fires
+# when a process still holds a now-empty removable drive letter (WSL keeps /mnt/i
+# mounted). Safe here: pishrink has finished, nothing else runs in WSL.
+Write-Host ""
+Write-Host "Releasing WSL drive mounts (wsl --shutdown) — SSD is safe to unplug now." -ForegroundColor DarkGray
+wsl --shutdown

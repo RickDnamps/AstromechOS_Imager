@@ -147,6 +147,9 @@ re-applies them and re-**disables** firstboot for the builder card.
    J:\R2-D2_Build\images\AstromechOS_Slave_<date>.img.gz    (+ .sha256)
    ```
    The pishrunk `.img.gz` IS the canonical format the Imager `.exe` consumes.
+5. `pishrink_both.ps1` ends with **`wsl --shutdown`** to release WSL's `/mnt/i` mount —
+   unplug the SSD only after that line, otherwise Windows pops *"Please insert a disk into
+   drive I:"* (a process still holding the now-empty letter). Benign, but the shutdown avoids it.
 
 > Regenerating a single golden from an existing raw `.img` on the SSD (e.g. a corrupted
 > sidecar): copy `I:\AstromechOS_<Role>_<date>.img` → `J:\…\images\`, then in WSL
